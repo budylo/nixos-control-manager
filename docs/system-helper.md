@@ -85,7 +85,8 @@ services.nix-control-manager-helper = {
 
 It requires a bound dry-preview receipt, arms recovery before activation, and
 never writes `/etc/nixos` or the system profile. Timer recovery is runtime-only
-and cannot cover a power loss or kernel panic.
+and cannot cover a power loss or kernel panic. The operator procedure is in
+[`live-test-recovery.md`](live-test-recovery.md).
 
 ## Sandbox highlights
 

@@ -127,6 +127,10 @@ the boot generation are untouched. Timer recovery cannot cover power loss or a
 kernel panic, so console access and a bootable previous generation remain
 necessary safeguards.
 
+Operational preparation, immediate recovery, TTY diagnostics, and power-loss
+handling are documented in
+[`docs/live-test-recovery.md`](docs/live-test-recovery.md).
+
 `generate` validates the complete state before writing. An existing output is
 copied to `managed.nix.bak`, then the new file is atomically moved into place.
 

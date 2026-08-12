@@ -64,7 +64,8 @@
 - green end-to-end recovery regression in a disposable NixOS VM, including
   receipt replay rejection, unchanged profile/source proofs, and timer-driven
   restoration of the previous runtime closure (implemented and part of flake
-  checks); recovery guidance for failed activation remains to be written;
+  checks), with TTY, manual, power-loss, and failed-recovery operator guidance
+  (implemented);
 - `switch`, generation history, and boot-generation rollback.
 
 ## Milestone 4 — Typed NixOS options
