@@ -5,6 +5,7 @@ import re
 from typing import Any, Mapping
 
 from .catalog import validate_setting_value
+from .dependencies import validate_managed_setting_dependencies
 from .errors import ValidationError
 
 
@@ -91,6 +92,8 @@ class ManagedState:
             options[normalized_path] = validate_setting_value(
                 normalized_path, normalized_value
             )
+
+        validate_managed_setting_dependencies(options)
 
         return cls(schema_version=version, packages=packages, options=options)
 

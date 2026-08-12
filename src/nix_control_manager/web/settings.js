@@ -82,7 +82,60 @@
     return value === null || value === undefined ? "" : String(value);
   }
 
-  const api = { normalizeOptions, optionChangeCount, parseEditorValue, formatEditorValue };
+  function dependencyIssues(definitions, options, effectiveSettings) {
+    const byPath = new Map((definitions || []).map((definition) => [definition.path, definition]));
+    const effective = new Map(
+      (effectiveSettings || [])
+        .filter((setting) => setting.available)
+        .map((setting) => [setting.path, setting.value]),
+    );
+    const issues = [];
+    for (const definition of definitions || []) {
+      if (!Object.hasOwn(options || {}, definition.path)) continue;
+      const childValue = options[definition.path];
+      for (const rule of definition.requires || []) {
+        const active = rule.when === "always"
+          || (rule.when === "true" && childValue === true)
+          || (rule.when === "non-empty" && Array.isArray(childValue) && childValue.length > 0);
+        if (!active) continue;
+        let value;
+        let source;
+        if (Object.hasOwn(options, rule.path)) {
+          value = options[rule.path];
+          source = "managed";
+        } else if (effective.has(rule.path)) {
+          value = effective.get(rule.path);
+          source = "effective";
+        } else {
+          source = "unknown";
+        }
+        const status = source === "unknown"
+          ? "unknown"
+          : (JSON.stringify(value) === JSON.stringify(rule.requiredValue)
+            ? "satisfied"
+            : "unsatisfied");
+        issues.push({
+          path: definition.path,
+          name: definition.name,
+          requiredPath: rule.path,
+          requiredName: byPath.get(rule.path)?.name || rule.path,
+          requiredValue: rule.requiredValue,
+          message: rule.message,
+          source,
+          status,
+        });
+      }
+    }
+    return issues;
+  }
+
+  const api = {
+    normalizeOptions,
+    optionChangeCount,
+    parseEditorValue,
+    formatEditorValue,
+    dependencyIssues,
+  };
   root.NcmSettings = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 }(typeof globalThis !== "undefined" ? globalThis : this));

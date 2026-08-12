@@ -216,6 +216,15 @@ evaluate, the editor remains usable but labels the live value as unavailable.
 When management is enabled for an option, a compatible live value is adopted as
 the initial proposal to avoid an accidental change.
 
+Catalog entries can declare typed dependencies on other settings. Dependency
+analysis uses the projected managed values first and then the effective
+read-only system values. A known contradiction blocks preview and save; an
+unavailable effective value is reported as a warning without inventing a
+result. NCM never changes the required parent option silently: the interface
+offers an explicit repair action that adds the parent setting with the required
+typed value. The Python model independently rejects contradictions that are
+fully present in the managed state.
+
 For each active definition the interface also reports the Nix override priority
 and its value. Lower numeric priorities win in the Nix module system. List
 options are labelled as concatenated, repeated equal scalar definitions are

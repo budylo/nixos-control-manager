@@ -79,6 +79,10 @@
 - display effective values and definition provenance (implemented for the
   catalog through read-only channels/flake evaluation, including active
   override priority, list merge, equal scalar, and conflict explanations);
+- model typed dependencies between settings, resolve them against projected and
+  inherited effective values, block known contradictions, and offer explicit
+  one-click parent-setting repair without hidden mutations (implemented for
+  PipeWire/PulseAudio, NetworkManager Wi-Fi backend, and firewall TCP ports);
 - curated settings for common desktop, network, locale, sound, hardware,
   service, gaming, and boot tasks (first vertical slice implemented).
 

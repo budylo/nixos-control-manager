@@ -45,6 +45,7 @@ def _settings_by_path() -> dict[str, dict[str, Any]]:
         "unit",
         "pattern",
         "patternMessage",
+        "requires",
     }
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
@@ -90,6 +91,44 @@ def _settings_by_path() -> dict[str, dict[str, Any]]:
         definitions[path] = item
     for path, definition in definitions.items():
         _validate_known_setting(definition, definition["default"], label=f"Default for {path}")
+        rules = definition.get("requires", [])
+        if not isinstance(rules, list) or len(rules) > 8:
+            raise RuntimeError(f"{path}.requires must be an array with at most 8 rules")
+        dependency_paths: set[str] = set()
+        for index, rule in enumerate(rules):
+            label = f"{path}.requires[{index}]"
+            if not isinstance(rule, dict) or set(rule) != {
+                "message",
+                "path",
+                "requiredValue",
+                "when",
+            }:
+                raise RuntimeError(f"{label} must use the exact dependency schema")
+            dependency_path = rule["path"]
+            if (
+                not isinstance(dependency_path, str)
+                or dependency_path == path
+                or dependency_path not in definitions
+                or dependency_path in dependency_paths
+            ):
+                raise RuntimeError(f"{label}.path must name one other catalog setting")
+            dependency_paths.add(dependency_path)
+            when = rule["when"]
+            allowed_when = {"always"}
+            if definition["valueType"] == "boolean":
+                allowed_when.add("true")
+            if definition["valueType"] in {"string-list", "integer-list"}:
+                allowed_when.add("non-empty")
+            if when not in allowed_when:
+                raise RuntimeError(f"{label}.when is incompatible with {path}")
+            message = rule["message"]
+            if not isinstance(message, str) or not message or len(message) > 512:
+                raise RuntimeError(f"{label}.message must be a concise non-empty string")
+            _validate_known_setting(
+                definitions[dependency_path],
+                rule["requiredValue"],
+                label=f"Required value for {dependency_path}",
+            )
     return definitions
 
 

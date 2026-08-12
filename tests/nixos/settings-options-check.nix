@@ -4,6 +4,26 @@ let
   catalog = builtins.fromJSON (
     builtins.readFile ../../src/nix_control_manager/data/settings_catalog.json
   );
+  catalogByPath = builtins.listToAttrs (
+    map (definition: { name = definition.path; value = definition; }) catalog
+  );
+  dependencies = lib.concatMap (definition:
+    map (rule: { owner = definition; inherit rule; }) (definition.requires or [ ])
+  ) catalog;
+  missingDependencyPaths = map (dependency: dependency.rule.path) (
+    builtins.filter (dependency: !(builtins.hasAttr dependency.rule.path catalogByPath)) dependencies
+  );
+  activeForDefault = dependency:
+    dependency.rule.when == "always"
+    || (dependency.rule.when == "true" && dependency.owner.default == true)
+    || (dependency.rule.when == "non-empty" && dependency.owner.default != [ ]);
+  inconsistentDependencyDefaults = map (dependency: dependency.owner.path) (
+    builtins.filter (dependency:
+      activeForDefault dependency
+      && (builtins.getAttr dependency.rule.path catalogByPath).default
+        != dependency.rule.requiredValue
+    ) dependencies
+  );
   evaluated = import (pkgs.path + "/nixos") {
     system = pkgs.stdenv.hostPlatform.system;
     configuration = { ... }: { system.stateVersion = "26.05"; };
@@ -80,6 +100,10 @@ assert lib.assertMsg (mismatched == [ ])
   "Nix Control Manager settings defaults fail NixOS type/merge evaluation: ${lib.concatStringsSep ", " mismatched}";
 assert lib.assertMsg (unexpectedPriority == [ ])
   "Nix Control Manager normal settings do not expose priority 100: ${lib.concatStringsSep ", " unexpectedPriority}";
+assert lib.assertMsg (missingDependencyPaths == [ ])
+  "Settings dependencies reference missing catalog paths: ${lib.concatStringsSep ", " missingDependencyPaths}";
+assert lib.assertMsg (inconsistentDependencyDefaults == [ ])
+  "Settings defaults violate dependencies: ${lib.concatStringsSep ", " inconsistentDependencyDefaults}";
 assert lib.assertMsg
   (mergeFixture.config.networking.firewall.allowedTCPPorts == [ 22 443 ]
     && mergeFixture.options.networking.firewall.allowedTCPPorts.highestPrio == 100

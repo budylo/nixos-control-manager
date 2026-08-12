@@ -243,6 +243,26 @@ class ServerTests(unittest.TestCase):
         context.exception.close()
         self.assertIn("at most 65535", payload["error"])
 
+    def test_save_rejects_explicit_dependency_contradiction(self) -> None:
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/save",
+                method="POST",
+                token=self.server.token,
+                body={
+                    "schemaVersion": 1,
+                    "packages": [],
+                    "options": {
+                        "services.pipewire.enable": False,
+                        "services.pipewire.pulse.enable": True,
+                    },
+                },
+            )
+        self.assertEqual(context.exception.code, 400)
+        payload = json.loads(context.exception.read())
+        context.exception.close()
+        self.assertIn("requires services.pipewire.enable", payload["error"])
+
     def test_build_preview_requires_token_and_streams_a_fixed_job(self) -> None:
         root = self.server.config_root
         root.mkdir(exist_ok=True)

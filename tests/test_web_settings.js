@@ -65,4 +65,51 @@ assert.throws(
   /не може містити пробілів/,
 );
 
+const dependencyDefinitions = [
+  { path: "parent.enable", name: "Parent" },
+  {
+    path: "child.enable",
+    name: "Child",
+    requires: [{
+      path: "parent.enable",
+      requiredValue: true,
+      when: "true",
+      message: "Parent is required.",
+    }],
+  },
+];
+assert.deepEqual(
+  settings.dependencyIssues(
+    dependencyDefinitions,
+    { "child.enable": true },
+    [{ path: "parent.enable", available: true, value: false }],
+  ),
+  [{
+    path: "child.enable",
+    name: "Child",
+    requiredPath: "parent.enable",
+    requiredName: "Parent",
+    requiredValue: true,
+    message: "Parent is required.",
+    source: "effective",
+    status: "unsatisfied",
+  }],
+);
+assert.equal(
+  settings.dependencyIssues(
+    dependencyDefinitions,
+    { "child.enable": true, "parent.enable": true },
+    [],
+  )[0].status,
+  "satisfied",
+);
+assert.deepEqual(
+  settings.dependencyIssues(
+    dependencyDefinitions,
+    { "child.enable": false },
+    [],
+  ),
+  [],
+);
+
 console.log("web settings helpers: ok");

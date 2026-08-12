@@ -46,6 +46,22 @@ class ManagedStateTests(unittest.TestCase):
                 {"options": {"services.pipewire.enable": "enabled"}}
             )
 
+    def test_rejects_explicit_managed_dependency_contradiction(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "requires services.pipewire.enable"):
+            ManagedState.from_mapping(
+                {
+                    "options": {
+                        "services.pipewire.enable": False,
+                        "services.pipewire.pulse.enable": True,
+                    }
+                }
+            )
+
+        inherited_parent = ManagedState.from_mapping(
+            {"options": {"services.pipewire.pulse.enable": True}}
+        )
+        self.assertEqual(inherited_parent.options["services.pipewire.pulse.enable"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

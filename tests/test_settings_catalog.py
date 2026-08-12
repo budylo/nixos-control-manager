@@ -57,6 +57,24 @@ class SettingsCatalogTests(unittest.TestCase):
         value = {"kept": [1, True]}
         self.assertIs(validate_setting_value("custom.module.option", value), value)
 
+    def test_dependency_rules_reference_typed_catalog_settings(self) -> None:
+        catalog = load_settings_catalog()
+        rules = [
+            (definition["path"], rule)
+            for definition in catalog
+            for rule in definition.get("requires", [])
+        ]
+        self.assertEqual(len(rules), 3)
+        self.assertEqual(
+            {rule["path"] for _, rule in rules},
+            {
+                "services.pipewire.enable",
+                "networking.networkmanager.enable",
+                "networking.firewall.enable",
+            },
+        )
+        self.assertTrue(all(rule["requiredValue"] is True for _, rule in rules))
+
 
 if __name__ == "__main__":
     unittest.main()

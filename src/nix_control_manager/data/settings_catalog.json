@@ -95,6 +95,14 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
+    "requires": [
+      {
+        "path": "services.pipewire.enable",
+        "requiredValue": true,
+        "when": "true",
+        "message": "Сумісність PulseAudio працює лише з увімкненим PipeWire."
+      }
+    ],
     "risk": "low"
   },
   {
@@ -129,6 +137,14 @@
       {"value": "wpa_supplicant", "label": "wpa_supplicant (стабільний)"},
       {"value": "iwd", "label": "iwd (експериментальний)"}
     ],
+    "requires": [
+      {
+        "path": "networking.networkmanager.enable",
+        "requiredValue": true,
+        "when": "always",
+        "message": "Вибір Wi‑Fi backend має сенс лише з увімкненим NetworkManager."
+      }
+    ],
     "risk": "high"
   },
   {
@@ -152,6 +168,14 @@
     "minimum": 0,
     "maximum": 65535,
     "unit": "порт",
+    "requires": [
+      {
+        "path": "networking.firewall.enable",
+        "requiredValue": true,
+        "when": "non-empty",
+        "message": "Список дозволених портів застосовується лише з увімкненим firewall."
+      }
+    ],
     "risk": "high"
   },
   {

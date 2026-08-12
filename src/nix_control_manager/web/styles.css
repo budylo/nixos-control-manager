@@ -154,6 +154,17 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .effective-setting li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 42%); gap: 9px; align-items: start; }
 .effective-setting li code { color: #718299; }
 .effective-setting li span { overflow-wrap: anywhere; text-align: right; color: #aeb9c8; font: 8px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.setting-dependency { padding: 10px 11px; display: grid; gap: 8px; border: 1px solid rgba(255,202,115,.28); border-radius: 9px; background: rgba(255,202,115,.055); }
+.setting-dependency.invalid { border-color: rgba(255,116,116,.34); background: rgba(255,116,116,.055); }
+.setting-dependency > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.setting-dependency strong, .setting-dependency p, .setting-dependency small { display: block; }
+.setting-dependency strong { color: #ffd18a; font-size: 9px; }
+.setting-dependency.invalid strong { color: #ffaaaa; }
+.setting-dependency p { margin: 3px 0; min-height: 0; color: #b9a784; font-size: 8px; line-height: 1.45; }
+.setting-dependency small { color: #897d6a; font-size: 7px; }
+.setting-dependency button { max-width: 150px; min-height: 31px; padding: 5px 9px; border: 1px solid rgba(255,202,115,.28); border-radius: 8px; color: #ffd18a; background: rgba(255,202,115,.07); font-size: 8px; font-weight: 750; cursor: pointer; }
+.setting-dependency.invalid button { border-color: rgba(255,116,116,.3); color: #ffb0b0; background: rgba(255,116,116,.07); }
+.setting-dependency button:disabled { opacity: .5; cursor: not-allowed; }
 .setting-field { margin-top: auto; display: grid; gap: 6px; }
 .setting-field label { color: #8291a5; font-size: 9px; font-weight: 750; }
 .setting-field input, .setting-field select, .setting-field textarea { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; outline: none; color: var(--text); background: #0b111a; font-size: 11px; }
@@ -243,4 +254,6 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .candidate-validation-actions { grid-column: 1 / -1; }
   .effective-settings-status { grid-template-columns: 30px minmax(0, 1fr); }
   .effective-settings-status button { grid-column: 2; justify-self: start; }
+  .setting-dependency > div { grid-template-columns: 1fr; }
+  .setting-dependency button { max-width: none; justify-self: start; }
 }

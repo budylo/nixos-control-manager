@@ -82,6 +82,7 @@ const model = {
   options: {},
   savedOptions: {},
   settingErrors: new Map(),
+  dependencyIssues: [],
   settingsCategory: "Усі",
   page: "programs",
   category: "Усі",
@@ -126,7 +127,16 @@ function dirtyCount() {
   return count + NcmSettings.optionChangeCount(model.savedOptions, model.options);
 }
 
+function refreshDependencyIssues() {
+  model.dependencyIssues = NcmSettings.dependencyIssues(
+    model.settingsCatalog,
+    model.options,
+    model.effectiveSettings.settings,
+  );
+}
+
 function updateChangeState() {
+  refreshDependencyIssues();
   const count = dirtyCount();
   const lastTwo = count % 100;
   const last = count % 10;
@@ -135,9 +145,14 @@ function updateChangeState() {
     : last === 1 ? "зміна" : last >= 2 && last <= 4 ? "зміни" : "змін";
   ui.changeCount.textContent = count ? `${count} ${label}` : "Немає змін";
   ui.changeCount.classList.toggle("dirty", count > 0);
-  const invalid = model.settingErrors.size > 0;
-  ui.changeCount.textContent = invalid
+  const dependencyErrors = model.dependencyIssues.filter(
+    (issue) => issue.status === "unsatisfied",
+  ).length;
+  const invalid = model.settingErrors.size > 0 || dependencyErrors > 0;
+  ui.changeCount.textContent = model.settingErrors.size
     ? `${model.settingErrors.size} некоректне значення`
+    : dependencyErrors
+      ? `${dependencyErrors} невирішена залежність`
     : (count ? `${count} ${label}` : "Немає змін");
   ui.changeCount.classList.toggle("invalid", invalid);
   ui.saveButton.disabled = count === 0 || invalid;
@@ -424,6 +439,71 @@ function refreshCardComparison(card, definition) {
   panel.classList.toggle("will-change", !same);
 }
 
+function dependencyValueLabel(path, value) {
+  const definition = model.settingsCatalog.find((item) => item.path === path);
+  if (!definition) return JSON.stringify(value);
+  return actualValueText(definition, value);
+}
+
+function settingDependencyPanel(definition) {
+  const issues = model.dependencyIssues.filter(
+    (issue) => issue.path === definition.path && issue.status !== "satisfied",
+  );
+  if (!issues.length) return null;
+  const panel = document.createElement("section");
+  panel.className = `setting-dependency ${issues.some((issue) => issue.status === "unsatisfied") ? "invalid" : "unknown"}`;
+  for (const issue of issues) {
+    const item = document.createElement("div");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = issue.status === "unsatisfied"
+      ? "Залежність не виконано"
+      : "Залежність не вдалося перевірити";
+    const message = document.createElement("p");
+    message.textContent = issue.message;
+    const requirement = document.createElement("small");
+    requirement.textContent = `${issue.requiredName}: потрібно «${dependencyValueLabel(
+      issue.requiredPath,
+      issue.requiredValue,
+    )}».`;
+    copy.append(title, message, requirement);
+
+    const repair = document.createElement("button");
+    repair.type = "button";
+    repair.textContent = `Налаштувати: ${issue.requiredName}`;
+    const requiredActual = effectiveSetting(issue.requiredPath);
+    const manuallyBlocked = [
+      "conflict", "evaluation-failed", "option-missing",
+    ].includes(requiredActual?.assessment);
+    repair.disabled = manuallyBlocked;
+    repair.title = manuallyBlocked
+      ? "Батьківська опція потребує ручного огляду."
+      : `Явно додати ${issue.requiredPath} до керованого state.`;
+    repair.addEventListener("click", () => {
+      model.options[issue.requiredPath] = JSON.parse(JSON.stringify(issue.requiredValue));
+      model.settingErrors.delete(issue.requiredPath);
+      renderSettings();
+      updateChangeState();
+    });
+    item.append(copy, repair);
+    panel.append(item);
+  }
+  return panel;
+}
+
+function refreshDependencyPanels() {
+  refreshDependencyIssues();
+  for (const card of ui.settingsCatalog.querySelectorAll(".setting-card[data-setting-path]")) {
+    const definition = settingDefinitions().find((item) => item.path === card.dataset.settingPath);
+    card.querySelector(".setting-dependency")?.remove();
+    if (!definition?.unknown) {
+      const panel = settingDependencyPanel(definition);
+      const field = card.querySelector(".setting-field");
+      if (panel) card.insertBefore(panel, field);
+    }
+  }
+}
+
 function renderEffectiveSettingsStatus() {
   const inspection = model.effectiveSettings;
   ui.refreshEffectiveSettings.disabled = inspection.status === "loading";
@@ -530,6 +610,7 @@ function settingControl(definition, managed, card) {
     }
     refreshCardComparison(card, definition);
     updateChangeState();
+    refreshDependencyPanels();
   };
   control.addEventListener(definition.valueType === "string" ? "input" : "change", update);
   if (definition.valueType.endsWith("-list") || definition.valueType === "integer") {
@@ -550,6 +631,7 @@ function settingCard(definition) {
     "conflict", "evaluation-failed", "option-missing",
   ].includes(actual?.assessment);
   card.className = `setting-card${managed ? " managed" : ""}${definition.unknown ? " unknown" : ""}`;
+  card.dataset.settingPath = definition.path;
 
   const header = document.createElement("header");
   const heading = document.createElement("div");
@@ -603,12 +685,15 @@ function settingCard(definition) {
     card.append(raw);
   } else {
     card.append(effectiveSettingPanel(definition, managed));
+    const dependency = settingDependencyPanel(definition);
+    if (dependency) card.append(dependency);
     card.append(settingControl(definition, managed, card));
   }
   return card;
 }
 
 function renderSettings() {
+  refreshDependencyIssues();
   const definitions = settingDefinitions();
   const visible = definitions.filter(settingMatches);
   ui.settingsCatalog.replaceChildren(...visible.map(settingCard));
