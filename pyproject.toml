@@ -21,4 +21,4 @@ package-dir = { "" = "src" }
 include-package-data = true
 
 [tool.setuptools.package-data]
-nix_control_manager = ["web/*", "data/*.json"]
+nix_control_manager = ["web/*", "data/*.json", "data/*.nix"]

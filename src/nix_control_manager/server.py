@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import secrets
 import threading
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
@@ -22,6 +22,7 @@ from .model import ManagedState
 from .nix_generator import generate_module
 from .preview import build_preview
 from .storage import load_state, save_generated_module, save_state
+from .settings_inspector import EffectiveSettingsInspection, inspect_effective_settings
 from .system_inspector import inspect_system
 from .ui_helper import HelperUiAdapter, HelperUiError
 
@@ -47,6 +48,9 @@ class NcmServer(ThreadingHTTPServer):
         helper_adapter: HelperUiAdapter | None = None,
         build_timeout: int = 3_600,
         build_manager: CandidateBuildManager | None = None,
+        settings_inspector: Callable[
+            ..., EffectiveSettingsInspection
+        ] = inspect_effective_settings,
     ) -> None:
         super().__init__(server_address, handler)
         self.state_path = state_path
@@ -54,6 +58,7 @@ class NcmServer(ThreadingHTTPServer):
         self.config_root = config_root
         self.flake_target = flake_target
         self.validation_timeout = validation_timeout
+        self.settings_inspector = settings_inspector
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
             config_root=config_root,
@@ -144,6 +149,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(load_catalog())
             elif path == "/api/settings-catalog":
                 self._json(load_settings_catalog())
+            elif path == "/api/effective-settings":
+                self._json(
+                    self.server.settings_inspector(
+                        self.server.config_root,
+                        output_path=self.server.output_path,
+                        flake_target=self.server.flake_target,
+                        timeout=self.server.validation_timeout,
+                    ).to_mapping()
+                )
             elif path == "/api/preview":
                 state = load_state(self.server.state_path)
                 self._json(build_preview(state, self.server.output_path))

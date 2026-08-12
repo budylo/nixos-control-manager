@@ -132,6 +132,15 @@
             <div id="settingsFilters" class="filters"></div>
           </section>
 
+          <section class="effective-settings-status" aria-live="polite">
+            <span class="effective-settings-icon" aria-hidden="true">◎</span>
+            <div>
+              <strong id="effectiveSettingsStatus">Фактична конфігурація ще не прочитана</strong>
+              <small id="effectiveSettingsDetail">Перевірка виконується лише читанням через Nix evaluator.</small>
+            </div>
+            <button id="refreshEffectiveSettings" type="button">Оновити фактичні</button>
+          </section>
+
           <section class="catalog-heading">
             <div>
               <p class="section-kicker">Системні опції</p>

@@ -9,6 +9,10 @@ from urllib.request import Request, urlopen
 
 from nix_control_manager.server import NcmServer, RequestHandler
 from nix_control_manager.candidate_build import CandidateBuildManager
+from nix_control_manager.settings_inspector import (
+    EffectiveSetting,
+    EffectiveSettingsInspection,
+)
 
 
 class FakeHelperAdapter:
@@ -93,6 +97,21 @@ class ServerTests(unittest.TestCase):
             output_path=directory / "managed.nix",
             config_root=directory / "etc-nixos",
             helper_adapter=FakeHelperAdapter(),
+            settings_inspector=lambda *args, **kwargs: EffectiveSettingsInspection(
+                status="passed",
+                configuration_mode="channels",
+                flake_target=None,
+                settings=(
+                    EffectiveSetting(
+                        path="time.timeZone",
+                        available=True,
+                        value="Europe/Kyiv",
+                        definition_files=("/etc/nixos/configuration.nix",),
+                        ownership="inherited",
+                    ),
+                ),
+                duration_ms=42,
+            ),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -122,6 +141,7 @@ class ServerTests(unittest.TestCase):
         system = self.request_json("/api/system")
         adoption = self.request_json("/api/adoption")
         helper = self.request_json("/api/helper")
+        effective = self.request_json("/api/effective-settings")
         self.assertGreater(len(catalog), 10)
         self.assertGreaterEqual(len(settings_catalog), 15)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
@@ -132,6 +152,9 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(adoption["safeToApply"])
         self.assertTrue(helper["available"])
         self.assertFalse(helper["applyEnabled"])
+        self.assertEqual(effective["status"], "passed")
+        self.assertTrue(effective["readOnly"])
+        self.assertEqual(effective["settings"][0]["value"], "Europe/Kyiv")
 
         with urlopen(self.base_url + "/", timeout=2) as response:
             html = response.read().decode("utf-8")

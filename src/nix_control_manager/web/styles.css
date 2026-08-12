@@ -112,6 +112,13 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .empty-state p { margin: 0; font-size: 12px; }
 
 .settings-hero { min-height: 230px; }
+.effective-settings-status { margin: 18px clamp(28px, 4vw, 58px) 0; padding: 12px 14px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid rgba(94,215,255,.18); border-radius: 12px; background: rgba(94,215,255,.035); }
+.effective-settings-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--cyan); background: rgba(94,215,255,.09); font-size: 12px; }
+.effective-settings-status strong, .effective-settings-status small { display: block; }
+.effective-settings-status strong { font-size: 10px; }
+.effective-settings-status small { margin-top: 3px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.effective-settings-status button { min-height: 32px; padding: 0 11px; border: 1px solid rgba(94,215,255,.25); border-radius: 9px; color: #bcefff; background: rgba(94,215,255,.07); font-size: 9px; font-weight: 750; cursor: pointer; }
+.effective-settings-status button:disabled { opacity: .55; cursor: wait; }
 .settings-catalog { margin: 0 clamp(28px, 4vw, 58px); display: grid; grid-template-columns: repeat(2, minmax(300px, 1fr)); gap: 14px; }
 .setting-card { min-width: 0; padding: 19px; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, rgba(21,30,44,.92), rgba(15,22,33,.92)); }
 .setting-card.managed { border-color: rgba(94,215,255,.38); box-shadow: inset 0 0 0 1px rgba(94,215,255,.04); }
@@ -125,6 +132,19 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .setting-manage[aria-pressed="true"] { border-color: rgba(94,215,255,.35); color: #bcefff; background: rgba(94,215,255,.1); }
 .setting-manage:disabled { cursor: default; opacity: .65; }
 .setting-meta { color: #66778d; font-size: 8px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
+.effective-setting { padding: 10px 11px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; border: 1px solid rgba(255,255,255,.055); border-radius: 9px; background: rgba(4,9,15,.36); }
+.effective-setting-label { color: #738399; font-size: 8px; font-weight: 750; text-transform: uppercase; }
+.effective-setting strong { min-width: 0; overflow-wrap: anywhere; text-align: right; color: #c5d0df; font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.effective-setting-comparison { grid-column: 1 / -1; color: #738399; font-size: 8px; }
+.effective-setting.same { border-color: rgba(115,220,166,.19); }
+.effective-setting.same .effective-setting-comparison { color: #77cfa0; }
+.effective-setting.will-change { border-color: rgba(255,202,115,.22); }
+.effective-setting.will-change .effective-setting-comparison { color: #d5b06f; }
+.effective-setting.unavailable { border-style: dashed; opacity: .72; }
+.effective-setting details { grid-column: 1 / -1; color: #718299; font-size: 8px; }
+.effective-setting summary { cursor: pointer; }
+.effective-setting ul { margin: 6px 0 0; padding-left: 17px; }
+.effective-setting li { margin: 2px 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .setting-field { margin-top: auto; display: grid; gap: 6px; }
 .setting-field label { color: #8291a5; font-size: 9px; font-weight: 750; }
 .setting-field input, .setting-field select, .setting-field textarea { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; outline: none; color: var(--text); background: #0b111a; font-size: 11px; }
@@ -202,7 +222,7 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .topbar { padding: 18px 20px; align-items: flex-start; }
   .top-actions { flex-wrap: wrap; justify-content: end; }
   .change-count { width: 100%; margin: 0; text-align: right; }
-  .hero, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note { margin-left: 20px; margin-right: 20px; }
+  .hero, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note, .effective-settings-status { margin-left: 20px; margin-right: 20px; }
   .adoption-banner { margin-left: 20px; margin-right: 20px; }
   .hero { min-height: 245px; padding: 27px; }
   .hero-orbit { display: none; }
@@ -212,4 +232,6 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .candidate-validation { grid-template-columns: 30px 1fr; }
   .candidate-validation .button { grid-column: 1 / -1; }
   .candidate-validation-actions { grid-column: 1 / -1; }
+  .effective-settings-status { grid-template-columns: 30px minmax(0, 1fr); }
+  .effective-settings-status button { grid-column: 2; justify-self: start; }
 }

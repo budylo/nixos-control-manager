@@ -76,7 +76,9 @@
 - render booleans, enums, strings, integers, and string/integer lists with
   browser and server validation (implemented); numbers beyond integers and
   attribute-set editors remain;
-- display effective values and definition provenance;
+- display effective values and definition provenance (implemented for the
+  catalog through read-only channels/flake evaluation; richer merge-priority
+  and conflict explanations remain);
 - curated settings for common desktop, network, locale, sound, hardware,
   service, gaming, and boot tasks (first vertical slice implemented).
 

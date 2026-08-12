@@ -125,10 +125,14 @@ Options have three conceptual states:
 
 - unmanaged/inherited;
 - managed by Nix Control Manager;
-- conflicting with another module.
+- shared with another module (which may or may not be a conflict).
 
-The GUI must eventually query evaluated definitions and their source locations.
-It must not silently use `lib.mkForce`. List options such as
+The GUI queries evaluated catalog values, definition locations, and declaration
+locations through a fixed read-only Nix expression. It labels definitions from
+the generated NCM module as managed, definitions from other modules as
+inherited, and a mixture as shared. A shared source is not automatically called
+a conflict: richer priority and merge explanations remain future work. The GUI
+must not silently use `lib.mkForce`. List options such as
 `environment.systemPackages` normally merge, while scalar options can conflict.
 
 ## State and generated source

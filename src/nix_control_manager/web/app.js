@@ -67,6 +67,9 @@ const ui = {
   settingsCount: document.querySelector("#settingsCount"),
   settingsTitle: document.querySelector("#settingsTitle"),
   unknownSettingsNote: document.querySelector("#unknownSettingsNote"),
+  effectiveSettingsStatus: document.querySelector("#effectiveSettingsStatus"),
+  effectiveSettingsDetail: document.querySelector("#effectiveSettingsDetail"),
+  refreshEffectiveSettings: document.querySelector("#refreshEffectiveSettings"),
 };
 
 const model = {
@@ -91,6 +94,7 @@ const model = {
   buildLog: [],
   activationPreview: null,
   testActivation: null,
+  effectiveSettings: { status: "idle", settings: [], warnings: [] },
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -255,6 +259,142 @@ function settingMatches(definition) {
   return categoryMatch && (!query || text.includes(query));
 }
 
+function effectiveSetting(path) {
+  return model.effectiveSettings.settings?.find((setting) => setting.path === path) || null;
+}
+
+function actualValueText(definition, value) {
+  if (value === null) return "null (автоматично)";
+  if (definition.valueType === "boolean") return value ? "Увімкнено" : "Вимкнено";
+  if (definition.valueType === "enum") {
+    return definition.choices?.find((choice) => choice.value === value)?.label || String(value);
+  }
+  if (Array.isArray(value) && value.length === 0) return "Немає";
+  const formatted = NcmSettings.formatEditorValue(definition, value);
+  return formatted === "" ? "порожнє значення" : formatted;
+}
+
+function sourceLabel(source) {
+  const normalized = source.replaceAll("\\", "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.slice(-3).join("/") || source;
+}
+
+function usableActualValue(definition) {
+  const actual = effectiveSetting(definition.path);
+  if (!actual?.available || actual.value === null) return undefined;
+  try {
+    return NcmSettings.parseEditorValue(
+      definition,
+      NcmSettings.formatEditorValue(definition, actual.value),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function effectiveSettingPanel(definition, managed) {
+  const panel = document.createElement("div");
+  panel.className = "effective-setting";
+  const actual = effectiveSetting(definition.path);
+  const label = document.createElement("span");
+  label.className = "effective-setting-label";
+  label.textContent = "Фактично в NixOS";
+  const value = document.createElement("strong");
+  const comparison = document.createElement("span");
+  comparison.className = "effective-setting-comparison";
+
+  if (model.effectiveSettings.status === "loading" || model.effectiveSettings.status === "idle") {
+    value.textContent = "Читаємо…";
+    comparison.textContent = "лише читання";
+  } else if (!actual?.available) {
+    value.textContent = "Недоступно";
+    comparison.textContent = "поточне значення не визначено";
+    panel.classList.add("unavailable");
+  } else {
+    value.textContent = actualValueText(definition, actual.value);
+    const same = managed
+      && JSON.stringify(model.options[definition.path]) === JSON.stringify(actual.value);
+    const ownershipLabels = {
+      inherited: "успадковано з конфігурації",
+      managed: "визначено модулем NCM",
+      shared: "NCM та інші модулі",
+    };
+    comparison.textContent = managed
+      ? (same ? "запропоноване значення збігається" : "запропоноване значення відрізняється")
+      : (ownershipLabels[actual.ownership] || "лише читається");
+    panel.classList.toggle("will-change", managed && !same);
+    panel.classList.toggle("same", same);
+
+    if (actual.definitionFiles?.length) {
+      const sources = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `Джерела визначення: ${actual.definitionFiles.length}`;
+      const list = document.createElement("ul");
+      for (const source of actual.definitionFiles) {
+        const item = document.createElement("li");
+        item.textContent = sourceLabel(source);
+        item.title = source;
+        list.append(item);
+      }
+      sources.append(summary, list);
+      panel.append(label, value, comparison, sources);
+      return panel;
+    }
+  }
+  panel.append(label, value, comparison);
+  return panel;
+}
+
+function refreshCardComparison(card, definition) {
+  const actual = effectiveSetting(definition.path);
+  if (!actual?.available) return;
+  const panel = card.querySelector(".effective-setting");
+  const comparison = panel?.querySelector(".effective-setting-comparison");
+  if (!panel || !comparison) return;
+  const same = Object.hasOwn(model.options, definition.path)
+    && JSON.stringify(model.options[definition.path]) === JSON.stringify(actual.value);
+  comparison.textContent = same
+    ? "запропоноване значення збігається"
+    : "запропоноване значення відрізняється";
+  panel.classList.toggle("same", same);
+  panel.classList.toggle("will-change", !same);
+}
+
+function renderEffectiveSettingsStatus() {
+  const inspection = model.effectiveSettings;
+  ui.refreshEffectiveSettings.disabled = inspection.status === "loading";
+  if (inspection.status === "loading") {
+    ui.effectiveSettingsStatus.textContent = "Читаємо фактичну конфігурацію NixOS…";
+    ui.effectiveSettingsDetail.textContent = "Nix evaluator не виконує build, activation або запис файлів.";
+    return;
+  }
+  if (inspection.status === "passed") {
+    const target = inspection.configurationMode === "flake"
+      ? `flake: ${inspection.flakeTarget}`
+      : "configuration.nix (channels)";
+    ui.effectiveSettingsStatus.textContent = "Фактичну конфігурацію прочитано";
+    ui.effectiveSettingsDetail.textContent = `${target} · ${inspection.durationMs} мс · лише читання`;
+    return;
+  }
+  const warning = inspection.warnings?.[0]?.split("\n", 1)[0];
+  ui.effectiveSettingsStatus.textContent = "Фактична конфігурація недоступна";
+  ui.effectiveSettingsDetail.textContent = warning || "Перевірку ще не виконано.";
+}
+
+async function refreshEffectiveSettings() {
+  model.effectiveSettings = { status: "loading", settings: [], warnings: [] };
+  renderEffectiveSettingsStatus();
+  renderSettings();
+  try {
+    model.effectiveSettings = await api("/api/effective-settings");
+  } catch (error) {
+    model.effectiveSettings = { status: "failed", settings: [], warnings: [error.message] };
+  }
+  renderEffectiveSettingsStatus();
+  renderSettings();
+}
+
 function settingControl(definition, managed, card) {
   const field = document.createElement("div");
   field.className = "setting-field";
@@ -320,6 +460,7 @@ function settingControl(definition, managed, card) {
       error.textContent = problem.message;
       error.hidden = false;
     }
+    refreshCardComparison(card, definition);
     updateChangeState();
   };
   control.addEventListener(definition.valueType === "string" ? "input" : "change", update);
@@ -353,7 +494,10 @@ function settingCard(definition) {
       delete model.options[definition.path];
       model.settingErrors.delete(definition.path);
     } else {
-      model.options[definition.path] = JSON.parse(JSON.stringify(definition.default));
+      const actual = usableActualValue(definition);
+      model.options[definition.path] = JSON.parse(JSON.stringify(
+        actual === undefined ? definition.default : actual,
+      ));
     }
     renderSettings();
     updateChangeState();
@@ -374,6 +518,7 @@ function settingCard(definition) {
     raw.textContent = JSON.stringify(model.options[definition.path], null, 2);
     card.append(raw);
   } else {
+    card.append(effectiveSettingPanel(definition, managed));
     card.append(settingControl(definition, managed, card));
   }
   return card;
@@ -968,6 +1113,7 @@ async function initialize() {
     renderCatalog();
     renderSettings();
     updateChangeState();
+    void refreshEffectiveSettings();
   } catch (error) {
     showToast(`Не вдалося завантажити стан: ${error.message}`, true);
   }
@@ -977,6 +1123,7 @@ ui.search.addEventListener("input", renderCatalog);
 ui.settingsSearch.addEventListener("input", renderSettings);
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
+ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
 ui.backdrop.addEventListener("click", closePreview);

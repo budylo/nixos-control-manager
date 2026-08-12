@@ -208,6 +208,14 @@ catalog remain preserved and visible read-only instead of being silently
 discarded. `checks.<system>.settings-options` also evaluates every catalog path
 and default against the pinned nixpkgs NixOS module system.
 
+The settings page evaluates the selected live `configuration.nix` or flake
+target in read-only mode and shows the effective value plus every contributing
+definition file. This inspection never builds or activates a system and never
+writes a lock file. If Nix is unavailable or the current configuration cannot
+evaluate, the editor remains usable but labels the live value as unavailable.
+When management is enabled for an option, a compatible live value is adopted as
+the initial proposal to avoid an accidental change.
+
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).
 
