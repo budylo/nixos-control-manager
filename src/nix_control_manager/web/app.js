@@ -293,6 +293,66 @@ function usableActualValue(definition) {
   }
 }
 
+function priorityLabel(actual) {
+  if (actual.activePriority === null || actual.activePriority === undefined) return "";
+  const labels = {
+    forced: "примусове перевизначення",
+    "strong-override": "сильне перевизначення",
+    normal: "звичайне визначення",
+    "weak-override": "послаблене перевизначення",
+    "module-default": "модульне стандартне (mkDefault)",
+    "option-default": "вбудоване стандартне опції",
+    "weak-default": "слабке стандартне визначення",
+  };
+  return `пріоритет ${actual.activePriority} · ${labels[actual.priorityKind] || "інший"}`;
+}
+
+function assessmentLabel(actual) {
+  const count = actual.definitions?.length || actual.definitionFiles?.length || 0;
+  const labels = {
+    conflict: "активні scalar-значення конфліктують",
+    "evaluation-failed": "активне значення не вдалося обчислити",
+    "option-missing": "опції немає в цій версії NixOS",
+    "single-definition": "одне активне визначення",
+    "list-merged": `об’єднано активні списки: ${count}`,
+    "equal-definitions": `активні scalar-значення однакові: ${count}`,
+    "type-merged": `значення об’єднано типом опції: ${count}`,
+  };
+  return labels[actual.assessment] || "";
+}
+
+function effectiveDefinitions(actual) {
+  if (actual.definitions?.length) return actual.definitions;
+  return (actual.definitionFiles || []).map((file) => ({
+    file,
+    valueAvailable: false,
+    value: null,
+  }));
+}
+
+function appendDefinitionDetails(panel, definition, actual) {
+  const definitions = effectiveDefinitions(actual);
+  if (!definitions.length) return;
+  const sources = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = `Активні визначення: ${definitions.length}`;
+  const list = document.createElement("ul");
+  for (const active of definitions) {
+    const item = document.createElement("li");
+    const file = document.createElement("code");
+    file.textContent = sourceLabel(active.file);
+    file.title = active.file;
+    const activeValue = document.createElement("span");
+    activeValue.textContent = active.valueAvailable
+      ? actualValueText(definition, active.value)
+      : "значення недоступне";
+    item.append(file, activeValue);
+    list.append(item);
+  }
+  sources.append(summary, list);
+  panel.append(sources);
+}
+
 function effectiveSettingPanel(definition, managed) {
   const panel = document.createElement("div");
   panel.className = "effective-setting";
@@ -303,14 +363,17 @@ function effectiveSettingPanel(definition, managed) {
   const value = document.createElement("strong");
   const comparison = document.createElement("span");
   comparison.className = "effective-setting-comparison";
+  const provenance = document.createElement("div");
+  provenance.className = "effective-setting-provenance";
 
   if (model.effectiveSettings.status === "loading" || model.effectiveSettings.status === "idle") {
     value.textContent = "Читаємо…";
     comparison.textContent = "лише читання";
   } else if (!actual?.available) {
-    value.textContent = "Недоступно";
-    comparison.textContent = "поточне значення не визначено";
+    value.textContent = actual?.assessment === "conflict" ? "Конфлікт" : "Недоступно";
+    comparison.textContent = assessmentLabel(actual || {});
     panel.classList.add("unavailable");
+    panel.classList.toggle("conflict", actual?.assessment === "conflict");
   } else {
     value.textContent = actualValueText(definition, actual.value);
     const same = managed
@@ -325,24 +388,24 @@ function effectiveSettingPanel(definition, managed) {
       : (ownershipLabels[actual.ownership] || "лише читається");
     panel.classList.toggle("will-change", managed && !same);
     panel.classList.toggle("same", same);
-
-    if (actual.definitionFiles?.length) {
-      const sources = document.createElement("details");
-      const summary = document.createElement("summary");
-      summary.textContent = `Джерела визначення: ${actual.definitionFiles.length}`;
-      const list = document.createElement("ul");
-      for (const source of actual.definitionFiles) {
-        const item = document.createElement("li");
-        item.textContent = sourceLabel(source);
-        item.title = source;
-        list.append(item);
-      }
-      sources.append(summary, list);
-      panel.append(label, value, comparison, sources);
-      return panel;
-    }
   }
   panel.append(label, value, comparison);
+  if (actual) {
+    const assessment = assessmentLabel(actual);
+    const priority = priorityLabel(actual);
+    for (const text of [assessment, priority].filter(Boolean)) {
+      const badge = document.createElement("span");
+      badge.textContent = text;
+      badge.title = text.startsWith("пріоритет")
+        ? "У Nix менше числове значення означає сильніший override. Показано лише активний пріоритет."
+        : "Пояснення стосується активних визначень після фільтрації override.";
+      provenance.append(badge);
+    }
+    panel.classList.toggle("forced", actual.priorityKind === "forced");
+    panel.classList.toggle("merged", ["list-merged", "equal-definitions", "type-merged"].includes(actual.assessment));
+    if (provenance.childElementCount) panel.append(provenance);
+    appendDefinitionDetails(panel, definition, actual);
+  }
   return panel;
 }
 
@@ -373,7 +436,12 @@ function renderEffectiveSettingsStatus() {
     const target = inspection.configurationMode === "flake"
       ? `flake: ${inspection.flakeTarget}`
       : "configuration.nix (channels)";
-    ui.effectiveSettingsStatus.textContent = "Фактичну конфігурацію прочитано";
+    const attention = inspection.settings?.filter((setting) => [
+      "conflict", "evaluation-failed", "option-missing",
+    ].includes(setting.assessment)).length || 0;
+    ui.effectiveSettingsStatus.textContent = attention
+      ? `Фактичну конфігурацію прочитано · потребують уваги: ${attention}`
+      : "Фактичну конфігурацію прочитано";
     ui.effectiveSettingsDetail.textContent = `${target} · ${inspection.durationMs} мс · лише читання`;
     return;
   }
@@ -474,6 +542,13 @@ function settingControl(definition, managed, card) {
 function settingCard(definition) {
   const card = document.createElement("article");
   const managed = Object.hasOwn(model.options, definition.path);
+  const actual = effectiveSetting(definition.path);
+  const inspectionPending = !managed && ["idle", "loading"].includes(
+    model.effectiveSettings.status,
+  );
+  const inspectionBlocked = !managed && [
+    "conflict", "evaluation-failed", "option-missing",
+  ].includes(actual?.assessment);
   card.className = `setting-card${managed ? " managed" : ""}${definition.unknown ? " unknown" : ""}`;
 
   const header = document.createElement("header");
@@ -486,9 +561,18 @@ function settingCard(definition) {
   const manage = document.createElement("button");
   manage.type = "button";
   manage.className = "setting-manage";
-  manage.textContent = definition.unknown ? "Збережено" : (managed ? "Керується" : "Не керувати");
+  manage.textContent = definition.unknown
+    ? "Збережено"
+    : (managed
+      ? "Керується"
+      : (inspectionPending ? "Перевірка…" : (inspectionBlocked ? "Ручний огляд" : "Не керувати")));
   manage.setAttribute("aria-pressed", String(managed));
-  manage.disabled = definition.unknown;
+  manage.disabled = definition.unknown || inspectionPending || inspectionBlocked;
+  if (inspectionBlocked) {
+    manage.title = "NCM не додаватиме визначення, доки наявну помилку не буде розглянуто вручну.";
+  } else if (inspectionPending) {
+    manage.title = "Дочекайтеся завершення read-only перевірки фактичної конфігурації.";
+  }
   manage.addEventListener("click", () => {
     if (Object.hasOwn(model.options, definition.path)) {
       delete model.options[definition.path];

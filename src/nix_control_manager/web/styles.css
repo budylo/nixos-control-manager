@@ -141,10 +141,19 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .effective-setting.will-change { border-color: rgba(255,202,115,.22); }
 .effective-setting.will-change .effective-setting-comparison { color: #d5b06f; }
 .effective-setting.unavailable { border-style: dashed; opacity: .72; }
+.effective-setting.conflict { border-style: solid; border-color: rgba(255,116,116,.42); opacity: 1; }
+.effective-setting.conflict strong, .effective-setting.conflict .effective-setting-comparison { color: #ff9d9d; }
+.effective-setting.forced { border-color: rgba(255,116,116,.3); }
+.effective-setting.merged { border-color: rgba(115,220,166,.16); }
+.effective-setting-provenance { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
+.effective-setting-provenance span { padding: 4px 6px; border-radius: 6px; color: #8798ae; background: rgba(255,255,255,.035); font-size: 7px; line-height: 1.35; }
+.effective-setting.forced .effective-setting-provenance span:last-child { color: #ffb0b0; background: rgba(255,116,116,.08); }
 .effective-setting details { grid-column: 1 / -1; color: #718299; font-size: 8px; }
 .effective-setting summary { cursor: pointer; }
-.effective-setting ul { margin: 6px 0 0; padding-left: 17px; }
-.effective-setting li { margin: 2px 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.effective-setting ul { margin: 7px 0 0; padding: 0; display: grid; gap: 5px; list-style: none; }
+.effective-setting li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 42%); gap: 9px; align-items: start; }
+.effective-setting li code { color: #718299; }
+.effective-setting li span { overflow-wrap: anywhere; text-align: right; color: #aeb9c8; font: 8px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .setting-field { margin-top: auto; display: grid; gap: 6px; }
 .setting-field label { color: #8291a5; font-size: 9px; font-weight: 750; }
 .setting-field input, .setting-field select, .setting-field textarea { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; outline: none; color: var(--text); background: #0b111a; font-size: 11px; }

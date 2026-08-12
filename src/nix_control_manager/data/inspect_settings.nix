@@ -20,24 +20,53 @@ let
     let
       parts = lib.splitString "." definition.path;
       option = lib.attrByPath parts null evaluated.options;
+      optionExists = option != null;
       encoded = builtins.tryEval (
         builtins.toJSON (lib.attrByPath parts null evaluated.config)
       );
+      inspectDefinition = item:
+        let
+          definitionEncoded = builtins.tryEval (builtins.toJSON item.value);
+        in
+        {
+          file = builtins.toString item.file;
+          valueAvailable = definitionEncoded.success;
+          value =
+            if definitionEncoded.success then
+              builtins.fromJSON definitionEncoded.value
+            else
+              null;
+        };
     in
     {
       path = definition.path;
-      available = option != null && encoded.success;
+      inherit optionExists;
+      available = optionExists && encoded.success;
       value =
-        if option != null && encoded.success then
+        if optionExists && encoded.success then
           builtins.fromJSON encoded.value
         else
           null;
-      definitionFiles =
-        if option == null then [ ] else
-        map (item: builtins.toString item.file) option.definitionsWithLocations;
+      activePriority =
+        if optionExists && option ? highestPrio then option.highestPrio else null;
+      optionType =
+        if optionExists then
+          {
+            name = option.type.name or "";
+            description = option.type.description or "";
+          }
+        else
+          null;
+      definitions =
+        if optionExists then
+          map inspectDefinition option.definitionsWithLocations
+        else
+          [ ];
       declarationFiles =
-        if option == null then [ ] else
-        map builtins.toString option.declarations;
+        if optionExists then
+          map builtins.toString option.declarations
+        else
+          [ ];
     };
 in
 {

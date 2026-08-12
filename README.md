@@ -216,6 +216,15 @@ evaluate, the editor remains usable but labels the live value as unavailable.
 When management is enabled for an option, a compatible live value is adopted as
 the initial proposal to avoid an accidental change.
 
+For each active definition the interface also reports the Nix override priority
+and its value. Lower numeric priorities win in the Nix module system. List
+options are labelled as concatenated, repeated equal scalar definitions are
+distinguished from conflicts, and `mkForce`-strength priorities receive a
+warning. Only definitions that remain active after Nix override filtering are
+shown; discarded weaker definitions are intentionally not presented as if they
+were still contributing. Options whose current scalar definitions conflict or
+cannot evaluate require manual review before NCM can start managing them.
+
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).
 

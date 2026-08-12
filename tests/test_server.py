@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 from nix_control_manager.server import NcmServer, RequestHandler
 from nix_control_manager.candidate_build import CandidateBuildManager
 from nix_control_manager.settings_inspector import (
+    EffectiveDefinition,
     EffectiveSetting,
     EffectiveSettingsInspection,
 )
@@ -106,7 +107,16 @@ class ServerTests(unittest.TestCase):
                         path="time.timeZone",
                         available=True,
                         value="Europe/Kyiv",
-                        definition_files=("/etc/nixos/configuration.nix",),
+                        active_priority=100,
+                        priority_kind="normal",
+                        assessment="single-definition",
+                        definitions=(
+                            EffectiveDefinition(
+                                file="/etc/nixos/configuration.nix",
+                                value_available=True,
+                                value="Europe/Kyiv",
+                            ),
+                        ),
                         ownership="inherited",
                     ),
                 ),
@@ -155,6 +165,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(effective["status"], "passed")
         self.assertTrue(effective["readOnly"])
         self.assertEqual(effective["settings"][0]["value"], "Europe/Kyiv")
+        self.assertEqual(effective["settings"][0]["activePriority"], 100)
+        self.assertEqual(effective["settings"][0]["assessment"], "single-definition")
 
         with urlopen(self.base_url + "/", timeout=2) as response:
             html = response.read().decode("utf-8")

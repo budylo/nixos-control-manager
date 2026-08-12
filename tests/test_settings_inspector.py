@@ -18,19 +18,33 @@ class SettingsInspectorTests(unittest.TestCase):
         self.temporary.cleanup()
 
     @staticmethod
-    def _document(definition_files=None):
+    def _document(definition_files=None, priorities=None):
         records = []
         for index, definition in enumerate(load_settings_catalog()):
             records.append(
                 {
                     "path": definition["path"],
+                    "optionExists": True,
                     "available": True,
                     "value": index,
-                    "definitionFiles": (
-                        definition_files[index]
-                        if definition_files and index < len(definition_files)
-                        else [f"/nix/store/source/{definition['path']}.nix"]
+                    "activePriority": (
+                        priorities[index]
+                        if priorities and index < len(priorities)
+                        else 100
                     ),
+                    "optionType": {"name": "fixture", "description": "fixture type"},
+                    "definitions": [
+                        {
+                            "file": source,
+                            "valueAvailable": True,
+                            "value": index,
+                        }
+                        for source in (
+                            definition_files[index]
+                            if definition_files and index < len(definition_files)
+                            else [f"/nix/store/source/{definition['path']}.nix"]
+                        )
+                    ],
                     "declarationFiles": ["/nix/store/source/declaration.nix"],
                 }
             )
@@ -42,6 +56,7 @@ class SettingsInspectorTests(unittest.TestCase):
         sources = [
             [str(output)],
             [str(output), "/etc/nixos/configuration.nix"],
+            ["/etc/nixos/locale-a.nix", "/etc/nixos/locale-b.nix"],
         ]
         captured = {}
 
@@ -49,7 +64,10 @@ class SettingsInspectorTests(unittest.TestCase):
             captured["command"] = command
             captured["kwargs"] = kwargs
             return subprocess.CompletedProcess(
-                command, 0, stdout=json.dumps(self._document(sources)), stderr=""
+                command,
+                0,
+                stdout=json.dumps(self._document(sources, [50, 100, 100])),
+                stderr="",
             )
 
         result = inspect_effective_settings(
@@ -62,8 +80,12 @@ class SettingsInspectorTests(unittest.TestCase):
         self.assertEqual(result.status, "passed")
         self.assertEqual(result.configuration_mode, "channels")
         self.assertEqual(result.settings[0].ownership, "managed")
+        self.assertEqual(result.settings[0].priority_kind, "forced")
         self.assertEqual(result.settings[1].ownership, "shared")
+        self.assertEqual(result.settings[1].assessment, "equal-definitions")
         self.assertEqual(result.settings[2].ownership, "inherited")
+        self.assertEqual(result.settings[2].assessment, "list-merged")
+        self.assertEqual(result.settings[2].merge_strategy, "list-concatenation")
         command = captured["command"]
         self.assertIn("--no-write-lock-file", command)
         self.assertIn("allow-import-from-derivation", command)
@@ -109,6 +131,35 @@ class SettingsInspectorTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "failed")
         self.assertTrue(all(not setting.available for setting in result.settings))
+
+    def test_differing_active_scalar_definitions_are_classified_as_conflict(self) -> None:
+        (self.root / "configuration.nix").write_text("{ ... }: { }\n", encoding="utf-8")
+        document = self._document()
+        document["settings"][0].update(
+            {
+                "available": False,
+                "value": None,
+                "definitions": [
+                    {"file": "/a.nix", "valueAvailable": True, "value": "UTC"},
+                    {
+                        "file": "/b.nix",
+                        "valueAvailable": True,
+                        "value": "Europe/Kyiv",
+                    },
+                ],
+            }
+        )
+        result = inspect_effective_settings(
+            self.root,
+            output_path=self.root / "managed.nix",
+            runner=lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps(document), stderr=""
+            ),
+            which=lambda name: "/bin/nix",
+        )
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.settings[0].assessment, "conflict")
+        self.assertFalse(result.settings[0].available)
 
 
 if __name__ == "__main__":

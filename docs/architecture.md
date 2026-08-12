@@ -131,8 +131,14 @@ The GUI queries evaluated catalog values, definition locations, and declaration
 locations through a fixed read-only Nix expression. It labels definitions from
 the generated NCM module as managed, definitions from other modules as
 inherited, and a mixture as shared. A shared source is not automatically called
-a conflict: richer priority and merge explanations remain future work. The GUI
-must not silently use `lib.mkForce`. List options such as
+a conflict. The evaluator reads `highestPrio` and active
+`definitionsWithLocations` after Nix has applied `mkOverride` filtering. Lower
+numeric priorities are stronger. The GUI can therefore explain list
+concatenation, repeated equal scalar values, and differing active scalar values,
+but does not claim visibility into weaker definitions that Nix has already
+discarded. An evaluation failure with differing active scalar values is marked
+as a conflict; other failures remain conservatively labelled as evaluation
+errors. The GUI must not silently use `lib.mkForce`. List options such as
 `environment.systemPackages` normally merge, while scalar options can conflict.
 
 ## State and generated source
