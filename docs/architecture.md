@@ -141,6 +141,13 @@ as a conflict; other failures remain conservatively labelled as evaluation
 errors. The GUI must not silently use `lib.mkForce`. List options such as
 `environment.systemPackages` normally merge, while scalar options can conflict.
 
+Catalog dependency rules are evaluated against the projected managed state
+first and the read-only effective state second. Known contradictions block
+preview and save, while an unavailable effective parent remains an explicit
+unknown instead of being guessed. A repair action may add the typed parent value
+only after the user selects it. The Python state model separately rejects
+contradictions where both sides are already owned by NCM.
+
 ## State and generated source
 
 The JSON state is versioned and convenient for the UI. The generated `.nix`

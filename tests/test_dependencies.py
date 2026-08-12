@@ -55,11 +55,40 @@ class SettingDependencyTests(unittest.TestCase):
         )
 
     def test_non_empty_ports_require_enabled_firewall(self) -> None:
+        for path, ports in (
+            ("networking.firewall.allowedTCPPorts", [22]),
+            ("networking.firewall.allowedUDPPorts", [53]),
+        ):
+            with self.subTest(path=path):
+                issues = analyze_setting_dependencies(
+                    {path: ports},
+                    effective_options={"networking.firewall.enable": False},
+                )
+                self.assertEqual(
+                    issues[0].required_path, "networking.firewall.enable"
+                )
+                self.assertEqual(issues[0].status, "unsatisfied")
+
+    def test_bluetooth_features_require_system_support(self) -> None:
+        for path in (
+            "hardware.bluetooth.powerOnBoot",
+            "services.blueman.enable",
+        ):
+            with self.subTest(path=path):
+                issues = analyze_setting_dependencies(
+                    {path: True},
+                    effective_options={"hardware.bluetooth.enable": False},
+                )
+                self.assertEqual(issues[0].required_path, "hardware.bluetooth.enable")
+                self.assertEqual(issues[0].status, "unsatisfied")
+
+    def test_zram_capacity_requires_zram_swap(self) -> None:
         issues = analyze_setting_dependencies(
-            {"networking.firewall.allowedTCPPorts": [22]},
-            effective_options={"networking.firewall.enable": False},
+            {"zramSwap.memoryPercent": 75},
+            effective_options={"zramSwap.enable": False},
         )
-        self.assertEqual(issues[0].required_path, "networking.firewall.enable")
+        self.assertEqual(issues[0].required_path, "zramSwap.enable")
+        self.assertEqual(issues[0].required_value, True)
         self.assertEqual(issues[0].status, "unsatisfied")
 
 

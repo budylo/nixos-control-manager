@@ -195,11 +195,13 @@ recovery journal must finish in `recovered` state. This regression is exposed as
 
 ## Typed system settings
 
-The graphical interface now includes the first typed NixOS settings catalog.
-Seventeen curated options cover locale and time, Plasma/SDDM, PipeWire,
-Bluetooth, NetworkManager, firewall ports, SSH, printing, Steam, and the boot
-menu timeout. Boolean, enum, string, integer, and list editors expose the exact
-option path, NixOS type, curated default, and impact level.
+The graphical interface now includes a typed NixOS settings catalog. Thirty-two
+curated options cover locale and time, Plasma/SDDM, sound, Bluetooth, power and
+zram, NetworkManager, TCP/UDP firewall ports, SSH, Tailscale, printing,
+Flatpak, Steam, Docker/libvirt, firmware and SSD maintenance, Nix garbage
+collection, nix-ld compatibility, and the boot menu timeout. Boolean, enum,
+string, integer, and list editors expose the exact option path, NixOS type,
+curated default, and impact level.
 
 Settings are opt-in individually: an untouched catalog default is not emitted.
 Known values are validated independently in the browser and Python model;

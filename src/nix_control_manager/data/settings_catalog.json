@@ -116,6 +116,83 @@
     "risk": "low"
   },
   {
+    "path": "hardware.bluetooth.powerOnBoot",
+    "name": "Bluetooth після завантаження",
+    "description": "Автоматично подає живлення на стандартний Bluetooth-контролер під час запуску системи.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "requires": [
+      {
+        "path": "hardware.bluetooth.enable",
+        "requiredValue": true,
+        "when": "true",
+        "message": "Автоматичне живлення контролера потребує ввімкненої підтримки Bluetooth."
+      }
+    ],
+    "risk": "low"
+  },
+  {
+    "path": "services.blueman.enable",
+    "name": "Менеджер Bluetooth Blueman",
+    "description": "Встановлює графічний менеджер для підключення та керування Bluetooth-пристроями.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "requires": [
+      {
+        "path": "hardware.bluetooth.enable",
+        "requiredValue": true,
+        "when": "true",
+        "message": "Blueman потребує ввімкненої системної підтримки Bluetooth."
+      }
+    ],
+    "risk": "low"
+  },
+  {
+    "path": "services.upower.enable",
+    "name": "Моніторинг живлення UPower",
+    "description": "Надає програмам інформацію про батарею, заряд і джерела живлення через системну службу.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low"
+  },
+  {
+    "path": "zramSwap.enable",
+    "name": "Стиснений swap у RAM (zram)",
+    "description": "Вмикає стиснений простір swap у оперативній пам'яті, щоб відкласти повільне вивантаження на диск.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "zramSwap.memoryPercent",
+    "name": "Максимальний розмір zram",
+    "description": "Обмежує місткість стисненого zram swap у відсотках від загального обсягу оперативної пам'яті.",
+    "category": "Обладнання",
+    "valueType": "integer",
+    "nixosType": "додатне ціле число",
+    "default": 50,
+    "minimum": 1,
+    "maximum": 200,
+    "unit": "% RAM",
+    "requires": [
+      {
+        "path": "zramSwap.enable",
+        "requiredValue": true,
+        "when": "always",
+        "message": "Розмір zram застосовується лише після ввімкнення zram swap."
+      }
+    ],
+    "risk": "medium"
+  },
+  {
     "path": "networking.networkmanager.enable",
     "name": "NetworkManager",
     "description": "Керує Wi‑Fi, Ethernet і VPN через системну службу та аплет робочого столу.",
@@ -179,6 +256,37 @@
     "risk": "high"
   },
   {
+    "path": "networking.firewall.allowedUDPPorts",
+    "name": "Дозволені UDP-порти",
+    "description": "Список вхідних UDP-портів, які firewall залишить відкритими.",
+    "category": "Мережа",
+    "valueType": "integer-list",
+    "nixosType": "список 16-бітних беззнакових цілих",
+    "default": [],
+    "minimum": 0,
+    "maximum": 65535,
+    "unit": "порт",
+    "requires": [
+      {
+        "path": "networking.firewall.enable",
+        "requiredValue": true,
+        "when": "non-empty",
+        "message": "Список дозволених UDP-портів застосовується лише з увімкненим firewall."
+      }
+    ],
+    "risk": "high"
+  },
+  {
+    "path": "services.tailscale.enable",
+    "name": "Служба Tailscale",
+    "description": "Вмикає системний клієнт Tailscale для захищеної приватної мережі між вашими пристроями.",
+    "category": "Мережа",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
     "path": "services.openssh.enable",
     "name": "SSH-сервер",
     "description": "Дозволяє віддалений вхід до цієї машини через OpenSSH.",
@@ -199,6 +307,16 @@
     "risk": "low"
   },
   {
+    "path": "services.flatpak.enable",
+    "name": "Підтримка Flatpak",
+    "description": "Вмикає системну підтримку ізольованих застосунків Flatpak; репозиторії та програми додаються окремо.",
+    "category": "Служби",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
     "path": "programs.steam.enable",
     "name": "Інтеграція Steam",
     "description": "Вмикає системну підтримку Steam, включно з потрібними бібліотеками.",
@@ -206,6 +324,76 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "virtualisation.docker.enable",
+    "name": "Контейнери Docker",
+    "description": "Вмикає системний демон Docker для створення та запуску Linux-контейнерів.",
+    "category": "Віртуалізація",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "virtualisation.libvirtd.enable",
+    "name": "Віртуальні машини libvirt",
+    "description": "Вмикає демон libvirtd для керування локальними віртуальними машинами через KVM/QEMU.",
+    "category": "Віртуалізація",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "programs.virt-manager.enable",
+    "name": "Графічний менеджер virt-manager",
+    "description": "Встановлює графічний інтерфейс для керування локальними або віддаленими машинами libvirt.",
+    "category": "Віртуалізація",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium"
+  },
+  {
+    "path": "services.fwupd.enable",
+    "name": "Оновлення прошивок fwupd",
+    "description": "Вмикає системну службу, через яку сумісні програми перевіряють і встановлюють оновлення прошивок пристроїв.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "services.fstrim.enable",
+    "name": "Періодичний SSD TRIM",
+    "description": "Періодично виконує TRIM змонтованих SSD у фоні для підтримання їхньої продуктивності.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low"
+  },
+  {
+    "path": "nix.gc.automatic",
+    "name": "Автоматичне очищення Nix store",
+    "description": "Періодично запускає збирач сміття Nix; збережені системні покоління залишають свої store paths захищеними.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium"
+  },
+  {
+    "path": "programs.nix-ld.enable",
+    "name": "Сумісність nix-ld",
+    "description": "Дозволяє запускати частину сторонніх динамічно скомпонованих Linux-бінарників, не запакованих для NixOS.",
+    "category": "Система",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
     "risk": "medium"
   },
   {

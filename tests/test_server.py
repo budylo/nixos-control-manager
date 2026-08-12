@@ -153,9 +153,12 @@ class ServerTests(unittest.TestCase):
         helper = self.request_json("/api/helper")
         effective = self.request_json("/api/effective-settings")
         self.assertGreater(len(catalog), 10)
-        self.assertGreaterEqual(len(settings_catalog), 15)
+        self.assertGreaterEqual(len(settings_catalog), 30)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
         self.assertIn("enum", {item["valueType"] for item in settings_catalog})
+        self.assertIn(
+            "zramSwap.memoryPercent", {item["path"] for item in settings_catalog}
+        )
         self.assertEqual(state["packages"], [])
         self.assertEqual(system["configuration"]["mode"], "missing")
         self.assertEqual(adoption["status"], "blocked")
@@ -244,24 +247,42 @@ class ServerTests(unittest.TestCase):
         self.assertIn("at most 65535", payload["error"])
 
     def test_save_rejects_explicit_dependency_contradiction(self) -> None:
-        with self.assertRaises(HTTPError) as context:
-            self.request_json(
-                "/api/save",
-                method="POST",
-                token=self.server.token,
-                body={
-                    "schemaVersion": 1,
-                    "packages": [],
-                    "options": {
-                        "services.pipewire.enable": False,
-                        "services.pipewire.pulse.enable": True,
-                    },
+        cases = (
+            (
+                {
+                    "services.pipewire.enable": False,
+                    "services.pipewire.pulse.enable": True,
                 },
-            )
-        self.assertEqual(context.exception.code, 400)
-        payload = json.loads(context.exception.read())
-        context.exception.close()
-        self.assertIn("requires services.pipewire.enable", payload["error"])
+                "requires services.pipewire.enable",
+            ),
+            (
+                {
+                    "hardware.bluetooth.enable": False,
+                    "services.blueman.enable": True,
+                },
+                "requires hardware.bluetooth.enable",
+            ),
+            (
+                {"zramSwap.enable": False, "zramSwap.memoryPercent": 50},
+                "requires zramSwap.enable",
+            ),
+        )
+        for options, message in cases:
+            with self.subTest(options=options), self.assertRaises(HTTPError) as context:
+                self.request_json(
+                    "/api/save",
+                    method="POST",
+                    token=self.server.token,
+                    body={
+                        "schemaVersion": 1,
+                        "packages": [],
+                        "options": options,
+                    },
+                )
+            self.assertEqual(context.exception.code, 400)
+            payload = json.loads(context.exception.read())
+            context.exception.close()
+            self.assertIn(message, payload["error"])
 
     def test_build_preview_requires_token_and_streams_a_fixed_job(self) -> None:
         root = self.server.config_root

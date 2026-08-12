@@ -71,7 +71,7 @@
 ## Milestone 4 — Typed NixOS options
 
 - curated first catalog with checked option paths, descriptions, NixOS types,
-  defaults, suggestions, and impact labels (implemented for 17 options; dynamic
+  defaults, suggestions, and impact labels (implemented for 32 options; dynamic
   nixpkgs metadata/provenance ingestion remains);
 - render booleans, enums, strings, integers, and string/integer lists with
   browser and server validation (implemented); numbers beyond integers and
@@ -82,9 +82,11 @@
 - model typed dependencies between settings, resolve them against projected and
   inherited effective values, block known contradictions, and offer explicit
   one-click parent-setting repair without hidden mutations (implemented for
-  PipeWire/PulseAudio, NetworkManager Wi-Fi backend, and firewall TCP ports);
+  PipeWire/PulseAudio, Bluetooth features, NetworkManager Wi-Fi backend,
+  firewall TCP/UDP ports, and zram sizing);
 - curated settings for common desktop, network, locale, sound, hardware,
-  service, gaming, and boot tasks (first vertical slice implemented).
+  service, gaming, boot, maintenance, compatibility, and virtualization tasks
+  (two vertical slices implemented).
 
 ## Milestone 5 — User configuration
 
