@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Mapping
 
+from .catalog import validate_setting_value
 from .errors import ValidationError
 
 
@@ -86,8 +87,9 @@ class ManagedState:
         options: dict[str, Any] = {}
         for option_path, value in sorted(option_values.items()):
             normalized_path = validate_attribute_path(option_path, label="Option")
-            options[normalized_path] = _validate_value(
-                value, path=f"Option {normalized_path}"
+            normalized_value = _validate_value(value, path=f"Option {normalized_path}")
+            options[normalized_path] = validate_setting_value(
+                normalized_path, normalized_value
             )
 
         return cls(schema_version=version, packages=packages, options=options)

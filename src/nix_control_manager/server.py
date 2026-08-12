@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
-from .catalog import load_catalog
+from .catalog import load_catalog, load_settings_catalog
 from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager
@@ -142,6 +142,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(load_state(self.server.state_path).to_mapping())
             elif path == "/api/catalog":
                 self._json(load_catalog())
+            elif path == "/api/settings-catalog":
+                self._json(load_settings_catalog())
             elif path == "/api/preview":
                 state = load_state(self.server.state_path)
                 self._json(build_preview(state, self.server.output_path))

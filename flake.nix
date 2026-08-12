@@ -128,6 +128,18 @@
             }).config.system.build.toplevel
           );
         in {
+          settings-options = import ./tests/nixos/settings-options-check.nix {
+            inherit pkgs;
+          };
+          web-settings = pkgs.runCommand "nix-control-manager-web-settings-check" {
+            nativeBuildInputs = [ pkgs.nodejs ];
+          } ''
+            NCM_SETTINGS_JS=${./src/nix_control_manager/web/settings.js} \
+              node ${./tests/test_web_settings.js}
+            node --check ${./src/nix_control_manager/web/settings.js}
+            node --check ${./src/nix_control_manager/web/app.js}
+            touch "$out"
+          '';
           nixos-module =
             assert liveTargetEvaluation.success == false;
             assert service.serviceConfig.ProtectSystem == "strict";

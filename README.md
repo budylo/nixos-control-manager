@@ -193,6 +193,21 @@ recovery journal must finish in `recovered` state. This regression is exposed as
 `checks.x86_64-linux.live-test-recovery-vm` and
 `packages.x86_64-linux.live-test-recovery-vm-test`.
 
+## Typed system settings
+
+The graphical interface now includes the first typed NixOS settings catalog.
+Seventeen curated options cover locale and time, Plasma/SDDM, PipeWire,
+Bluetooth, NetworkManager, firewall ports, SSH, printing, Steam, and the boot
+menu timeout. Boolean, enum, string, integer, and list editors expose the exact
+option path, NixOS type, curated default, and impact level.
+
+Settings are opt-in individually: an untouched catalog default is not emitted.
+Known values are validated independently in the browser and Python model;
+invalid input disables preview and save. Existing options outside the current
+catalog remain preserved and visible read-only instead of being silently
+discarded. `checks.<system>.settings-options` also evaluates every catalog path
+and default against the pinned nixpkgs NixOS module system.
+
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).
 

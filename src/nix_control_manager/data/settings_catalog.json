@@ -1,0 +1,200 @@
+[
+  {
+    "path": "time.timeZone",
+    "name": "Часовий пояс",
+    "description": "Часовий пояс для системного часу, журналів і календарів.",
+    "category": "Мова і час",
+    "valueType": "string",
+    "nixosType": "null або рядок без пробілів",
+    "default": "Europe/Kyiv",
+    "suggestions": ["Europe/Kyiv", "UTC", "Europe/Warsaw", "Europe/Berlin", "America/New_York"],
+    "pattern": "^[^\\s]+$",
+    "patternMessage": "не може містити пробілів",
+    "risk": "low"
+  },
+  {
+    "path": "i18n.defaultLocale",
+    "name": "Основна локаль",
+    "description": "Мова повідомлень, формат дат, чисел і порядок сортування.",
+    "category": "Мова і час",
+    "valueType": "enum",
+    "nixosType": "рядок",
+    "default": "uk_UA.UTF-8",
+    "choices": [
+      {"value": "uk_UA.UTF-8", "label": "Українська (Україна)"},
+      {"value": "en_US.UTF-8", "label": "English (United States)"},
+      {"value": "en_GB.UTF-8", "label": "English (United Kingdom)"},
+      {"value": "de_DE.UTF-8", "label": "Deutsch (Deutschland)"},
+      {"value": "pl_PL.UTF-8", "label": "Polski (Polska)"}
+    ],
+    "risk": "low"
+  },
+  {
+    "path": "i18n.supportedLocales",
+    "name": "Додаткові локалі",
+    "description": "Локалі glibc, які будуть доступні програмам додатково до основної.",
+    "category": "Мова і час",
+    "valueType": "string-list",
+    "nixosType": "список рядків",
+    "default": ["uk_UA.UTF-8/UTF-8", "en_US.UTF-8/UTF-8"],
+    "suggestions": ["uk_UA.UTF-8/UTF-8", "en_US.UTF-8/UTF-8", "en_GB.UTF-8/UTF-8", "de_DE.UTF-8/UTF-8", "pl_PL.UTF-8/UTF-8"],
+    "risk": "low"
+  },
+  {
+    "path": "console.keyMap",
+    "name": "Розкладка текстової консолі",
+    "description": "Клавіатурна розкладка Linux TTY; не змінює розкладку Plasma.",
+    "category": "Мова і час",
+    "valueType": "enum",
+    "nixosType": "рядок або абсолютний шлях",
+    "default": "us",
+    "choices": [
+      {"value": "us", "label": "English (US)"},
+      {"value": "uk", "label": "English (UK)"},
+      {"value": "de", "label": "Deutsch"},
+      {"value": "pl2", "label": "Polski"},
+      {"value": "ua", "label": "Українська"}
+    ],
+    "risk": "medium"
+  },
+  {
+    "path": "services.desktopManager.plasma6.enable",
+    "name": "Робоче середовище Plasma 6",
+    "description": "Встановлює та вмикає KDE Plasma 6 як графічне середовище.",
+    "category": "Робочий стіл",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "services.displayManager.sddm.enable",
+    "name": "Менеджер входу SDDM",
+    "description": "Вмикає графічний екран входу, рекомендований для Plasma.",
+    "category": "Робочий стіл",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "services.pipewire.enable",
+    "name": "PipeWire",
+    "description": "Вмикає сучасний аудіо- та відеосервер PipeWire.",
+    "category": "Звук",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "services.pipewire.pulse.enable",
+    "name": "Сумісність PulseAudio",
+    "description": "Дозволяє програмам PulseAudio працювати через PipeWire.",
+    "category": "Звук",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low"
+  },
+  {
+    "path": "hardware.bluetooth.enable",
+    "name": "Bluetooth",
+    "description": "Вмикає системну підтримку Bluetooth-пристроїв.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low"
+  },
+  {
+    "path": "networking.networkmanager.enable",
+    "name": "NetworkManager",
+    "description": "Керує Wi‑Fi, Ethernet і VPN через системну службу та аплет робочого столу.",
+    "category": "Мережа",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "high"
+  },
+  {
+    "path": "networking.networkmanager.wifi.backend",
+    "name": "Wi‑Fi backend",
+    "description": "Вибирає стабільний wpa_supplicant або експериментальний iwd для NetworkManager.",
+    "category": "Мережа",
+    "valueType": "enum",
+    "nixosType": "одне зі значень: wpa_supplicant, iwd",
+    "default": "wpa_supplicant",
+    "choices": [
+      {"value": "wpa_supplicant", "label": "wpa_supplicant (стабільний)"},
+      {"value": "iwd", "label": "iwd (експериментальний)"}
+    ],
+    "risk": "high"
+  },
+  {
+    "path": "networking.firewall.enable",
+    "name": "Системний firewall",
+    "description": "Блокує неавторизовані вхідні TCP та UDP з'єднання.",
+    "category": "Мережа",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "high"
+  },
+  {
+    "path": "networking.firewall.allowedTCPPorts",
+    "name": "Дозволені TCP-порти",
+    "description": "Список вхідних TCP-портів, які firewall залишить відкритими.",
+    "category": "Мережа",
+    "valueType": "integer-list",
+    "nixosType": "список 16-бітних беззнакових цілих",
+    "default": [],
+    "minimum": 0,
+    "maximum": 65535,
+    "unit": "порт",
+    "risk": "high"
+  },
+  {
+    "path": "services.openssh.enable",
+    "name": "SSH-сервер",
+    "description": "Дозволяє віддалений вхід до цієї машини через OpenSSH.",
+    "category": "Служби",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "services.printing.enable",
+    "name": "Друк через CUPS",
+    "description": "Вмикає системну службу друку та підтримку принтерів.",
+    "category": "Служби",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low"
+  },
+  {
+    "path": "programs.steam.enable",
+    "name": "Інтеграція Steam",
+    "description": "Вмикає системну підтримку Steam, включно з потрібними бібліотеками.",
+    "category": "Ігри",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "boot.loader.timeout",
+    "name": "Таймер меню завантаження",
+    "description": "Кількість секунд до автоматичного запуску стандартного пункту bootloader.",
+    "category": "Завантаження",
+    "valueType": "integer",
+    "nixosType": "null або signed integer",
+    "default": 5,
+    "minimum": 0,
+    "maximum": 120,
+    "unit": "секунд",
+    "risk": "medium"
+  }
+]

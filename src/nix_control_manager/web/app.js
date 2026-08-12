@@ -55,14 +55,32 @@ const ui = {
   runTestActivationButton: document.querySelector("#runTestActivationButton"),
   recoverTestActivationButton: document.querySelector("#recoverTestActivationButton"),
   testActivationLog: document.querySelector("#testActivationLog"),
+  programsNav: document.querySelector("#programsNav"),
+  settingsNav: document.querySelector("#settingsNav"),
+  programsPage: document.querySelector("#programsPage"),
+  settingsPage: document.querySelector("#settingsPage"),
+  pageTitle: document.querySelector("#pageTitle"),
+  settingsCatalog: document.querySelector("#settingsCatalog"),
+  settingsEmptyState: document.querySelector("#settingsEmptyState"),
+  settingsSearch: document.querySelector("#settingsSearch"),
+  settingsFilters: document.querySelector("#settingsFilters"),
+  settingsCount: document.querySelector("#settingsCount"),
+  settingsTitle: document.querySelector("#settingsTitle"),
+  unknownSettingsNote: document.querySelector("#unknownSettingsNote"),
 };
 
 const model = {
   token: "",
   catalog: [],
+  settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
   savedPackages: new Set(),
   selected: new Set(),
+  options: {},
+  savedOptions: {},
+  settingErrors: new Map(),
+  settingsCategory: "Усі",
+  page: "programs",
   category: "Усі",
   preview: { diff: "", generated: "" },
   previewMode: "diff",
@@ -91,7 +109,7 @@ function currentState() {
   return {
     schemaVersion: 1,
     packages: [...model.selected].sort(),
-    options: model.state.options || {},
+    options: NcmSettings.normalizeOptions(model.options),
   };
 }
 
@@ -101,7 +119,7 @@ function dirtyCount() {
   for (const item of all) {
     if (model.savedPackages.has(item) !== model.selected.has(item)) count += 1;
   }
-  return count;
+  return count + NcmSettings.optionChangeCount(model.savedOptions, model.options);
 }
 
 function updateChangeState() {
@@ -113,8 +131,14 @@ function updateChangeState() {
     : last === 1 ? "зміна" : last >= 2 && last <= 4 ? "зміни" : "змін";
   ui.changeCount.textContent = count ? `${count} ${label}` : "Немає змін";
   ui.changeCount.classList.toggle("dirty", count > 0);
-  ui.saveButton.disabled = count === 0;
-  ui.drawerSaveButton.disabled = count === 0;
+  const invalid = model.settingErrors.size > 0;
+  ui.changeCount.textContent = invalid
+    ? `${model.settingErrors.size} некоректне значення`
+    : (count ? `${count} ${label}` : "Немає змін");
+  ui.changeCount.classList.toggle("invalid", invalid);
+  ui.saveButton.disabled = count === 0 || invalid;
+  ui.drawerSaveButton.disabled = count === 0 || invalid;
+  ui.previewButton.disabled = invalid;
 }
 
 function buildFilters() {
@@ -186,6 +210,200 @@ function renderCatalog() {
   ui.emptyState.hidden = visible.length > 0;
   ui.resultCount.textContent = `${visible.length} із ${model.catalog.length}`;
   ui.title.textContent = model.category === "Усі" ? "Рекомендовані програми" : model.category;
+}
+
+function settingDefinitions() {
+  const known = new Set(model.settingsCatalog.map((definition) => definition.path));
+  const unknown = Object.keys(model.options)
+    .filter((path) => !known.has(path))
+    .sort()
+    .map((path) => ({
+      path,
+      name: path,
+      description: "Опція з наявного state-файлу, якої немає в поточному типізованому каталозі.",
+      category: "Інші",
+      valueType: "json",
+      nixosType: "невідомий тип",
+      risk: "medium",
+      unknown: true,
+    }));
+  return [...model.settingsCatalog, ...unknown];
+}
+
+function buildSettingsFilters() {
+  const categories = ["Усі", ...new Set(settingDefinitions().map((item) => item.category))];
+  ui.settingsFilters.replaceChildren(...categories.map((category) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `filter${category === model.settingsCategory ? " active" : ""}`;
+    button.textContent = category;
+    button.addEventListener("click", () => {
+      model.settingsCategory = category;
+      buildSettingsFilters();
+      renderSettings();
+    });
+    return button;
+  }));
+}
+
+function settingMatches(definition) {
+  const query = ui.settingsSearch.value.trim().toLocaleLowerCase("uk");
+  const categoryMatch = model.settingsCategory === "Усі"
+    || definition.category === model.settingsCategory;
+  const text = `${definition.name} ${definition.path} ${definition.description} ${definition.category}`
+    .toLocaleLowerCase("uk");
+  return categoryMatch && (!query || text.includes(query));
+}
+
+function settingControl(definition, managed, card) {
+  const field = document.createElement("div");
+  field.className = "setting-field";
+  const controlId = `setting-${definition.path.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const label = document.createElement("label");
+  label.htmlFor = controlId;
+  label.textContent = "Значення";
+  let control;
+
+  if (definition.valueType === "boolean" || definition.valueType === "enum") {
+    control = document.createElement("select");
+    const choices = definition.valueType === "boolean"
+      ? [{ value: "true", label: "Увімкнено" }, { value: "false", label: "Вимкнено" }]
+      : definition.choices;
+    for (const choice of choices) {
+      const option = document.createElement("option");
+      option.value = choice.value;
+      option.textContent = choice.label;
+      control.append(option);
+    }
+  } else if (definition.valueType === "string-list" || definition.valueType === "integer-list") {
+    control = document.createElement("textarea");
+    control.rows = 2;
+    control.placeholder = definition.valueType === "integer-list"
+      ? "Наприклад: 22, 80, 443"
+      : "Значення через кому або з нового рядка";
+  } else {
+    control = document.createElement("input");
+    control.type = definition.valueType === "integer" ? "number" : "text";
+    if (definition.minimum !== undefined) control.min = String(definition.minimum);
+    if (definition.maximum !== undefined) control.max = String(definition.maximum);
+    if (definition.suggestions?.length) {
+      const list = document.createElement("datalist");
+      list.id = `${controlId}-suggestions`;
+      for (const suggestion of definition.suggestions) {
+        const option = document.createElement("option");
+        option.value = suggestion;
+        list.append(option);
+      }
+      control.setAttribute("list", list.id);
+      field.append(list);
+    }
+  }
+
+  control.id = controlId;
+  control.disabled = !managed;
+  control.value = NcmSettings.formatEditorValue(
+    definition,
+    managed ? model.options[definition.path] : definition.default,
+  );
+  const error = document.createElement("small");
+  error.className = "setting-error";
+  error.hidden = true;
+  const update = () => {
+    try {
+      model.options[definition.path] = NcmSettings.parseEditorValue(definition, control.value);
+      model.settingErrors.delete(definition.path);
+      card.classList.remove("invalid");
+      error.hidden = true;
+    } catch (problem) {
+      model.settingErrors.set(definition.path, problem.message);
+      card.classList.add("invalid");
+      error.textContent = problem.message;
+      error.hidden = false;
+    }
+    updateChangeState();
+  };
+  control.addEventListener(definition.valueType === "string" ? "input" : "change", update);
+  if (definition.valueType.endsWith("-list") || definition.valueType === "integer") {
+    control.addEventListener("input", update);
+  }
+  field.append(label, control, error);
+  return field;
+}
+
+function settingCard(definition) {
+  const card = document.createElement("article");
+  const managed = Object.hasOwn(model.options, definition.path);
+  card.className = `setting-card${managed ? " managed" : ""}${definition.unknown ? " unknown" : ""}`;
+
+  const header = document.createElement("header");
+  const heading = document.createElement("div");
+  const name = document.createElement("h3");
+  name.textContent = definition.name;
+  const path = document.createElement("code");
+  path.textContent = definition.path;
+  heading.append(name, path);
+  const manage = document.createElement("button");
+  manage.type = "button";
+  manage.className = "setting-manage";
+  manage.textContent = definition.unknown ? "Збережено" : (managed ? "Керується" : "Не керувати");
+  manage.setAttribute("aria-pressed", String(managed));
+  manage.disabled = definition.unknown;
+  manage.addEventListener("click", () => {
+    if (Object.hasOwn(model.options, definition.path)) {
+      delete model.options[definition.path];
+      model.settingErrors.delete(definition.path);
+    } else {
+      model.options[definition.path] = JSON.parse(JSON.stringify(definition.default));
+    }
+    renderSettings();
+    updateChangeState();
+  });
+  header.append(heading, manage);
+
+  const description = document.createElement("p");
+  description.textContent = definition.description;
+  const metadata = document.createElement("div");
+  metadata.className = "setting-meta";
+  const riskLabels = { low: "низький вплив", medium: "помірний вплив", high: "високий вплив" };
+  metadata.textContent = `${definition.category} · ${definition.nixosType} · ${riskLabels[definition.risk]}`;
+  card.append(header, description, metadata);
+
+  if (definition.unknown) {
+    const raw = document.createElement("pre");
+    raw.className = "unknown-setting-value";
+    raw.textContent = JSON.stringify(model.options[definition.path], null, 2);
+    card.append(raw);
+  } else {
+    card.append(settingControl(definition, managed, card));
+  }
+  return card;
+}
+
+function renderSettings() {
+  const definitions = settingDefinitions();
+  const visible = definitions.filter(settingMatches);
+  ui.settingsCatalog.replaceChildren(...visible.map(settingCard));
+  ui.settingsEmptyState.hidden = visible.length > 0;
+  ui.settingsCount.textContent = `${visible.length} із ${definitions.length}`;
+  ui.settingsTitle.textContent = model.settingsCategory === "Усі"
+    ? "Рекомендовані налаштування"
+    : model.settingsCategory;
+  const unknownCount = definitions.filter((item) => item.unknown).length;
+  ui.unknownSettingsNote.hidden = unknownCount === 0;
+  ui.unknownSettingsNote.textContent = unknownCount
+    ? `${unknownCount} опцій поза каталогом збережено без змін і показано лише для читання.`
+    : "";
+}
+
+function showPage(page) {
+  model.page = page;
+  const settings = page === "settings";
+  ui.programsPage.hidden = settings;
+  ui.settingsPage.hidden = !settings;
+  ui.programsNav.classList.toggle("active", !settings);
+  ui.settingsNav.classList.toggle("active", settings);
+  ui.pageTitle.textContent = settings ? "Налаштування" : "Програми";
+  if (settings) renderSettings();
 }
 
 function renderPreview() {
@@ -696,6 +914,7 @@ async function save() {
     });
     model.preview = result;
     model.savedPackages = new Set(model.selected);
+    model.savedOptions = JSON.parse(JSON.stringify(model.options));
     updateChangeState();
     renderPreview();
     const outputName = result.outputPath.split(/[\\/]/).pop();
@@ -710,8 +929,9 @@ async function initialize() {
   try {
     const config = await api("/api/config");
     model.token = config.token;
-    const [catalog, state, system, adoption, helper, buildPreview] = await Promise.all([
+    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview] = await Promise.all([
       api("/api/catalog"),
+      api("/api/settings-catalog"),
       api("/api/state"),
       api("/api/system"),
       api("/api/adoption"),
@@ -719,7 +939,10 @@ async function initialize() {
       api("/api/build-preview"),
     ]);
     model.catalog = catalog;
+    model.settingsCatalog = settingsCatalog;
     model.state = state;
+    model.options = NcmSettings.normalizeOptions(JSON.parse(JSON.stringify(state.options || {})));
+    model.savedOptions = JSON.parse(JSON.stringify(model.options));
     const knownPackages = new Set(catalog.map((app) => app.attribute));
     for (const attribute of state.packages) {
       if (!knownPackages.has(attribute)) {
@@ -741,7 +964,9 @@ async function initialize() {
     renderBuildPreview(buildPreview);
     if (activeBuildStatuses.has(buildPreview.status)) pollBuildPreview();
     buildFilters();
+    buildSettingsFilters();
     renderCatalog();
+    renderSettings();
     updateChangeState();
   } catch (error) {
     showToast(`Не вдалося завантажити стан: ${error.message}`, true);
@@ -749,6 +974,9 @@ async function initialize() {
 }
 
 ui.search.addEventListener("input", renderCatalog);
+ui.settingsSearch.addEventListener("input", renderSettings);
+ui.programsNav.addEventListener("click", () => showPage("programs"));
+ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
 ui.backdrop.addEventListener("click", closePreview);
@@ -770,9 +998,10 @@ ui.recoverTestActivationButton.addEventListener("click", recoverTestActivation);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.drawer.classList.contains("open")) closePreview();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
-  if (event.key === "/" && document.activeElement !== ui.search) {
+  const activeSearch = model.page === "settings" ? ui.settingsSearch : ui.search;
+  if (event.key === "/" && document.activeElement !== activeSearch) {
     event.preventDefault();
-    ui.search.focus();
+    activeSearch.focus();
   }
 });
 

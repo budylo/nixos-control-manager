@@ -29,6 +29,23 @@ class ManagedStateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "Unsupported schemaVersion"):
             ManagedState.from_mapping({"schemaVersion": 2})
 
+    def test_known_settings_use_catalog_types_and_normalization(self) -> None:
+        state = ManagedState.from_mapping(
+            {
+                "options": {
+                    "networking.firewall.allowedTCPPorts": [443, 80, 443],
+                    "services.pipewire.enable": True,
+                }
+            }
+        )
+        self.assertEqual(
+            state.options["networking.firewall.allowedTCPPorts"], [443, 80]
+        )
+        with self.assertRaisesRegex(ValidationError, "must be boolean"):
+            ManagedState.from_mapping(
+                {"options": {"services.pipewire.enable": "enabled"}}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

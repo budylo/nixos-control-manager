@@ -21,8 +21,8 @@
 
         <nav aria-label="Розділи">
           <p class="nav-label">Система</p>
-          <button class="nav-item active" type="button"><span>▦</span> Програми</button>
-          <button class="nav-item" type="button" disabled><span>◇</span> Налаштування <small>згодом</small></button>
+          <button id="programsNav" class="nav-item active" type="button"><span>▦</span> Програми</button>
+          <button id="settingsNav" class="nav-item" type="button"><span>◇</span> Налаштування</button>
           <button class="nav-item" type="button" disabled><span>◎</span> Служби <small>згодом</small></button>
           <button class="nav-item" type="button" disabled><span>⌁</span> Драйвери <small>згодом</small></button>
           <p class="nav-label">Конфігурація</p>
@@ -51,7 +51,7 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">Керований модуль NixOS</p>
-            <h1>Програми</h1>
+            <h1 id="pageTitle">Програми</h1>
           </div>
           <div class="top-actions">
             <div id="changeCount" class="change-count">Немає змін</div>
@@ -60,6 +60,7 @@
           </div>
         </header>
 
+        <div id="programsPage" class="page-panel">
         <section class="hero">
           <div>
             <span class="hero-tag">Декларативно та прозоро</span>
@@ -105,6 +106,46 @@
           <span>⌕</span>
           <h3>Нічого не знайдено</h3>
           <p>Спробуйте іншу назву або оберіть усі категорії.</p>
+        </div>
+        </div>
+
+        <div id="settingsPage" class="page-panel" hidden>
+          <section class="hero settings-hero">
+            <div>
+              <span class="hero-tag">Типізовані опції NixOS</span>
+              <h2>Налаштовуйте систему.<br><em>Без ручного синтаксису Nix.</em></h2>
+              <p>Кожне поле має перевірений тип, стандартне значення та точний шлях NixOS option. Опція потрапляє до модуля лише після явного ввімкнення керування.</p>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">◇</span>
+            </div>
+          </section>
+
+          <section class="controls" aria-label="Пошук налаштувань">
+            <label class="search">
+              <span aria-hidden="true">⌕</span>
+              <input id="settingsSearch" type="search" placeholder="Пошук опцій або категорій…" autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <div id="settingsFilters" class="filters"></div>
+          </section>
+
+          <section class="catalog-heading">
+            <div>
+              <p class="section-kicker">Системні опції</p>
+              <h2 id="settingsTitle">Рекомендовані налаштування</h2>
+            </div>
+            <p id="settingsCount" class="result-count"></p>
+          </section>
+          <p id="unknownSettingsNote" class="unknown-settings-note" hidden></p>
+          <section id="settingsCatalog" class="settings-catalog" aria-live="polite"></section>
+          <div id="settingsEmptyState" class="empty-state" hidden>
+            <span>⌕</span>
+            <h3>Налаштувань не знайдено</h3>
+            <p>Спробуйте іншу назву або категорію.</p>
+          </div>
         </div>
       </main>
     </div>
@@ -197,6 +238,7 @@
     </aside>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="settings.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>

@@ -117,11 +117,15 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_and_empty_state_are_available(self) -> None:
         catalog = self.request_json("/api/catalog")
+        settings_catalog = self.request_json("/api/settings-catalog")
         state = self.request_json("/api/state")
         system = self.request_json("/api/system")
         adoption = self.request_json("/api/adoption")
         helper = self.request_json("/api/helper")
         self.assertGreater(len(catalog), 10)
+        self.assertGreaterEqual(len(settings_catalog), 15)
+        self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
+        self.assertIn("enum", {item["valueType"] for item in settings_catalog})
         self.assertEqual(state["packages"], [])
         self.assertEqual(system["configuration"]["mode"], "missing")
         self.assertEqual(adoption["status"], "blocked")
@@ -186,6 +190,23 @@ class ServerTests(unittest.TestCase):
             json.loads(self.server.state_path.read_text(encoding="utf-8"))["packages"],
             ["firefox"],
         )
+
+    def test_save_rejects_invalid_typed_setting(self) -> None:
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/save",
+                method="POST",
+                token=self.server.token,
+                body={
+                    "schemaVersion": 1,
+                    "packages": [],
+                    "options": {"networking.firewall.allowedTCPPorts": [70000]},
+                },
+            )
+        self.assertEqual(context.exception.code, 400)
+        payload = json.loads(context.exception.read())
+        context.exception.close()
+        self.assertIn("at most 65535", payload["error"])
 
     def test_build_preview_requires_token_and_streams_a_fixed_job(self) -> None:
         root = self.server.config_root

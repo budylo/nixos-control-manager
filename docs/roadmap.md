@@ -70,10 +70,15 @@
 
 ## Milestone 4 — Typed NixOS options
 
-- consume option descriptions, types, defaults, examples, and declarations;
-- render booleans, enums, strings, numbers, lists, and attribute sets;
+- curated first catalog with checked option paths, descriptions, NixOS types,
+  defaults, suggestions, and impact labels (implemented for 17 options; dynamic
+  nixpkgs metadata/provenance ingestion remains);
+- render booleans, enums, strings, integers, and string/integer lists with
+  browser and server validation (implemented); numbers beyond integers and
+  attribute-set editors remain;
 - display effective values and definition provenance;
-- curated settings for common desktop, network, locale, and service tasks.
+- curated settings for common desktop, network, locale, sound, hardware,
+  service, gaming, and boot tasks (first vertical slice implemented).
 
 ## Milestone 5 — User configuration
 
