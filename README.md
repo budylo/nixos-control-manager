@@ -34,6 +34,9 @@ This repository currently contains the first vertical slice:
   output. A root-only journal is created and automatic recovery is armed before
   the fixed `switch-to-configuration test` entrypoint runs. It never selects
   `switch` or changes the boot profile.
+- a read-only Home Manager inspector for both NixOS-module and standalone
+  configurations, with conservative user discovery and a separate versioned
+  user-state boundary. Home Manager writes and activation remain disabled.
 
 ## Try it
 
@@ -63,9 +66,11 @@ nix flake check --no-build
 nix build
 ```
 
-The server listens only on `127.0.0.1`. By default it stores the UI state in
-`state.local.json` and generates `managed.local.nix` in the current directory.
-These local files are ignored by Git.
+The server listens only on `127.0.0.1`. By default it stores the system UI state
+in `state.local.json`, inspects the separate `user-state.local.json`, and
+generates `managed.local.nix` in the current directory. These local files are
+ignored by Git. The Home Manager state is currently read-only and is never
+created implicitly.
 
 ## CLI
 
@@ -74,12 +79,22 @@ ncm init --state state.json
 ncm preview --state state.json --output managed.nix
 ncm generate --state state.json --output managed.nix
 ncm detect --config-root /etc/nixos --json
+ncm detect-home-manager --config-root /etc/nixos --json
 ncm migrate-state --state /etc/nixos/ncm/state.json
 ncm plan-adoption --config-root /etc/nixos
 ncm validate-adoption --config-root /etc/nixos
 ncm serve --state state.json --output managed.nix --open
 ncm-helper-client capabilities
 ```
+
+`detect-home-manager` performs a bounded static inspection of Nix files. It
+recognizes `home-manager.nixosModules.home-manager`, legacy
+`<home-manager/nixos>` imports, `home-manager.users.<name>`, flake
+`homeConfigurations.<name>`, and a standalone `~/.config/home-manager`
+configuration. Detection is deliberately conservative: dynamic user names may
+require manual confirmation in a future adoption flow. The command and UI do
+not add flake inputs, create or edit `home.nix`, write user-state, or activate a
+Home Manager generation.
 
 On NixOS, `ncm serve` looks for the helper at
 `/run/nix-control-manager/helper.sock` and target `live`. Override these with
@@ -235,6 +250,21 @@ warning. Only definitions that remain active after Nix override filtering are
 shown; discarded weaker definitions are intentionally not presented as if they
 were still contributing. Options whose current scalar definitions conflict or
 cannot evaluate require manual review before NCM can start managing them.
+
+## Home Manager foundation
+
+The Home Manager page is an inventory view for the next user-configuration
+milestone. It reports whether the existing configuration uses the NixOS module,
+standalone mode, or both, and lists only users that can be identified safely
+from static source. It also reports whether a separate version-1 user-state is
+missing, readable, or invalid.
+
+System and user ownership remain intentionally separate. System packages and
+NixOS options continue to live in `state.local.json` and `managed.local.nix`;
+future per-user Home Manager packages and options belong to
+`user-state.local.json` and a distinct generated user module. This phase has no
+user-state save endpoint, source-writing operation, Home Manager activation, or
+flake-input mutation.
 
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).

@@ -90,9 +90,12 @@
 
 ## Milestone 5 — User configuration
 
-- Home Manager in NixOS-module mode;
-- standalone Home Manager mode;
-- user/system package scope;
+- read-only discovery of Home Manager in NixOS-module and standalone modes,
+  including statically identifiable users and source files (implemented);
+- separate versioned user-state model with explicit integration per user and
+  no write or activation path (implemented foundation);
+- Home Manager source adoption and managed module generation (not implemented);
+- user/system package scope (ownership boundary implemented; editing remains);
 - profiles and reusable presets.
 
 ## Later

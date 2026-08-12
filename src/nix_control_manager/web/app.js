@@ -70,6 +70,15 @@ const ui = {
   effectiveSettingsStatus: document.querySelector("#effectiveSettingsStatus"),
   effectiveSettingsDetail: document.querySelector("#effectiveSettingsDetail"),
   refreshEffectiveSettings: document.querySelector("#refreshEffectiveSettings"),
+  topActions: document.querySelector(".top-actions"),
+  homeManagerNav: document.querySelector("#homeManagerNav"),
+  homeManagerPage: document.querySelector("#homeManagerPage"),
+  homeManagerStatus: document.querySelector("#homeManagerStatus"),
+  homeManagerStatusTitle: document.querySelector("#homeManagerStatusTitle"),
+  homeManagerStatusDetail: document.querySelector("#homeManagerStatusDetail"),
+  homeManagerUserCount: document.querySelector("#homeManagerUserCount"),
+  homeManagerUsers: document.querySelector("#homeManagerUsers"),
+  homeManagerState: document.querySelector("#homeManagerState"),
 };
 
 const model = {
@@ -96,6 +105,14 @@ const model = {
   activationPreview: null,
   testActivation: null,
   effectiveSettings: { status: "idle", settings: [], warnings: [] },
+  homeManager: {
+    status: "loading",
+    integrations: [],
+    users: [],
+    sources: [],
+    userState: { status: "missing", profileCount: 0, state: { schemaVersion: 1, users: {} } },
+    warnings: [],
+  },
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -709,15 +726,92 @@ function renderSettings() {
     : "";
 }
 
+function renderHomeManager() {
+  const inspection = model.homeManager;
+  const integrationLabels = {
+    "nixos-module": "Модуль NixOS",
+    standalone: "Standalone",
+  };
+  ui.homeManagerStatus.classList.toggle("detected", inspection.status === "detected");
+  ui.homeManagerStatus.classList.toggle("warning", inspection.userState?.status === "invalid");
+  if (inspection.status === "detected") {
+    ui.homeManagerStatusTitle.textContent = "Home Manager виявлено";
+    ui.homeManagerStatusDetail.textContent = inspection.integrations
+      .map((item) => integrationLabels[item] || item).join(" · ");
+  } else {
+    ui.homeManagerStatusTitle.textContent = "Home Manager не виявлено";
+    ui.homeManagerStatusDetail.textContent = "Перевірено системну конфігурацію та стандартний standalone-каталог.";
+  }
+  ui.homeManagerUserCount.textContent = `${inspection.users.length} користувачів`;
+
+  const cards = inspection.users.map((user) => {
+    const card = document.createElement("article");
+    card.className = "home-manager-card";
+    const icon = document.createElement("span");
+    icon.className = "home-user-icon";
+    icon.textContent = user.name.slice(0, 1).toLocaleUpperCase("uk");
+    const copy = document.createElement("div");
+    const name = document.createElement("h3");
+    name.textContent = user.name;
+    const integration = document.createElement("strong");
+    integration.textContent = integrationLabels[user.integration] || user.integration;
+    const source = document.createElement("code");
+    source.textContent = user.source;
+    copy.append(name, integration, source);
+    card.append(icon, copy);
+    return card;
+  });
+  if (!cards.length) {
+    const empty = document.createElement("div");
+    empty.className = "home-manager-empty";
+    empty.textContent = inspection.status === "detected"
+      ? "Інтеграцію знайдено, але ім’я користувача неможливо надійно визначити статично."
+      : "Наявних Home Manager профілів не знайдено.";
+    cards.push(empty);
+  }
+  ui.homeManagerUsers.replaceChildren(...cards);
+
+  const state = inspection.userState || {};
+  const stateCard = document.createElement("article");
+  stateCard.className = `home-manager-state-card ${state.status || "missing"}`;
+  const title = document.createElement("strong");
+  const statusLabels = {
+    missing: "User-state ще не створено",
+    current: "User-state прочитано",
+    invalid: "User-state пошкоджено або несумісний",
+  };
+  title.textContent = statusLabels[state.status] || state.status;
+  const path = document.createElement("code");
+  path.textContent = state.path || "user-state.local.json";
+  const detail = document.createElement("p");
+  detail.textContent = state.status === "current"
+    ? `${state.profileCount} керованих профілів · схема ${state.state?.schemaVersion}`
+    : state.status === "invalid"
+      ? (state.warning || "Файл не буде використано до ручного виправлення.")
+      : "Системний state залишається окремим. Створення цього файла буде окремою явно підтвердженою дією на наступному етапі.";
+  const boundary = document.createElement("small");
+  boundary.textContent = "Запис вимкнено · активація вимкнена · flake inputs не змінюються";
+  stateCard.append(title, path, detail, boundary);
+  ui.homeManagerState.replaceChildren(stateCard);
+}
+
 function showPage(page) {
   model.page = page;
   const settings = page === "settings";
-  ui.programsPage.hidden = settings;
+  const homeManager = page === "home-manager";
+  const programs = !settings && !homeManager;
+  ui.programsPage.hidden = !programs;
   ui.settingsPage.hidden = !settings;
-  ui.programsNav.classList.toggle("active", !settings);
+  ui.homeManagerPage.hidden = !homeManager;
+  ui.programsNav.classList.toggle("active", programs);
   ui.settingsNav.classList.toggle("active", settings);
-  ui.pageTitle.textContent = settings ? "Налаштування" : "Програми";
+  ui.homeManagerNav.classList.toggle("active", homeManager);
+  ui.topActions.hidden = homeManager;
+  ui.pageTitle.textContent = homeManager
+    ? "Home Manager"
+    : (settings ? "Налаштування" : "Програми");
   if (settings) renderSettings();
+  if (homeManager) renderHomeManager();
 }
 
 function renderPreview() {
@@ -1243,7 +1337,7 @@ async function initialize() {
   try {
     const config = await api("/api/config");
     model.token = config.token;
-    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview] = await Promise.all([
+    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager] = await Promise.all([
       api("/api/catalog"),
       api("/api/settings-catalog"),
       api("/api/state"),
@@ -1251,12 +1345,14 @@ async function initialize() {
       api("/api/adoption"),
       api("/api/helper"),
       api("/api/build-preview"),
+      api("/api/home-manager"),
     ]);
     model.catalog = catalog;
     model.settingsCatalog = settingsCatalog;
     model.state = state;
     model.options = NcmSettings.normalizeOptions(JSON.parse(JSON.stringify(state.options || {})));
     model.savedOptions = JSON.parse(JSON.stringify(model.options));
+    model.homeManager = homeManager;
     const knownPackages = new Set(catalog.map((app) => app.attribute));
     for (const attribute of state.packages) {
       if (!knownPackages.has(attribute)) {
@@ -1281,6 +1377,7 @@ async function initialize() {
     buildSettingsFilters();
     renderCatalog();
     renderSettings();
+    renderHomeManager();
     updateChangeState();
     void refreshEffectiveSettings();
   } catch (error) {
@@ -1292,6 +1389,7 @@ ui.search.addEventListener("input", renderCatalog);
 ui.settingsSearch.addEventListener("input", renderSettings);
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
+ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
@@ -1314,7 +1412,10 @@ ui.recoverTestActivationButton.addEventListener("click", recoverTestActivation);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.drawer.classList.contains("open")) closePreview();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
-  const activeSearch = model.page === "settings" ? ui.settingsSearch : ui.search;
+  const activeSearch = model.page === "settings"
+    ? ui.settingsSearch
+    : (model.page === "programs" ? ui.search : null);
+  if (!activeSearch) return;
   if (event.key === "/" && document.activeElement !== activeSearch) {
     event.preventDefault();
     activeSearch.focus();

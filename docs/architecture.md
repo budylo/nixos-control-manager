@@ -51,6 +51,10 @@ The generated module remains usable without Nix Control Manager.
     exact output. The helper journals the prior profile closure and arms a
     systemd recovery timer before invoking only `switch-to-configuration test`.
     Permanent `switch` and configuration writes remain unavailable.
+12. **Home Manager inspector** performs a bounded static scan of selected NixOS
+    and standalone configuration roots. It identifies known integration forms,
+    statically named users, and the status of a separate versioned user-state.
+    Its API explicitly advertises that writes and activation are disabled.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -154,6 +158,18 @@ The JSON state is versioned and convenient for the UI. The generated `.nix`
 file is the portable configuration consumed by NixOS. Both can be committed to
 the user's configuration repository. A header marks generated files and warns
 against direct editing.
+
+System state and Home Manager user-state are different ownership domains. The
+system schema drives `managed.nix`; user-state schema version 1 contains a map
+of user profiles, each with an explicit `nixos-module` or `standalone`
+integration, package attribute paths, and typed option values. The latter is
+currently validation-and-inspection only: there is no storage call, generator,
+HTTP mutation, flake-input edit, or activation path connected to it.
+
+Home Manager detection does not evaluate arbitrary source and does not infer
+dynamic attribute names. It recognizes a narrow set of documented static forms
+and reports uncertainty instead of rewriting a configuration. This keeps the
+future adoption decision separate from read-only discovery.
 
 ## Privilege boundary
 

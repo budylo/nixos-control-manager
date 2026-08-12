@@ -9,11 +9,17 @@ from urllib.request import Request, urlopen
 
 from nix_control_manager.server import NcmServer, RequestHandler
 from nix_control_manager.candidate_build import CandidateBuildManager
+from nix_control_manager.home_manager_inspector import (
+    DetectedHomeUser,
+    HomeManagerInspection,
+    UserStateInspection,
+)
 from nix_control_manager.settings_inspector import (
     EffectiveDefinition,
     EffectiveSetting,
     EffectiveSettingsInspection,
 )
+from nix_control_manager.user_model import UserManagedState
 
 
 class FakeHelperAdapter:
@@ -122,6 +128,23 @@ class ServerTests(unittest.TestCase):
                 ),
                 duration_ms=42,
             ),
+            home_manager_inspector=lambda *args, **kwargs: HomeManagerInspection(
+                status="detected",
+                integrations=("nixos-module",),
+                users=(
+                    DetectedHomeUser(
+                        name="alice",
+                        integration="nixos-module",
+                        source="flake.nix",
+                    ),
+                ),
+                sources=("flake.nix",),
+                config_root=directory / "etc-nixos",
+                standalone_root=directory / "home-manager",
+                user_state=UserStateInspection(
+                    "missing", directory / "user-state.json", UserManagedState.empty()
+                ),
+            ),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -152,6 +175,7 @@ class ServerTests(unittest.TestCase):
         adoption = self.request_json("/api/adoption")
         helper = self.request_json("/api/helper")
         effective = self.request_json("/api/effective-settings")
+        home_manager = self.request_json("/api/home-manager")
         self.assertGreater(len(catalog), 10)
         self.assertGreaterEqual(len(settings_catalog), 30)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
@@ -170,6 +194,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(effective["settings"][0]["value"], "Europe/Kyiv")
         self.assertEqual(effective["settings"][0]["activePriority"], 100)
         self.assertEqual(effective["settings"][0]["assessment"], "single-definition")
+        self.assertEqual(home_manager["status"], "detected")
+        self.assertEqual(home_manager["users"][0]["name"], "alice")
+        self.assertFalse(home_manager["writeEnabled"])
+        self.assertFalse(home_manager["activationEnabled"])
 
         with urlopen(self.base_url + "/", timeout=2) as response:
             html = response.read().decode("utf-8")

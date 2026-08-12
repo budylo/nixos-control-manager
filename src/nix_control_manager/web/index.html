@@ -26,7 +26,7 @@
           <button class="nav-item" type="button" disabled><span>◎</span> Служби <small>згодом</small></button>
           <button class="nav-item" type="button" disabled><span>⌁</span> Драйвери <small>згодом</small></button>
           <p class="nav-label">Конфігурація</p>
-          <button class="nav-item" type="button" disabled><span>⌂</span> Home Manager <small>згодом</small></button>
+          <button id="homeManagerNav" class="nav-item" type="button"><span>⌂</span> Home Manager</button>
           <button class="nav-item" type="button" disabled><span>❄</span> Flakes <small>згодом</small></button>
           <button class="nav-item" type="button" disabled><span>◴</span> Покоління <small>згодом</small></button>
         </nav>
@@ -155,6 +155,47 @@
             <h3>Налаштувань не знайдено</h3>
             <p>Спробуйте іншу назву або категорію.</p>
           </div>
+        </div>
+
+        <div id="homeManagerPage" class="page-panel" hidden>
+          <section class="hero home-manager-hero">
+            <div>
+              <span class="hero-tag">Окрема конфігурація користувача</span>
+              <h2>Home Manager.<br><em>Спочатку розуміємо наявний стан.</em></h2>
+              <p>Цей етап лише читає спосіб інтеграції, користувачів і джерела конфігурації. NCM не додає flake inputs, не створює home.nix і не запускає активацію.</p>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">⌂</span>
+            </div>
+          </section>
+
+          <section id="homeManagerStatus" class="home-manager-status" aria-live="polite">
+            <span class="effective-settings-icon" aria-hidden="true">⌂</span>
+            <div>
+              <strong id="homeManagerStatusTitle">Пошук Home Manager…</strong>
+              <small id="homeManagerStatusDetail">Лише читання локальних Nix-файлів.</small>
+            </div>
+            <span class="read-only-badge">read-only</span>
+          </section>
+
+          <section class="catalog-heading">
+            <div>
+              <p class="section-kicker">Виявлена конфігурація</p>
+              <h2>Інтеграції та користувачі</h2>
+            </div>
+            <p id="homeManagerUserCount" class="result-count"></p>
+          </section>
+          <section id="homeManagerUsers" class="home-manager-grid" aria-live="polite"></section>
+
+          <section class="catalog-heading">
+            <div>
+              <p class="section-kicker">Майбутній керований scope</p>
+              <h2>Окремий user-state</h2>
+            </div>
+          </section>
+          <section id="homeManagerState" class="home-manager-state"></section>
         </div>
       </main>
     </div>

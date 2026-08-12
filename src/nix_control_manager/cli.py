@@ -9,6 +9,7 @@ import sys
 from .errors import NcmError
 from .adoption import plan_adoption
 from .candidate import validate_adoption
+from .home_manager_inspector import inspect_home_manager
 from .model import ManagedState
 from .migration import load_migration_preview
 from .nix_generator import generate_module
@@ -48,6 +49,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detect.add_argument("--json", action="store_true", dest="as_json")
 
+    detect_home = subparsers.add_parser(
+        "detect-home-manager",
+        help="inspect Home Manager integration and user state without changing them",
+    )
+    detect_home.add_argument(
+        "--config-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_CONFIG_ROOT", "/etc/nixos")),
+    )
+    detect_home.add_argument(
+        "--standalone-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_HOME_MANAGER_ROOT", "~/.config/home-manager")),
+    )
+    detect_home.add_argument(
+        "--user-state", type=_path, default=_path("user-state.local.json")
+    )
+    detect_home.add_argument("--json", action="store_true", dest="as_json")
+
     migrate = subparsers.add_parser(
         "migrate-state", help="preview or write a normalized managed state"
     )
@@ -86,6 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = subparsers.add_parser("serve", help="start the local graphical interface")
     serve.add_argument("--state", type=_path, default=_path("state.local.json"))
+    serve.add_argument(
+        "--user-state", type=_path, default=_path("user-state.local.json")
+    )
     serve.add_argument("--output", type=_path, default=_path("managed.local.nix"))
     serve.add_argument(
         "--config-root",
@@ -94,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--flake-target")
+    serve.add_argument(
+        "--home-manager-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_HOME_MANAGER_ROOT", "~/.config/home-manager")),
+    )
     serve.add_argument("--validation-timeout", type=int, default=120)
     serve.add_argument(
         "--build-timeout",
@@ -172,6 +200,28 @@ def run(args: argparse.Namespace) -> int:
             )
         return 0
 
+    if args.command == "detect-home-manager":
+        inspection = inspect_home_manager(
+            args.config_root,
+            standalone_root=args.standalone_root,
+            user_state_path=args.user_state,
+        )
+        if args.as_json:
+            print(json.dumps(inspection.to_mapping(), ensure_ascii=False, indent=2))
+        else:
+            integrations = ", ".join(inspection.integrations) or "none"
+            print(f"Status:       {inspection.status}")
+            print(f"Integrations: {integrations}")
+            print(f"Users:        {len(inspection.users)}")
+            print(f"User state:   {inspection.user_state.status} at {inspection.user_state.path}")
+            for user in inspection.users:
+                print(f"  {user.name}: {user.integration} ({user.source})")
+            for warning in inspection.warnings:
+                print(f"Warning: {warning}")
+            print("Writes:       disabled")
+            print("Activation:   disabled")
+        return 0
+
     if args.command == "plan-adoption":
         plan = plan_adoption(args.config_root)
         if args.as_json:
@@ -224,8 +274,10 @@ def run(args: argparse.Namespace) -> int:
 
         serve(
             state_path=args.state,
+            user_state_path=args.user_state,
             output_path=args.output,
             config_root=args.config_root,
+            home_manager_root=args.home_manager_root,
             port=args.port,
             open_browser=args.open_browser,
             flake_target=args.flake_target,

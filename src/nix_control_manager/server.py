@@ -18,6 +18,7 @@ from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager
 from .errors import NcmError, ValidationError
+from .home_manager_inspector import HomeManagerInspection, inspect_home_manager
 from .model import ManagedState
 from .nix_generator import generate_module
 from .preview import build_preview
@@ -41,8 +42,10 @@ class NcmServer(ThreadingHTTPServer):
         handler: type[BaseHTTPRequestHandler],
         *,
         state_path: Path,
+        user_state_path: Path | None = None,
         output_path: Path,
         config_root: Path,
+        home_manager_root: Path | None = None,
         flake_target: str | None = None,
         validation_timeout: int = 120,
         helper_adapter: HelperUiAdapter | None = None,
@@ -51,14 +54,18 @@ class NcmServer(ThreadingHTTPServer):
         settings_inspector: Callable[
             ..., EffectiveSettingsInspection
         ] = inspect_effective_settings,
+        home_manager_inspector: Callable[..., HomeManagerInspection] = inspect_home_manager,
     ) -> None:
         super().__init__(server_address, handler)
         self.state_path = state_path
+        self.user_state_path = user_state_path or state_path.with_name("user-state.local.json")
         self.output_path = output_path
         self.config_root = config_root
+        self.home_manager_root = home_manager_root or Path("~/.config/home-manager")
         self.flake_target = flake_target
         self.validation_timeout = validation_timeout
         self.settings_inspector = settings_inspector
+        self.home_manager_inspector = home_manager_inspector
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
             config_root=config_root,
@@ -156,6 +163,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                         output_path=self.server.output_path,
                         flake_target=self.server.flake_target,
                         timeout=self.server.validation_timeout,
+                    ).to_mapping()
+                )
+            elif path == "/api/home-manager":
+                self._json(
+                    self.server.home_manager_inspector(
+                        self.server.config_root,
+                        standalone_root=self.server.home_manager_root,
+                        user_state_path=self.server.user_state_path,
                     ).to_mapping()
                 )
             elif path == "/api/preview":
@@ -348,8 +363,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 def serve(
     *,
     state_path: Path,
+    user_state_path: Path,
     output_path: Path,
     config_root: Path,
+    home_manager_root: Path,
     port: int,
     open_browser: bool,
     flake_target: str | None = None,
@@ -373,8 +390,10 @@ def serve(
         ("127.0.0.1", port),
         RequestHandler,
         state_path=state_path,
+        user_state_path=user_state_path,
         output_path=output_path,
         config_root=config_root,
+        home_manager_root=home_manager_root,
         flake_target=flake_target,
         validation_timeout=validation_timeout,
         helper_adapter=helper_adapter,
@@ -383,8 +402,10 @@ def serve(
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"Nix Control Manager is available at {url}")
     print(f"State:  {state_path}")
+    print(f"User state: {user_state_path} (read-only foundation)")
     print(f"Module: {output_path}")
     print(f"Target: {config_root} (read-only inspection)")
+    print(f"Home Manager: {home_manager_root} (read-only inspection)")
     print("Validation: disposable candidate only")
     print("Build preview: unprivileged Nix store build; permanent switch disabled")
     print(

@@ -140,6 +140,35 @@
             node --check ${./src/nix_control_manager/web/app.js}
             touch "$out"
           '';
+          home-manager-detection = pkgs.runCommand "nix-control-manager-home-manager-detection-check" {
+            nativeBuildInputs = [ self.packages.${system}.default pkgs.jq ];
+          } ''
+            mkdir -p fixture/etc-nixos fixture/home-manager
+            cat > fixture/etc-nixos/flake.nix <<'EOF'
+            { home-manager, ... }: {
+              modules = [ home-manager.nixosModules.home-manager ];
+              home-manager.users.fixture-user = ./home.nix;
+            }
+            EOF
+            cat > fixture/home-manager/home.nix <<'EOF'
+            { ... }: { home.username = "standalone-user"; }
+            EOF
+            ncm detect-home-manager \
+              --config-root fixture/etc-nixos \
+              --standalone-root fixture/home-manager \
+              --user-state fixture/user-state.json \
+              --json > inspection.json
+            jq -e '
+              .status == "detected"
+              and .writeEnabled == false
+              and .activationEnabled == false
+              and (.integrations | sort) == ["nixos-module", "standalone"]
+              and ([.users[].name] | sort) == ["fixture-user", "standalone-user"]
+              and .userState.status == "missing"
+            ' inspection.json
+            test ! -e fixture/user-state.json
+            cp inspection.json "$out"
+          '';
           nixos-module =
             assert liveTargetEvaluation.success == false;
             assert service.serviceConfig.ProtectSystem == "strict";
