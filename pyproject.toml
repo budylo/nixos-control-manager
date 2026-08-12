@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nix-control-manager"
+version = "0.1.0"
+description = "A safe, user-friendly control center for declarative NixOS configuration"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+ncm = "nix_control_manager.cli:main"
+ncm-helper = "nix_control_manager.helper_daemon:main"
+ncm-helper-client = "nix_control_manager.helper_client:main"
+ncm-test-recover = "nix_control_manager.activation_session:recovery_main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.package-data]
+nix_control_manager = ["web/*", "data/*.json"]

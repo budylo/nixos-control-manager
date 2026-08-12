@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Nix Control Manager</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">✣</div>
+          <div>
+            <strong>Nix Control</strong>
+            <span>Manager</span>
+          </div>
+        </div>
+
+        <nav aria-label="Розділи">
+          <p class="nav-label">Система</p>
+          <button class="nav-item active" type="button"><span>▦</span> Програми</button>
+          <button class="nav-item" type="button" disabled><span>◇</span> Налаштування <small>згодом</small></button>
+          <button class="nav-item" type="button" disabled><span>◎</span> Служби <small>згодом</small></button>
+          <button class="nav-item" type="button" disabled><span>⌁</span> Драйвери <small>згодом</small></button>
+          <p class="nav-label">Конфігурація</p>
+          <button class="nav-item" type="button" disabled><span>⌂</span> Home Manager <small>згодом</small></button>
+          <button class="nav-item" type="button" disabled><span>❄</span> Flakes <small>згодом</small></button>
+          <button class="nav-item" type="button" disabled><span>◴</span> Покоління <small>згодом</small></button>
+        </nav>
+
+        <div class="sidebar-statuses">
+          <div id="systemTarget" class="sidebar-note target-note">
+            <span class="note-dot muted"></span>
+            <div><strong>Виявлення системи…</strong><small>лише читання конфігурації</small></div>
+          </div>
+          <div id="helperTarget" class="sidebar-note helper-note">
+            <span class="note-dot muted"></span>
+            <div><strong>Системний helper</strong><small>пошук read-only socket…</small></div>
+          </div>
+          <div class="sidebar-note">
+            <span class="note-dot"></span>
+            <div><strong>Безпечний режим</strong><small>build лише в Nix store; постійний switch вимкнено</small></div>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Керований модуль NixOS</p>
+            <h1>Програми</h1>
+          </div>
+          <div class="top-actions">
+            <div id="changeCount" class="change-count">Немає змін</div>
+            <button id="previewButton" class="button secondary" type="button">Переглянути Nix</button>
+            <button id="saveButton" class="button primary" type="button" disabled>Зберегти модуль</button>
+          </div>
+        </header>
+
+        <section class="hero">
+          <div>
+            <span class="hero-tag">Декларативно та прозоро</span>
+            <h2>Виберіть потрібне.<br><em>Nix-код створиться сам.</em></h2>
+            <p>Кожна зміна потрапляє лише до модуля, яким керує Nix Control Manager. Перед збереженням можна переглянути точний diff.</p>
+          </div>
+          <div class="hero-orbit" aria-hidden="true">
+            <span class="orbit orbit-one"></span>
+            <span class="orbit orbit-two"></span>
+            <span class="snowflake">❄</span>
+          </div>
+        </section>
+
+        <section id="adoptionBanner" class="adoption-banner" hidden>
+          <div class="adoption-icon" aria-hidden="true">↻</div>
+          <div class="adoption-copy">
+            <span id="adoptionLabel">План конфігурації</span>
+            <strong id="adoptionTitle">Потрібен перегляд</strong>
+            <small id="adoptionDetail"></small>
+          </div>
+          <button id="adoptionPlanButton" class="button secondary" type="button">Переглянути план</button>
+        </section>
+
+        <section class="controls" aria-label="Пошук і фільтри">
+          <label class="search">
+            <span aria-hidden="true">⌕</span>
+            <input id="searchInput" type="search" placeholder="Пошук програм або пакетів…" autocomplete="off">
+            <kbd>/</kbd>
+          </label>
+          <div id="categoryFilters" class="filters"></div>
+        </section>
+
+        <section class="catalog-heading">
+          <div>
+            <p class="section-kicker">Каталог</p>
+            <h2 id="catalogTitle">Рекомендовані програми</h2>
+          </div>
+          <p id="resultCount" class="result-count"></p>
+        </section>
+
+        <section id="catalog" class="catalog" aria-live="polite"></section>
+        <div id="emptyState" class="empty-state" hidden>
+          <span>⌕</span>
+          <h3>Нічого не знайдено</h3>
+          <p>Спробуйте іншу назву або оберіть усі категорії.</p>
+        </div>
+      </main>
+    </div>
+
+    <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="previewDrawer" class="preview-drawer" aria-labelledby="previewTitle" aria-hidden="true" inert>
+      <header>
+        <div>
+          <p class="eyebrow">Попередній перегляд</p>
+          <h2 id="previewTitle">Керований модуль</h2>
+        </div>
+        <button id="closePreview" class="icon-button" type="button" aria-label="Закрити">×</button>
+      </header>
+      <div class="preview-tabs" role="tablist">
+        <button id="diffTab" class="preview-tab active" type="button" role="tab" aria-selected="true">Зміни</button>
+        <button id="sourceTab" class="preview-tab" type="button" role="tab" aria-selected="false">Повний Nix</button>
+      </div>
+      <div class="code-wrap">
+        <pre id="previewCode"><code>Завантаження…</code></pre>
+      </div>
+      <footer>
+        <div class="validation-state"><span>✓</span><div><strong>Стан перевірено</strong><small>Синтаксис Nix буде перевірено на етапі build</small></div></div>
+        <button id="drawerSaveButton" class="button primary" type="button">Зберегти модуль</button>
+      </footer>
+    </aside>
+
+    <div id="planBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="planDrawer" class="preview-drawer plan-drawer" aria-labelledby="planTitle" aria-hidden="true" inert>
+      <header>
+        <div>
+          <p class="eyebrow">Read-only adoption plan</p>
+          <h2 id="planTitle">Зміни конфігурації</h2>
+        </div>
+        <button id="closePlan" class="icon-button" type="button" aria-label="Закрити">×</button>
+      </header>
+      <div class="plan-summary">
+        <span id="planStatus" class="plan-status"></span>
+        <span id="planFileCount"></span>
+      </div>
+      <section id="candidateValidation" class="candidate-validation">
+        <span id="candidateValidationIcon" class="candidate-validation-icon">◇</span>
+        <div class="candidate-validation-copy">
+          <strong id="candidateValidationTitle">Кандидат ще не перевірено</strong>
+          <small id="candidateValidationDetail">Перевірка працює лише з тимчасовою копією та не виконує build або activation.</small>
+        </div>
+        <div class="candidate-validation-actions">
+          <div id="helperAvailability" class="helper-availability unavailable">
+            <span aria-hidden="true"></span>
+            <small>Системний helper ще не виявлено</small>
+          </div>
+          <button id="validateCandidateButton" class="button secondary compact" type="button">Локальна перевірка</button>
+          <button id="validateHelperButton" class="button helper-button compact" type="button" disabled>Через системний helper</button>
+        </div>
+        <pre id="candidateValidationLog" class="candidate-validation-log" hidden></pre>
+      </section>
+      <section id="buildPreview" class="candidate-validation build-preview">
+        <span id="buildPreviewIcon" class="candidate-validation-icon">▱</span>
+        <div class="candidate-validation-copy">
+          <strong id="buildPreviewTitle">Build-preview ще не запущено</strong>
+          <small id="buildPreviewDetail">Після перевірки можна зібрати кандидата непривілейовано. Запис дозволено лише до Nix store; test, switch та activation відсутні.</small>
+        </div>
+        <div class="candidate-validation-actions build-preview-actions">
+          <button id="startBuildPreviewButton" class="button secondary compact" type="button" disabled>Зібрати кандидата</button>
+          <button id="cancelBuildPreviewButton" class="button danger compact" type="button" hidden>Скасувати build</button>
+        </div>
+        <pre id="buildPreviewLog" class="candidate-validation-log build-preview-log" hidden></pre>
+      </section>
+      <section id="activationPreview" class="candidate-validation activation-preview">
+        <span id="activationPreviewIcon" class="candidate-validation-icon">≋</span>
+        <div class="candidate-validation-copy">
+          <strong id="activationPreviewTitle">Вплив активації ще не проаналізовано</strong>
+          <small id="activationPreviewDetail">Після build буде показано непривілейований diff closure. Повний dry-report потребує окремої авторизації системного helper-а.</small>
+        </div>
+        <div class="candidate-validation-actions">
+          <button id="runActivationPreviewButton" class="button helper-button compact" type="button" disabled>Системний dry-preview</button>
+          <button id="runTestActivationButton" class="button danger compact" type="button" disabled>Тимчасово виконати test</button>
+          <button id="recoverTestActivationButton" class="button secondary compact" type="button" hidden>Відновити зараз</button>
+        </div>
+        <pre id="closureDiffLog" class="candidate-validation-log activation-impact-log" hidden></pre>
+        <pre id="activationPreviewLog" class="candidate-validation-log activation-impact-log" hidden></pre>
+        <pre id="testActivationLog" class="candidate-validation-log activation-impact-log" hidden></pre>
+      </section>
+      <div class="code-wrap">
+        <pre><code id="planCode">Завантаження…</code></pre>
+      </div>
+      <footer>
+        <div class="validation-state"><span>○</span><div><strong>Постійний switch вимкнено</strong><small>Test доступний лише в окремому opt-in режимі з автоматичним відновленням</small></div></div>
+        <button id="closePlanFooter" class="button secondary" type="button">Готово</button>
+      </footer>
+    </aside>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>

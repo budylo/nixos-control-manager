@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Nix Control Manager</vendor>
+
+  <action id="org.nixos.nix-control-manager.apply-validated-plan">
+    <description>Apply a validated Nix Control Manager plan</description>
+    <message>Authentication is required to write the validated NixOS configuration files</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.recover-transaction">
+    <description>Recover an incomplete Nix Control Manager transaction</description>
+    <message>Authentication is required to recover the NixOS configuration transaction</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.preview-activation">
+    <description>Preview activation of an exact NixOS candidate</description>
+    <message>Authentication is required to inspect system-level activation impact</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.test-activation">
+    <description>Temporarily test an exact NixOS candidate</description>
+    <message>Authentication is required to test the candidate with automatic runtime recovery</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.recover-test-activation">
+    <description>Restore the runtime system after a NixOS test activation</description>
+    <message>Authentication is required to restore the previous runtime system now</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

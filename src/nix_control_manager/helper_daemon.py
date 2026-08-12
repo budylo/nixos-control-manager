@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+import json
+import os
+from pathlib import Path, PurePosixPath
+import signal
+import sys
+import threading
+from typing import Any, Mapping
+
+from .errors import TransactionError
+from .fixture_helper_backend import FixtureWorkflowHelperBackend
+from .helper_service import HelperDispatcher, HelperTarget
+from .helper_transport import UnixJsonHelperServer
+from .live_read_only_backend import LiveReadOnlyHelperBackend, RoutingHelperBackend
+from .polkit_authorizer import PolkitAuthorizer
+from .transaction import require_transaction_fixture
+
+
+class HelperConfigurationError(ValueError):
+    pass
+
+
+def _mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise HelperConfigurationError(f"{label} must be an object")
+    return value
+
+
+def _exact_keys(value: Mapping[str, Any], expected: set[str], label: str) -> None:
+    unknown = set(value) - expected
+    missing = expected - set(value)
+    if unknown or missing:
+        raise HelperConfigurationError(
+            f"{label} fields do not match the versioned schema"
+        )
+
+
+def _absolute_path(value: Any, label: str) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise HelperConfigurationError(f"{label} must be a non-empty path string")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise HelperConfigurationError(f"{label} must be absolute")
+    return path.resolve()
+
+
+def _allowed_paths(raw: Any) -> frozenset[str]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 16:
+        raise HelperConfigurationError(
+            "allowedRelativePaths must contain between 1 and 16 paths"
+        )
+    allowed: set[str] = set()
+    for value in raw:
+        if not isinstance(value, str):
+            raise HelperConfigurationError("Allowed paths must be strings")
+        relative = PurePosixPath(value)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or str(relative) != value
+        ):
+            raise HelperConfigurationError(f"Unsafe allowed path: {value}")
+        allowed.add(value)
+    if len(allowed) != len(raw):
+        raise HelperConfigurationError("Duplicate allowed paths are not permitted")
+    return frozenset(allowed)
+
+
+def _flake_target(value: Any) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise HelperConfigurationError("flakeTarget must be a string or null")
+    return value
+
+
+def _target_v1(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "configurationRoot",
+            "journalRoot",
+            "allowedRelativePaths",
+            "fixtureOnly",
+            "flakeTarget",
+        },
+        "target",
+    )
+    if mapping["fixtureOnly"] is not True:
+        raise HelperConfigurationError(
+            "This helper build accepts fixtureOnly targets exclusively"
+        )
+    allowed = _allowed_paths(mapping["allowedRelativePaths"])
+    config_root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    journal_root = _absolute_path(mapping["journalRoot"], "journalRoot")
+    if journal_root == config_root or journal_root.is_relative_to(config_root):
+        raise HelperConfigurationError(
+            "journalRoot must be outside configurationRoot"
+        )
+    flake_target = _flake_target(mapping["flakeTarget"])
+    try:
+        require_transaction_fixture(config_root)
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=config_root,
+            journal_root=journal_root,
+            allowed_relative_paths=frozenset(allowed),
+            fixture_only=True,
+            apply_enabled=True,
+            flake_target=flake_target,
+        )
+    except (TransactionError, TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
+def _target_v2(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "allowedRelativePaths",
+            "flakeTarget",
+        },
+        "target",
+    )
+    mode = mapping["mode"]
+    if mode not in {"fixture", "live-read-only"}:
+        raise HelperConfigurationError(
+            "target mode must be fixture or live-read-only"
+        )
+    config_root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    allowed = _allowed_paths(mapping["allowedRelativePaths"])
+    flake_target = _flake_target(mapping["flakeTarget"])
+    try:
+        if mode == "fixture":
+            journal_root = _absolute_path(mapping["journalRoot"], "journalRoot")
+            if journal_root == config_root or journal_root.is_relative_to(config_root):
+                raise HelperConfigurationError(
+                    "journalRoot must be outside configurationRoot"
+                )
+            require_transaction_fixture(config_root)
+            return HelperTarget(
+                target_id=mapping["targetId"],
+                configuration_root=config_root,
+                journal_root=journal_root,
+                allowed_relative_paths=allowed,
+                fixture_only=True,
+                apply_enabled=True,
+                flake_target=flake_target,
+            )
+        if mapping["journalRoot"] is not None:
+            raise HelperConfigurationError(
+                "live-read-only targets must set journalRoot to null"
+            )
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=config_root,
+            journal_root=None,
+            allowed_relative_paths=allowed,
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target=flake_target,
+        )
+    except (TransactionError, TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
+def _target_v3(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "testJournalRoot",
+            "testTimeoutSeconds",
+            "allowedRelativePaths",
+            "flakeTarget",
+        },
+        "target",
+    )
+    mode = mapping["mode"]
+    if mode not in {"fixture", "live-read-only", "live-test"}:
+        raise HelperConfigurationError(
+            "target mode must be fixture, live-read-only, or live-test"
+        )
+    config_root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    allowed = _allowed_paths(mapping["allowedRelativePaths"])
+    flake_target = _flake_target(mapping["flakeTarget"])
+    timeout = mapping["testTimeoutSeconds"]
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 30 <= timeout <= 1800:
+        raise HelperConfigurationError("testTimeoutSeconds must be between 30 and 1800")
+    try:
+        if mode == "fixture":
+            journal_root = _absolute_path(mapping["journalRoot"], "journalRoot")
+            if mapping["testJournalRoot"] is not None:
+                raise HelperConfigurationError("fixture targets cannot set testJournalRoot")
+            if journal_root == config_root or journal_root.is_relative_to(config_root):
+                raise HelperConfigurationError("journalRoot must be outside configurationRoot")
+            require_transaction_fixture(config_root)
+            return HelperTarget(
+                target_id=mapping["targetId"],
+                configuration_root=config_root,
+                journal_root=journal_root,
+                allowed_relative_paths=allowed,
+                fixture_only=True,
+                apply_enabled=True,
+                flake_target=flake_target,
+                test_timeout_seconds=timeout,
+            )
+        if mapping["journalRoot"] is not None:
+            raise HelperConfigurationError("live targets must set journalRoot to null")
+        test_enabled = mode == "live-test"
+        if test_enabled:
+            test_journal = _absolute_path(mapping["testJournalRoot"], "testJournalRoot")
+            if test_journal == config_root or test_journal.is_relative_to(config_root):
+                raise HelperConfigurationError(
+                    "testJournalRoot must be outside configurationRoot"
+                )
+        else:
+            if mapping["testJournalRoot"] is not None:
+                raise HelperConfigurationError(
+                    "live-read-only targets must set testJournalRoot to null"
+                )
+            test_journal = None
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=config_root,
+            journal_root=None,
+            allowed_relative_paths=allowed,
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target=flake_target,
+            test_activation_enabled=test_enabled,
+            test_journal_root=test_journal,
+            test_timeout_seconds=timeout,
+        )
+    except (TransactionError, TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
+@dataclass(frozen=True, slots=True)
+class HelperDaemonConfig:
+    socket_path: Path
+    polkit_executable: Path
+    validation_timeout: int
+    targets: tuple[HelperTarget, ...]
+
+    @classmethod
+    def load(cls, path: Path) -> "HelperDaemonConfig":
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise HelperConfigurationError(f"Could not read helper configuration: {error}") from error
+        mapping = _mapping(raw, "helper configuration")
+        _exact_keys(
+            mapping,
+            {
+                "schemaVersion",
+                "socketPath",
+                "polkitExecutable",
+                "validationTimeout",
+                "targets",
+            },
+            "helper configuration",
+        )
+        schema_version = mapping["schemaVersion"]
+        if schema_version not in {1, 2, 3}:
+            raise HelperConfigurationError(
+                "Only helper configuration schemaVersion 1, 2, and 3 are supported"
+            )
+        timeout = mapping["validationTimeout"]
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 900:
+            raise HelperConfigurationError("validationTimeout must be between 1 and 900")
+        targets_raw = mapping["targets"]
+        if not isinstance(targets_raw, list) or not 1 <= len(targets_raw) <= 8:
+            raise HelperConfigurationError("targets must contain between 1 and 8 entries")
+        target_loader = {
+            1: _target_v1,
+            2: _target_v2,
+            3: _target_v3,
+        }[schema_version]
+        targets = tuple(target_loader(item) for item in targets_raw)
+        if len({target.target_id for target in targets}) != len(targets):
+            raise HelperConfigurationError("Duplicate target identifiers are not permitted")
+        return cls(
+            socket_path=_absolute_path(mapping["socketPath"], "socketPath"),
+            polkit_executable=_absolute_path(
+                mapping["polkitExecutable"], "polkitExecutable"
+            ),
+            validation_timeout=timeout,
+            targets=targets,
+        )
+
+
+def run_daemon(config_path: Path) -> None:
+    if os.name != "posix" or not hasattr(os, "geteuid") or os.geteuid() != 0:
+        raise HelperConfigurationError("The system helper must run as root on Linux")
+    config = HelperDaemonConfig.load(config_path)
+    dispatcher = HelperDispatcher(
+        targets=config.targets,
+        authorizer=PolkitAuthorizer(config.polkit_executable),
+        backend=RoutingHelperBackend(
+            fixture_backend=FixtureWorkflowHelperBackend(
+                timeout=config.validation_timeout
+            ),
+            live_backend=LiveReadOnlyHelperBackend(
+                timeout=config.validation_timeout
+            ),
+        ),
+    )
+    stop = threading.Event()
+
+    def request_stop(signum: int, frame: object) -> None:
+        stop.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    with UnixJsonHelperServer.from_systemd(config.socket_path, dispatcher) as server:
+        server.serve_until(stop)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="ncm-helper")
+    parser.add_argument("--config", required=True, type=Path)
+    arguments = parser.parse_args(argv)
+    try:
+        run_daemon(arguments.config)
+    except (HelperConfigurationError, RuntimeError, ValueError) as error:
+        print(f"ncm-helper: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
