@@ -43,6 +43,9 @@ This repository currently contains the first vertical slice:
 - a read-only Home Manager connection plan for conservative NixOS-module and
   standalone imports, plus disposable-copy parse/evaluation. No apply endpoint
   exists and every validation result confirms that build and activation are off.
+- a fault-tested Home Manager transaction workflow that can write the validated
+  module/import set only inside an explicitly marked disposable fixture. It has
+  no CLI, HTTP, GUI, helper, live-write, build, or activation endpoint.
 
 ## Try it
 
@@ -173,13 +176,22 @@ but still has no configuration-write or permanent activation authority.
 
 The repository already contains the underlying transaction and recovery engine,
 but it deliberately has no CLI or HTTP apply endpoint and refuses live
-`/etc/nixos` paths. Its success, rollback, crash-recovery, concurrent-edit, and
-manual-recovery cases run only against temporary test fixtures.
+`/etc/nixos`, `/etc/home-manager`, and the default
+`~/.config/home-manager` path. Its success, rollback, crash-recovery,
+concurrent-edit, and manual-recovery cases run only against temporary test
+fixtures.
 
 The fixture workflow also performs a second NixOS evaluation after provisional
 commit. The journal reaches `committed` only when that installed snapshot needs
 no further generated changes and still matches every candidate digest;
 otherwise the transaction is rolled back.
+
+The same journal engine now has a separate Home Manager transaction kind. It
+requires a fingerprint-bound validation with a successful evaluation check,
+commits only the exact planned NixOS-module or standalone files, reconstructs a
+no-changes plan from the installed fixture, and evaluates it again before
+finalization. User-state persistence and every live Home Manager write remain
+unimplemented.
 
 The helper protocol is documented in
 [`docs/helper-protocol.md`](docs/helper-protocol.md). Its Unix transport and

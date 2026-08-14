@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import unified_diff
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,13 @@ class HomeManagerCandidateValidation:
     checks: tuple[HomeManagerValidationCheck, ...]
     warnings: tuple[str, ...]
     working_copy_removed: bool = True
+    flake_target: str | None = None
+    plan_fingerprint: str | None = None
+    candidate_digests: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def candidate_files(self) -> tuple[str, ...]:
+        return tuple(change.relative_path for change in self.plan.changes)
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -108,12 +116,44 @@ class HomeManagerCandidateValidation:
             "checks": [check.to_mapping() for check in self.checks],
             "warnings": list(self.warnings),
             "workingCopyRemoved": self.working_copy_removed,
+            "flakeTarget": self.flake_target,
+            "planFingerprint": self.plan_fingerprint,
+            "candidateDigests": dict(self.candidate_digests),
             "readOnly": True,
             "writeEnabled": False,
             "activationEnabled": False,
             "buildEnabled": False,
             "flakeInputMutationEnabled": False,
         }
+
+
+def home_manager_plan_identity(
+    plan: HomeManagerAdoptionPlan, flake_target: str | None
+) -> tuple[str, tuple[tuple[str, str], ...]]:
+    changes = [
+        {
+            "path": change.relative_path,
+            "action": change.action,
+            "previousSha256": change.previous_sha256,
+            "candidateSha256": change.candidate_sha256,
+        }
+        for change in plan.changes
+    ]
+    manifest = {
+        "root": str(plan.root),
+        "username": plan.username,
+        "integration": plan.integration,
+        "flakeTarget": flake_target,
+        "candidateState": plan.candidate_state,
+        "changes": changes,
+    }
+    encoded = json.dumps(
+        manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    digests = tuple(
+        (change.relative_path, change.candidate_sha256) for change in plan.changes
+    )
+    return hashlib.sha256(encoded).hexdigest(), digests
 
 
 def _relative(root: Path, path: Path) -> str:
@@ -123,7 +163,7 @@ def _relative(root: Path, path: Path) -> str:
 def _file_change(
     root: Path, path: Path, candidate: str, reason: str
 ) -> PlannedFileChange | None:
-    previous = path.read_text(encoding="utf-8") if path.is_file() else ""
+    previous = path.read_bytes().decode("utf-8") if path.is_file() else ""
     if previous == candidate:
         return None
     relative = _relative(root, path)
@@ -477,6 +517,14 @@ def validate_home_manager_adoption(
         warnings.append("nix-instantiate is unavailable; validation was not run.")
         return HomeManagerCandidateValidation("unavailable", plan, (), tuple(dict.fromkeys(warnings)))
 
+    effective_flake_target = (
+        flake_target or socket.gethostname()
+        if plan.integration == "nixos-module" and (plan.root / "flake.nix").is_file()
+        else flake_target
+    )
+    plan_fingerprint, candidate_digests = home_manager_plan_identity(
+        plan, effective_flake_target
+    )
     checks: list[HomeManagerValidationCheck] = []
     try:
         with tempfile.TemporaryDirectory(prefix="ncm-home-candidate-") as temporary:
@@ -504,10 +552,10 @@ def validate_home_manager_adoption(
                     if check.status != "passed":
                         break
 
-            if checks and all(check.status == "passed" for check in checks):
+            if all(check.status == "passed" for check in checks):
                 if plan.integration == "nixos-module":
                     if (candidate_root / "flake.nix").is_file():
-                        target = flake_target or socket.gethostname()
+                        target = effective_flake_target or ""
                         nix = which("nix")
                         if not nix or not _FLAKE_TARGET.fullmatch(target):
                             warnings.append(
@@ -518,6 +566,9 @@ def validate_home_manager_adoption(
                                 plan,
                                 tuple(checks),
                                 tuple(dict.fromkeys(warnings)),
+                                flake_target=effective_flake_target,
+                                plan_fingerprint=plan_fingerprint,
+                                candidate_digests=candidate_digests,
                             )
                         checks.append(
                             _run(
@@ -583,7 +634,13 @@ def validate_home_manager_adoption(
     except (OSError, ValidationError) as error:
         warnings.append(f"Disposable Home Manager copy could not be created safely: {error}")
         return HomeManagerCandidateValidation(
-            "blocked", plan, tuple(checks), tuple(dict.fromkeys(warnings))
+            "blocked",
+            plan,
+            tuple(checks),
+            tuple(dict.fromkeys(warnings)),
+            flake_target=effective_flake_target,
+            plan_fingerprint=plan_fingerprint,
+            candidate_digests=candidate_digests,
         )
 
     passed = bool(checks) and all(check.status == "passed" for check in checks)
@@ -592,4 +649,7 @@ def validate_home_manager_adoption(
         plan,
         tuple(checks),
         tuple(dict.fromkeys(warnings)),
+        flake_target=effective_flake_target,
+        plan_fingerprint=plan_fingerprint,
+        candidate_digests=candidate_digests,
     )

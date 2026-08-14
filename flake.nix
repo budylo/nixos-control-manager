@@ -141,7 +141,7 @@
             touch "$out"
           '';
           home-manager-detection = pkgs.runCommand "nix-control-manager-home-manager-detection-check" {
-            nativeBuildInputs = [ self.packages.${system}.default pkgs.jq pkgs.nix ];
+            nativeBuildInputs = [ self.packages.${system}.default pkgs.jq pkgs.nix pkgs.python3 ];
           } ''
             mkdir -p fixture/etc-nixos fixture/home-manager
             cat > fixture/etc-nixos/flake.nix <<'EOF'
@@ -228,13 +228,27 @@
             jq -e '
               .status == "passed"
               and .workingCopyRemoved == true
+              and (.planFingerprint | length) == 64
+              and (.candidateDigests | length) == 2
               and .writeEnabled == false
               and .buildEnabled == false
               and .activationEnabled == false
             ' validation.json
             test ! -e fixture/home-manager/ncm
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            PYTHONPATH=${./src} python3 ${./tests/integration_home_manager_fixture_real_nix.py} \
+              --root fixture/home-manager-transaction \
+              --journal fixture/home-manager-journals > transaction.json
+            jq -e '
+              .state == "committed"
+              and .fixtureOnly == true
+              and .liveWriteEnabled == false
+              and .activationEnabled == false
+              and .transaction.state == "committed"
+            ' transaction.json
             mkdir "$out"
-            cp inspection.json preview.json adoption.json validation.json "$out"/
+            cp inspection.json preview.json adoption.json validation.json transaction.json "$out"/
           '';
           nixos-module =
             assert liveTargetEvaluation.success == false;

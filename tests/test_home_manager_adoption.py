@@ -137,6 +137,8 @@ class HomeManagerAdoptionTests(unittest.TestCase):
         self.assertEqual(result.status, "passed")
         self.assertEqual(len(result.checks), 4)
         self.assertIn("Evaluate NixOS", result.checks[-1].name)
+        self.assertEqual(len(result.plan_fingerprint or ""), 64)
+        self.assertEqual(len(result.candidate_digests), 3)
         self.assertTrue(all(not path.exists() for path in working))
         self.assertEqual(configuration.read_text(encoding="utf-8"), original)
         self.assertFalse(result.to_mapping()["buildEnabled"])

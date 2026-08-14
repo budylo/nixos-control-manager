@@ -65,6 +65,13 @@ The generated module remains usable without Nix Control Manager.
     conservative `home.nix` module body. A validator materializes the plan only
     in a disposable copy, parses every changed Nix file, and evaluates an
     available NixOS or standalone-flake derivation without building it.
+15. **Home Manager fixture transaction workflow** reuses the shared atomic
+    replacement, journal, rollback, and crash-recovery engine under a distinct
+    transaction kind. It accepts only a marked disposable root, a matching
+    validation fingerprint and digest set, and a successful evaluation check.
+    After provisional commit it reconstructs a no-changes plan and evaluates
+    the installed fixture before finalization. No application endpoint exposes
+    this workflow.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -192,6 +199,14 @@ accepts only a simple multiline imports block, plus the standard standalone
 module body when a new imports block is required. All other shapes stop for
 manual review. Candidate paths are reconstructed beneath the selected root and
 checked for symlinks before temporary materialization.
+
+The internal fixture workflow does not weaken that public contract. Fixture
+writes require the exact transaction marker and reject `/etc/nixos`,
+`/etc/home-manager`, and the resolved default `~/.config/home-manager`. The
+journal is outside the configuration root and records
+`transactionKind = "home-manager-adoption"`; generic recovery can therefore
+restore an interrupted Home Manager provisional commit without a separate file
+mutation implementation.
 
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms

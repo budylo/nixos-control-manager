@@ -98,8 +98,11 @@
   an exactly detected user/integration and with all writes disabled
   (implemented);
 - read-only, integration-specific source adoption plans with exact diffs and
-  disposable parse/evaluation (implemented; apply remains disabled);
-- Home Manager managed module and user-state persistence (not implemented);
+  disposable parse/evaluation (implemented; live apply remains disabled);
+- atomic Home Manager module/import persistence with fingerprint, journal,
+  post-commit evaluation, rollback, and crash recovery (implemented only for
+  explicitly marked disposable fixtures; no CLI/HTTP/helper/live endpoint);
+- Home Manager user-state and live managed-module persistence (not implemented);
 - user/system package scope (separate catalog selection and preview implemented;
   persistence remains);
 - profiles and reusable presets.

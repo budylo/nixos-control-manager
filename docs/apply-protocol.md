@@ -2,9 +2,10 @@
 
 This document specifies the future privileged write boundary. The journaled
 transaction core and helper adapter are implemented only for explicitly marked
-disposable fixtures. They have no CLI or HTTP endpoint and reject `/etc/nixos`;
-the current application still cannot apply an adoption plan to the live system
-or activate a generation. The separate local build-preview API can build the
+disposable fixtures. They have no CLI or HTTP endpoint and reject the standard
+live NixOS and Home Manager roots; the current application still cannot apply
+an adoption plan to the live system or activate a generation. The separate
+local build-preview API can build the
 same candidate as an unprivileged user into `/nix/store`, with no output link;
 it grants no write or activation authority to this protocol.
 
@@ -13,7 +14,8 @@ it grants no write or activation authority to this protocol.
 The test-only engine currently provides:
 
 - an exact fixture marker and an additional hard refusal for paths shaped like
-  `/etc/nixos`;
+  `/etc/nixos`, `/etc/home-manager`, or the resolved default
+  `~/.config/home-manager`;
 - validation-fingerprint and candidate-digest matching;
 - source digest checks before preparation and again immediately before every
   atomic replacement;
@@ -22,7 +24,7 @@ The test-only engine currently provides:
 - same-filesystem staged files, verified backups, and an fsynced JSON journal;
 - reverse-order rollback after an injected partial failure;
 - journal recovery after an injected process crash;
-- a provisional `awaiting-verification` state followed by a second NixOS
+- a provisional `awaiting-verification` state followed by a second Nix
   evaluation of the installed fixture;
 - no low-level path that can mark a provisional write `committed`; only the
   verification-aware finalize operation performs that transition;
@@ -34,6 +36,14 @@ The test-only engine currently provides:
 
 This is infrastructure for the future helper, not permission to connect it to a
 live configuration.
+
+The same core now supports a distinct `home-manager-adoption` journal kind for
+both NixOS-module and standalone plans. It requires a successful full evaluation
+in addition to parse checks, binds the exact root, user, integration, candidate
+state, target and file digests into the fingerprint, and performs a second
+evaluation after provisional commit. This path remains internal and
+fixture-only; Home Manager user-state persistence is not part of the
+transaction yet.
 
 The fixture helper receives a short-lived UID-bound validation receipt through
 the versioned Unix-socket protocol. It reconstructs the adoption plan from its

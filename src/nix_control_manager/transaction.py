@@ -13,6 +13,11 @@ from typing import Any
 from .adoption import AdoptionPlan, PlannedFileChange
 from .candidate import CandidateValidation, plan_identity
 from .errors import TransactionError
+from .home_manager_adoption import (
+    HomeManagerAdoptionPlan,
+    HomeManagerCandidateValidation,
+    home_manager_plan_identity,
+)
 
 
 FIXTURE_MARKER = ".ncm-transaction-fixture"
@@ -58,8 +63,18 @@ def initialize_transaction_fixture(root: Path) -> None:
 
 
 def _refuse_live_root(root: Path) -> None:
-    if root.as_posix() == "/etc/nixos" or str(root).replace("\\", "/").endswith("/etc/nixos"):
+    normalized = str(root).replace("\\", "/")
+    if root.as_posix() == "/etc/nixos" or normalized.endswith("/etc/nixos"):
         raise TransactionError("The fixture transaction engine refuses /etc/nixos")
+    default_home_manager = Path("~/.config/home-manager").expanduser().resolve()
+    if (
+        root == default_home_manager
+        or root.as_posix() == "/etc/home-manager"
+        or normalized.endswith("/etc/home-manager")
+    ):
+        raise TransactionError(
+            "The fixture transaction engine refuses live Home Manager roots"
+        )
 
 
 def _require_fixture_root(root: Path) -> Path:
@@ -209,12 +224,43 @@ def _validate_plan(
     return fingerprint
 
 
-def _verification_summary(validation: CandidateValidation | None) -> dict[str, Any] | None:
+def _validate_home_manager_plan(
+    plan: HomeManagerAdoptionPlan,
+    validation: HomeManagerCandidateValidation,
+    root: Path,
+) -> str:
+    if plan.status != "ready" or not plan.changes:
+        raise TransactionError("A non-empty Home Manager adoption plan is required")
+    if (
+        validation.status != "passed"
+        or not validation.working_copy_removed
+        or not validation.plan_fingerprint
+    ):
+        raise TransactionError("A successful Home Manager candidate validation is required")
+    if not any(
+        check.status == "passed" and check.name.startswith("Evaluate")
+        for check in validation.checks
+    ):
+        raise TransactionError("A successful Home Manager evaluation check is required")
+    fingerprint, candidate_digests = home_manager_plan_identity(
+        plan, validation.flake_target
+    )
+    if fingerprint != validation.plan_fingerprint:
+        raise TransactionError("The validated Home Manager fingerprint no longer matches")
+    if candidate_digests != validation.candidate_digests:
+        raise TransactionError("The validated Home Manager candidate digests no longer match")
+    if plan.root != root:
+        raise TransactionError("The Home Manager plan targets a different fixture root")
+    return fingerprint
+
+
+def _verification_summary(
+    validation: CandidateValidation | HomeManagerCandidateValidation | None,
+) -> dict[str, Any] | None:
     if validation is None:
         return None
-    return {
+    summary = {
         "status": validation.status,
-        "configurationMode": validation.configuration_mode,
         "flakeTarget": validation.flake_target,
         "workingCopyRemoved": validation.working_copy_removed,
         "checks": [
@@ -227,6 +273,13 @@ def _verification_summary(validation: CandidateValidation | None) -> dict[str, A
             for check in validation.checks
         ],
     }
+    configuration_mode = getattr(validation, "configuration_mode", None)
+    if configuration_mode is not None:
+        summary["configurationMode"] = configuration_mode
+    if isinstance(validation, HomeManagerCandidateValidation):
+        summary["integration"] = validation.plan.integration
+        summary["username"] = validation.plan.username
+    return summary
 
 
 def _transaction_paths(
@@ -357,28 +410,27 @@ def _restore_from_manifest(
     _cleanup_stages_and_directories(root, manifest)
 
 
-def apply_plan_in_fixture(
-    plan: AdoptionPlan,
-    validation: CandidateValidation,
+def _apply_validated_changes_in_fixture(
     *,
+    root: Path,
+    changes: tuple[PlannedFileChange, ...],
+    fingerprint: str,
     journal_root: Path,
+    transaction_kind: str,
     fault_after_commits: int | None = None,
     simulate_crash: bool = False,
 ) -> TransactionResult:
-    """Apply only to a marked fixture; no CLI or server endpoint exposes this function."""
-    root = _require_fixture_root(plan.inspection.config_root)
     journal_input = journal_root.expanduser()
     if journal_input.is_symlink():
         raise TransactionError("The transaction journal root cannot be a symbolic link")
     journal = journal_input.resolve()
     if journal == root or journal.is_relative_to(root):
         raise TransactionError("The transaction journal must be outside the configuration root")
-    fingerprint = _validate_plan(plan, validation, root)
     if fault_after_commits is not None and fault_after_commits < 1:
         raise TransactionError("fault_after_commits must be at least one")
 
     verified: list[tuple[PlannedFileChange, Path, Path]] = []
-    for change in plan.changes:
+    for change in changes:
         relative, target = _verify_change_precondition(root, change)
         verified.append((change, relative, target))
 
@@ -389,6 +441,7 @@ def apply_plan_in_fixture(
         "schemaVersion": 1,
         "transactionId": transaction_id,
         "configurationRoot": str(root),
+        "transactionKind": transaction_kind,
         "planFingerprint": fingerprint,
         "state": "preparing",
         "createdDirectories": [],
@@ -460,7 +513,7 @@ def apply_plan_in_fixture(
             transaction_id=transaction_id,
             state="awaiting-verification",
             journal_path=transaction_dir / _MANIFEST_NAME,
-            changed_files=tuple(change.relative_path for change in plan.changes),
+            changed_files=tuple(change.relative_path for change in changes),
         )
     except SimulatedTransactionCrash:
         raise
@@ -484,12 +537,57 @@ def apply_plan_in_fixture(
         _release_lock(lock_descriptor, lock_path)
 
 
-def finalize_fixture_transaction(
+def apply_plan_in_fixture(
+    plan: AdoptionPlan,
+    validation: CandidateValidation,
+    *,
+    journal_root: Path,
+    fault_after_commits: int | None = None,
+    simulate_crash: bool = False,
+) -> TransactionResult:
+    """Apply a NixOS adoption plan only to a marked disposable fixture."""
+    root = _require_fixture_root(plan.inspection.config_root)
+    fingerprint = _validate_plan(plan, validation, root)
+    return _apply_validated_changes_in_fixture(
+        root=root,
+        changes=plan.changes,
+        fingerprint=fingerprint,
+        journal_root=journal_root,
+        transaction_kind="nixos-adoption",
+        fault_after_commits=fault_after_commits,
+        simulate_crash=simulate_crash,
+    )
+
+
+def apply_home_manager_plan_in_fixture(
+    plan: HomeManagerAdoptionPlan,
+    validation: HomeManagerCandidateValidation,
+    *,
+    journal_root: Path,
+    fault_after_commits: int | None = None,
+    simulate_crash: bool = False,
+) -> TransactionResult:
+    """Apply a Home Manager plan only to a marked disposable fixture."""
+    root = _require_fixture_root(plan.root)
+    fingerprint = _validate_home_manager_plan(plan, validation, root)
+    return _apply_validated_changes_in_fixture(
+        root=root,
+        changes=plan.changes,
+        fingerprint=fingerprint,
+        journal_root=journal_root,
+        transaction_kind="home-manager-adoption",
+        fault_after_commits=fault_after_commits,
+        simulate_crash=simulate_crash,
+    )
+
+
+def _finalize_validated_fixture_transaction(
     root: Path,
     *,
     journal_root: Path,
     transaction_id: str,
-    verification: CandidateValidation,
+    verification: CandidateValidation | HomeManagerCandidateValidation,
+    transaction_kind: str,
 ) -> TransactionResult:
     fixture_root = _require_fixture_root(root)
     journal, transaction_dir = _transaction_paths(
@@ -501,6 +599,8 @@ def finalize_fixture_transaction(
         manifest = _load_manifest(manifest_path)
         if manifest.get("configurationRoot") != str(fixture_root):
             raise TransactionError("Transaction journal targets a different root")
+        if manifest.get("transactionKind", "nixos-adoption") != transaction_kind:
+            raise TransactionError("Transaction journal belongs to a different workflow")
         if manifest.get("state") != "awaiting-verification":
             raise TransactionError(
                 f"Transaction cannot be finalized from state {manifest.get('state')}"
@@ -515,7 +615,7 @@ def finalize_fixture_transaction(
             check.status == "passed" and check.name.startswith("Evaluate")
             for check in verification.checks
         ):
-            raise TransactionError("The post-commit NixOS evaluation check is missing")
+            raise TransactionError("The post-commit evaluation check is missing")
         _verify_installed_candidates(fixture_root, manifest)
         manifest["postVerification"] = _verification_summary(verification)
         manifest["state"] = "committed"
@@ -530,13 +630,45 @@ def finalize_fixture_transaction(
         _release_lock(lock_descriptor, lock_path)
 
 
+def finalize_fixture_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    verification: CandidateValidation,
+) -> TransactionResult:
+    return _finalize_validated_fixture_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        verification=verification,
+        transaction_kind="nixos-adoption",
+    )
+
+
+def finalize_home_manager_fixture_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    verification: HomeManagerCandidateValidation,
+) -> TransactionResult:
+    return _finalize_validated_fixture_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        verification=verification,
+        transaction_kind="home-manager-adoption",
+    )
+
+
 def rollback_fixture_transaction(
     root: Path,
     *,
     journal_root: Path,
     transaction_id: str,
     reason: str,
-    verification: CandidateValidation | None = None,
+    verification: CandidateValidation | HomeManagerCandidateValidation | None = None,
 ) -> TransactionResult:
     fixture_root = _require_fixture_root(root)
     journal, transaction_dir = _transaction_paths(
