@@ -9,6 +9,11 @@ import sys
 from .errors import NcmError
 from .adoption import plan_adoption
 from .candidate import validate_adoption
+from .home_manager_generator import (
+    build_home_preview,
+    candidate_user_state,
+    user_module_path,
+)
 from .home_manager_inspector import inspect_home_manager
 from .model import ManagedState
 from .migration import load_migration_preview
@@ -16,6 +21,7 @@ from .nix_generator import generate_module
 from .preview import build_preview
 from .storage import load_state, save_generated_module, save_state
 from .system_inspector import inspect_system
+from .user_model import USER_INTEGRATIONS, UserManagedState
 
 
 def _path(value: str) -> Path:
@@ -67,6 +73,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--user-state", type=_path, default=_path("user-state.local.json")
     )
     detect_home.add_argument("--json", action="store_true", dest="as_json")
+
+    preview_home = subparsers.add_parser(
+        "preview-home-manager",
+        help="render one Home Manager user module without writing or activating it",
+    )
+    preview_home.add_argument("--user", required=True)
+    preview_home.add_argument(
+        "--integration", required=True, choices=sorted(USER_INTEGRATIONS)
+    )
+    preview_home.add_argument(
+        "--package", action="append", default=[], dest="packages"
+    )
+    preview_home.add_argument(
+        "--output",
+        type=_path,
+        help="future managed module path used only as the diff label and read source",
+    )
+    preview_home.add_argument("--json", action="store_true", dest="as_json")
 
     migrate = subparsers.add_parser(
         "migrate-state", help="preview or write a normalized managed state"
@@ -220,6 +244,26 @@ def run(args: argparse.Namespace) -> int:
                 print(f"Warning: {warning}")
             print("Writes:       disabled")
             print("Activation:   disabled")
+        return 0
+
+    if args.command == "preview-home-manager":
+        state = candidate_user_state(
+            UserManagedState.empty(),
+            username=args.user,
+            integration=args.integration,
+            packages=args.packages,
+        )
+        output = args.output or user_module_path(
+            _path("user-state.local.json"), args.user
+        )
+        preview = build_home_preview(state, username=args.user, output_path=output)
+        if args.as_json:
+            print(json.dumps(preview, ensure_ascii=False, indent=2))
+        else:
+            print(preview["diff"] or "No changes.")
+            print("Writes:       disabled")
+            print("Activation:   disabled")
+            print("Flake inputs: unchanged")
         return 0
 
     if args.command == "plan-adoption":

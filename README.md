@@ -37,6 +37,9 @@ This repository currently contains the first vertical slice:
 - a read-only Home Manager inspector for both NixOS-module and standalone
   configurations, with conservative user discovery and a separate versioned
   user-state boundary. Home Manager writes and activation remain disabled.
+- a preview-only Home Manager package selector that renders a deterministic
+  per-user module and unified diff while preserving existing user options. It
+  has no save, source-adoption, flake-input, build, or activation operation.
 
 ## Try it
 
@@ -80,6 +83,7 @@ ncm preview --state state.json --output managed.nix
 ncm generate --state state.json --output managed.nix
 ncm detect --config-root /etc/nixos --json
 ncm detect-home-manager --config-root /etc/nixos --json
+ncm preview-home-manager --user alice --integration nixos-module --package firefox --json
 ncm migrate-state --state /etc/nixos/ncm/state.json
 ncm plan-adoption --config-root /etc/nixos
 ncm validate-adoption --config-root /etc/nixos
@@ -253,17 +257,24 @@ cannot evaluate require manual review before NCM can start managing them.
 
 ## Home Manager foundation
 
-The Home Manager page is an inventory view for the next user-configuration
-milestone. It reports whether the existing configuration uses the NixOS module,
-standalone mode, or both, and lists only users that can be identified safely
-from static source. It also reports whether a separate version-1 user-state is
-missing, readable, or invalid.
+The Home Manager page reports whether the existing configuration uses the
+NixOS module, standalone mode, or both, and lists only users that can be
+identified safely from static source. It also reports whether a separate
+version-1 user-state is missing, readable, or invalid.
+
+For an exactly detected user/integration pair, the graphical catalog can now
+project package choices in memory and request a token-protected preview. The
+server preserves unrelated profiles and existing options, validates the entire
+candidate user-state, then renders an integration-agnostic module containing
+`home.packages`. Its fixed future name is `managed-home-<user>.nix`, but the
+preview only reads that path to build a diff and never creates or changes it.
 
 System and user ownership remain intentionally separate. System packages and
 NixOS options continue to live in `state.local.json` and `managed.local.nix`;
 future per-user Home Manager packages and options belong to
-`user-state.local.json` and a distinct generated user module. This phase has no
-user-state save endpoint, source-writing operation, Home Manager activation, or
+`user-state.local.json` and a distinct generated user module. This phase can
+render that state and module as candidates, but still has no user-state save
+endpoint, source-writing operation, Home Manager build or activation, or
 flake-input mutation.
 
 See [docs/architecture.md](docs/architecture.md) and

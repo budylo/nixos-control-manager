@@ -94,8 +94,12 @@
   including statically identifiable users and source files (implemented);
 - separate versioned user-state model with explicit integration per user and
   no write or activation path (implemented foundation);
-- Home Manager source adoption and managed module generation (not implemented);
-- user/system package scope (ownership boundary implemented; editing remains);
+- deterministic per-user Home Manager module and diff preview, restricted to
+  an exactly detected user/integration and with all writes disabled
+  (implemented);
+- Home Manager source adoption and managed module persistence (not implemented);
+- user/system package scope (separate catalog selection and preview implemented;
+  persistence remains);
 - profiles and reusable presets.
 
 ## Later

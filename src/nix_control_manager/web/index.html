@@ -196,6 +196,31 @@
             </div>
           </section>
           <section id="homeManagerState" class="home-manager-state"></section>
+
+          <section class="catalog-heading home-package-heading">
+            <div>
+              <p class="section-kicker">home.packages · preview-only</p>
+              <h2>Пакунки користувача</h2>
+            </div>
+            <p id="homeManagerPackageCount" class="result-count"></p>
+          </section>
+          <section class="home-package-toolbar">
+            <label class="search">
+              <span aria-hidden="true">⌕</span>
+              <input id="homeManagerPackageSearch" type="search" placeholder="Пошук пакунків для Home Manager…" autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <div class="home-package-preview-action">
+              <small id="homeManagerSelectedUser">Спочатку виберіть користувача</small>
+              <button id="homeManagerPreviewButton" class="button secondary" type="button" disabled>Переглянути user-модуль</button>
+            </div>
+          </section>
+          <section id="homeManagerCatalog" class="catalog home-manager-catalog" aria-live="polite"></section>
+          <div id="homeManagerCatalogEmpty" class="empty-state" hidden>
+            <span>⌕</span>
+            <h3>Пакунків не знайдено</h3>
+            <p>Виберіть виявленого користувача або змініть пошуковий запит.</p>
+          </div>
         </div>
       </main>
     </div>
@@ -219,6 +244,28 @@
       <footer>
         <div class="validation-state"><span>✓</span><div><strong>Стан перевірено</strong><small>Синтаксис Nix буде перевірено на етапі build</small></div></div>
         <button id="drawerSaveButton" class="button primary" type="button">Зберегти модуль</button>
+      </footer>
+    </aside>
+
+    <div id="homePreviewBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="homePreviewDrawer" class="preview-drawer" aria-labelledby="homePreviewTitle" aria-hidden="true" inert>
+      <header>
+        <div>
+          <p class="eyebrow">Home Manager · preview-only</p>
+          <h2 id="homePreviewTitle">Керований user-модуль</h2>
+        </div>
+        <button id="closeHomePreview" class="icon-button" type="button" aria-label="Закрити">×</button>
+      </header>
+      <div class="preview-tabs" role="tablist">
+        <button id="homePreviewDiffTab" class="preview-tab active" type="button" role="tab" aria-selected="true">Зміни</button>
+        <button id="homePreviewSourceTab" class="preview-tab" type="button" role="tab" aria-selected="false">Повний Nix</button>
+      </div>
+      <div class="code-wrap">
+        <pre id="homePreviewCode"><code>Оберіть користувача та пакунки…</code></pre>
+      </div>
+      <footer>
+        <div class="validation-state"><span>◇</span><div><strong>Лише кандидат</strong><small>Запис, flake inputs і Home Manager activation вимкнені</small></div></div>
+        <button id="closeHomePreviewFooter" class="button secondary" type="button">Готово</button>
       </footer>
     </aside>
 

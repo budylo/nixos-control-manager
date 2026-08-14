@@ -18,6 +18,11 @@ from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager
 from .errors import NcmError, ValidationError
+from .home_manager_generator import (
+    build_home_preview,
+    candidate_user_state,
+    user_module_path,
+)
 from .home_manager_inspector import HomeManagerInspection, inspect_home_manager
 from .model import ManagedState
 from .nix_generator import generate_module
@@ -228,6 +233,56 @@ class RequestHandler(BaseHTTPRequestHandler):
                 raise ValidationError("POST API endpoints do not accept query parameters")
             if path == "/api/build-preview":
                 self._json(self.server.build_manager.start(), HTTPStatus.ACCEPTED)
+                return
+            if path == "/api/home-manager/preview":
+                payload = self._read_json_object()
+                if set(payload) != {"username", "integration", "packages"}:
+                    raise ValidationError(
+                        "Home Manager preview requires username, integration, and packages"
+                    )
+                username = payload["username"]
+                integration = payload["integration"]
+                packages = payload["packages"]
+                if not isinstance(username, str) or not isinstance(integration, str):
+                    raise ValidationError("Home Manager user and integration must be strings")
+                if not isinstance(packages, list):
+                    raise ValidationError("Home Manager packages must be a JSON array")
+                inspection = self.server.home_manager_inspector(
+                    self.server.config_root,
+                    standalone_root=self.server.home_manager_root,
+                    user_state_path=self.server.user_state_path,
+                )
+                if not any(
+                    user.name == username and user.integration == integration
+                    for user in inspection.users
+                ):
+                    raise ValidationError(
+                        "Home Manager preview is limited to an exactly detected user integration"
+                    )
+                if inspection.user_state.status == "invalid":
+                    raise ValidationError(
+                        "Invalid user-state must be repaired before creating a preview"
+                    )
+                previous = inspection.user_state.state.users.get(username)
+                if previous is not None and previous.integration != integration:
+                    raise ValidationError(
+                        "Detected integration conflicts with the existing user-state profile"
+                    )
+                state = candidate_user_state(
+                    inspection.user_state.state,
+                    username=username,
+                    integration=integration,
+                    packages=packages,
+                )
+                self._json(
+                    build_home_preview(
+                        state,
+                        username=username,
+                        output_path=user_module_path(
+                            self.server.user_state_path, username
+                        ),
+                    )
+                )
                 return
             if cancel_match:
                 self._json(self.server.build_manager.cancel(cancel_match.group(1)))

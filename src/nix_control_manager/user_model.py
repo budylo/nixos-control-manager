@@ -10,9 +10,16 @@ from .model import validate_attribute_path
 
 USER_STATE_SCHEMA_VERSION = 1
 USER_INTEGRATIONS = frozenset({"nixos-module", "standalone"})
-_USER_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+MAX_USER_PACKAGES = 500
+_USER_NAME = re.compile(r"^[a-z_][a-z0-9_.@-]{0,63}$")
 _STATE_FIELDS = {"schemaVersion", "users"}
 _PROFILE_FIELDS = {"integration", "packages", "options"}
+
+
+def validate_user_name(value: str) -> str:
+    if not isinstance(value, str) or not _USER_NAME.fullmatch(value):
+        raise ValidationError(f"Invalid managed user name: {value!r}")
+    return value
 
 
 def _json_value(value: Any, *, path: str) -> Any:
@@ -62,6 +69,11 @@ class UserProfileState:
         package_values = raw.get("packages", [])
         if not isinstance(package_values, list):
             raise ValidationError(f"User {username!r} packages must be a JSON array")
+        if len(package_values) > MAX_USER_PACKAGES:
+            raise ValidationError(
+                f"User {username!r} packages cannot contain more than "
+                f"{MAX_USER_PACKAGES} items"
+            )
         packages = tuple(
             sorted(
                 {
@@ -73,12 +85,18 @@ class UserProfileState:
         option_values = raw.get("options", {})
         if not isinstance(option_values, Mapping):
             raise ValidationError(f"User {username!r} options must be a JSON object")
-        options = {
-            validate_attribute_path(path, label=f"User {username!r} option"): _json_value(
-                value, path=f"User {username!r} option {path}"
+        options: dict[str, Any] = {}
+        for path, value in sorted(option_values.items()):
+            normalized_path = validate_attribute_path(
+                path, label=f"User {username!r} option"
             )
-            for path, value in sorted(option_values.items())
-        }
+            if normalized_path == "home.packages":
+                raise ValidationError(
+                    f"User {username!r} option home.packages must use the packages field"
+                )
+            options[normalized_path] = _json_value(
+                value, path=f"User {username!r} option {normalized_path}"
+            )
         return cls(integration=integration, packages=packages, options=options)
 
     def to_mapping(self) -> dict[str, Any]:
@@ -119,8 +137,7 @@ class UserManagedState:
             raise ValidationError("User state users must be a JSON object")
         users: dict[str, UserProfileState] = {}
         for username, profile in sorted(user_values.items()):
-            if not isinstance(username, str) or not _USER_NAME.fullmatch(username):
-                raise ValidationError(f"Invalid managed user name: {username!r}")
+            validate_user_name(username)
             users[username] = UserProfileState.from_mapping(username, profile)
         return cls(schema_version=version, users=users)
 

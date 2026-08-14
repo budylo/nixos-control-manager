@@ -79,6 +79,20 @@ const ui = {
   homeManagerUserCount: document.querySelector("#homeManagerUserCount"),
   homeManagerUsers: document.querySelector("#homeManagerUsers"),
   homeManagerState: document.querySelector("#homeManagerState"),
+  homeManagerPackageSearch: document.querySelector("#homeManagerPackageSearch"),
+  homeManagerPackageCount: document.querySelector("#homeManagerPackageCount"),
+  homeManagerSelectedUser: document.querySelector("#homeManagerSelectedUser"),
+  homeManagerPreviewButton: document.querySelector("#homeManagerPreviewButton"),
+  homeManagerCatalog: document.querySelector("#homeManagerCatalog"),
+  homeManagerCatalogEmpty: document.querySelector("#homeManagerCatalogEmpty"),
+  homePreviewBackdrop: document.querySelector("#homePreviewBackdrop"),
+  homePreviewDrawer: document.querySelector("#homePreviewDrawer"),
+  homePreviewTitle: document.querySelector("#homePreviewTitle"),
+  closeHomePreview: document.querySelector("#closeHomePreview"),
+  closeHomePreviewFooter: document.querySelector("#closeHomePreviewFooter"),
+  homePreviewDiffTab: document.querySelector("#homePreviewDiffTab"),
+  homePreviewSourceTab: document.querySelector("#homePreviewSourceTab"),
+  homePreviewCode: document.querySelector("#homePreviewCode code"),
 };
 
 const model = {
@@ -113,6 +127,10 @@ const model = {
     userState: { status: "missing", profileCount: 0, state: { schemaVersion: 1, users: {} } },
     warnings: [],
   },
+  homeUserKey: null,
+  homePackageSelections: new Map(),
+  homePreview: { diff: "", generated: "" },
+  homePreviewMode: "diff",
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -726,6 +744,104 @@ function renderSettings() {
     : "";
 }
 
+function homeUserKey(user) {
+  return `${user.integration}\u0000${user.name}`;
+}
+
+function selectedHomeUser() {
+  return model.homeManager.users.find((user) => homeUserKey(user) === model.homeUserKey) || null;
+}
+
+function initializeHomePackageSelections() {
+  const profiles = model.homeManager.userState?.state?.users || {};
+  for (const user of model.homeManager.users) {
+    const key = homeUserKey(user);
+    const profile = profiles[user.name];
+    const packages = profile?.integration === user.integration ? profile.packages : [];
+    model.homePackageSelections.set(key, new Set(packages || []));
+  }
+  if (!selectedHomeUser() && model.homeManager.users.length) {
+    model.homeUserKey = homeUserKey(model.homeManager.users[0]);
+  }
+}
+
+function homePackageCard(app, selectedPackages, disabled) {
+  const card = document.createElement("article");
+  const selected = selectedPackages.has(app.attribute);
+  card.className = `app-card home-package-card${selected ? " selected" : ""}`;
+
+  const symbol = document.createElement("div");
+  symbol.className = "app-symbol";
+  symbol.textContent = app.symbol;
+  const copy = document.createElement("div");
+  copy.className = "app-copy";
+  const name = document.createElement("h3");
+  name.textContent = app.name;
+  const packageName = document.createElement("span");
+  packageName.className = "package-name";
+  packageName.textContent = `home.packages · pkgs.${app.attribute}`;
+  const description = document.createElement("p");
+  description.textContent = app.description;
+  copy.append(name, packageName, description);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "app-toggle";
+  toggle.textContent = "✓";
+  toggle.disabled = disabled;
+  toggle.setAttribute("aria-label", `${selected ? "Вилучити" : "Додати"} ${app.name} для користувача`);
+  toggle.setAttribute("aria-pressed", String(selected));
+  toggle.addEventListener("click", () => {
+    if (selectedPackages.has(app.attribute)) selectedPackages.delete(app.attribute);
+    else selectedPackages.add(app.attribute);
+    renderHomeManagerPackages();
+  });
+  const category = document.createElement("div");
+  category.className = "category-badge";
+  category.textContent = app.category;
+  card.append(symbol, copy, toggle, category);
+  return card;
+}
+
+function renderHomeManagerPackages() {
+  const user = selectedHomeUser();
+  const invalidState = model.homeManager.userState?.status === "invalid";
+  const selectedPackages = user
+    ? model.homePackageSelections.get(homeUserKey(user)) || new Set()
+    : new Set();
+  const query = ui.homeManagerPackageSearch.value.trim().toLocaleLowerCase("uk");
+  const knownAttributes = new Set(model.catalog.map((app) => app.attribute));
+  const unknown = [...selectedPackages]
+    .filter((attribute) => !knownAttributes.has(attribute))
+    .map((attribute) => ({
+      attribute,
+      name: attribute,
+      description: "Пакунок із наявного user-state; він буде збережений у кандидатові.",
+      category: "Інші",
+      symbol: attribute.slice(0, 1).toLocaleUpperCase("uk"),
+    }));
+  const available = [...model.catalog, ...unknown];
+  const visible = user
+    ? available.filter((app) => {
+      const text = `${app.name} ${app.attribute} ${app.description}`.toLocaleLowerCase("uk");
+      return !query || text.includes(query);
+    })
+    : [];
+  ui.homeManagerCatalog.replaceChildren(
+    ...visible.map((app) => homePackageCard(app, selectedPackages, invalidState)),
+  );
+  ui.homeManagerCatalogEmpty.hidden = visible.length > 0;
+  ui.homeManagerPackageCount.textContent = user ? `${visible.length} із ${available.length}` : "";
+  ui.homeManagerPreviewButton.disabled = !user || invalidState;
+  ui.homeManagerPreviewButton.textContent = user
+    ? `Переглянути user-модуль (${selectedPackages.size})`
+    : "Переглянути user-модуль";
+  const integration = user?.integration === "nixos-module" ? "Модуль NixOS" : "Standalone";
+  ui.homeManagerSelectedUser.textContent = user
+    ? `${user.name} · ${integration} · запис вимкнено`
+    : "Спочатку виберіть користувача";
+}
+
 function renderHomeManager() {
   const inspection = model.homeManager;
   const integrationLabels = {
@@ -745,8 +861,10 @@ function renderHomeManager() {
   ui.homeManagerUserCount.textContent = `${inspection.users.length} користувачів`;
 
   const cards = inspection.users.map((user) => {
-    const card = document.createElement("article");
-    card.className = "home-manager-card";
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `home-manager-card${homeUserKey(user) === model.homeUserKey ? " selected" : ""}`;
+    card.setAttribute("aria-pressed", String(homeUserKey(user) === model.homeUserKey));
     const icon = document.createElement("span");
     icon.className = "home-user-icon";
     icon.textContent = user.name.slice(0, 1).toLocaleUpperCase("uk");
@@ -759,6 +877,10 @@ function renderHomeManager() {
     source.textContent = user.source;
     copy.append(name, integration, source);
     card.append(icon, copy);
+    card.addEventListener("click", () => {
+      model.homeUserKey = homeUserKey(user);
+      renderHomeManager();
+    });
     return card;
   });
   if (!cards.length) {
@@ -793,6 +915,7 @@ function renderHomeManager() {
   boundary.textContent = "Запис вимкнено · активація вимкнена · flake inputs не змінюються";
   stateCard.append(title, path, detail, boundary);
   ui.homeManagerState.replaceChildren(stateCard);
+  renderHomeManagerPackages();
 }
 
 function showPage(page) {
@@ -823,6 +946,65 @@ function renderPreview() {
     ? (model.preview.diff || "Змін немає.")
     : model.preview.generated;
   ui.previewCode.textContent = content;
+}
+
+function renderHomePreview() {
+  const diff = model.homePreviewMode === "diff";
+  ui.homePreviewDiffTab.classList.toggle("active", diff);
+  ui.homePreviewSourceTab.classList.toggle("active", !diff);
+  ui.homePreviewDiffTab.setAttribute("aria-selected", String(diff));
+  ui.homePreviewSourceTab.setAttribute("aria-selected", String(!diff));
+  ui.homePreviewCode.textContent = diff
+    ? (model.homePreview.diff || "Змін немає.")
+    : model.homePreview.generated;
+}
+
+async function openHomePreview() {
+  const user = selectedHomeUser();
+  if (!user) return;
+  const packages = [...(model.homePackageSelections.get(homeUserKey(user)) || [])].sort();
+  ui.homeManagerPreviewButton.disabled = true;
+  try {
+    const preview = await api("/api/home-manager/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: user.name,
+        integration: user.integration,
+        packages,
+      }),
+    });
+    if (
+      preview.readOnly !== true
+      || preview.writeEnabled !== false
+      || preview.activationEnabled !== false
+      || preview.flakeInputMutationEnabled !== false
+    ) {
+      throw new Error("Сервер не підтвердив безпечну preview-only межу");
+    }
+    model.homePreview = preview;
+    model.homePreviewMode = "diff";
+    ui.homePreviewTitle.textContent = `${user.name} · керований user-модуль`;
+    renderHomePreview();
+    ui.homePreviewBackdrop.hidden = false;
+    ui.homePreviewDrawer.inert = false;
+    ui.homePreviewDrawer.classList.add("open");
+    ui.homePreviewDrawer.setAttribute("aria-hidden", "false");
+    ui.closeHomePreview.focus();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    renderHomeManagerPackages();
+  }
+}
+
+function closeHomePreview() {
+  ui.homePreviewDrawer.classList.remove("open");
+  ui.homePreviewDrawer.setAttribute("aria-hidden", "true");
+  window.setTimeout(() => {
+    ui.homePreviewBackdrop.hidden = true;
+    ui.homePreviewDrawer.inert = true;
+  }, 220);
 }
 
 function renderSystemTarget(system) {
@@ -1368,6 +1550,7 @@ async function initialize() {
     }
     model.selected = new Set(state.packages);
     model.savedPackages = new Set(state.packages);
+    initializeHomePackageSelections();
     renderSystemTarget(system);
     renderAdoptionPlan(adoption);
     renderHelperStatus(helper);
@@ -1387,9 +1570,16 @@ async function initialize() {
 
 ui.search.addEventListener("input", renderCatalog);
 ui.settingsSearch.addEventListener("input", renderSettings);
+ui.homeManagerPackageSearch.addEventListener("input", renderHomeManagerPackages);
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
+ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
+ui.closeHomePreview.addEventListener("click", closeHomePreview);
+ui.closeHomePreviewFooter.addEventListener("click", closeHomePreview);
+ui.homePreviewBackdrop.addEventListener("click", closeHomePreview);
+ui.homePreviewDiffTab.addEventListener("click", () => { model.homePreviewMode = "diff"; renderHomePreview(); });
+ui.homePreviewSourceTab.addEventListener("click", () => { model.homePreviewMode = "source"; renderHomePreview(); });
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
@@ -1411,10 +1601,11 @@ ui.runTestActivationButton.addEventListener("click", runTestActivation);
 ui.recoverTestActivationButton.addEventListener("click", recoverTestActivation);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.drawer.classList.contains("open")) closePreview();
+  if (event.key === "Escape" && ui.homePreviewDrawer.classList.contains("open")) closeHomePreview();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
   const activeSearch = model.page === "settings"
     ? ui.settingsSearch
-    : (model.page === "programs" ? ui.search : null);
+    : (model.page === "programs" ? ui.search : ui.homeManagerPackageSearch);
   if (!activeSearch) return;
   if (event.key === "/" && document.activeElement !== activeSearch) {
     event.preventDefault();

@@ -141,7 +141,7 @@
             touch "$out"
           '';
           home-manager-detection = pkgs.runCommand "nix-control-manager-home-manager-detection-check" {
-            nativeBuildInputs = [ self.packages.${system}.default pkgs.jq ];
+            nativeBuildInputs = [ self.packages.${system}.default pkgs.jq pkgs.nix ];
           } ''
             mkdir -p fixture/etc-nixos fixture/home-manager
             cat > fixture/etc-nixos/flake.nix <<'EOF'
@@ -167,7 +167,29 @@
               and .userState.status == "missing"
             ' inspection.json
             test ! -e fixture/user-state.json
-            cp inspection.json "$out"
+            ncm preview-home-manager \
+              --user fixture-user \
+              --integration nixos-module \
+              --package firefox \
+              --package git \
+              --output fixture/managed-home-fixture-user.nix \
+              --json > preview.json
+            jq -e '
+              .username == "fixture-user"
+              and .integration == "nixos-module"
+              and .readOnly == true
+              and .writeEnabled == false
+              and .activationEnabled == false
+              and .flakeInputMutationEnabled == false
+              and (.generated | contains("home.packages"))
+              and (.generated | contains("pkgs.firefox"))
+            ' preview.json
+            export NIX_STATE_DIR="$TMPDIR/nix-state"
+            mkdir -p "$NIX_STATE_DIR/profiles"
+            jq -r .generated preview.json | nix-instantiate --parse - >/dev/null
+            test ! -e fixture/managed-home-fixture-user.nix
+            mkdir "$out"
+            cp inspection.json preview.json "$out"/
           '';
           nixos-module =
             assert liveTargetEvaluation.success == false;

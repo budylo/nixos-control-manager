@@ -142,7 +142,19 @@ class ServerTests(unittest.TestCase):
                 config_root=directory / "etc-nixos",
                 standalone_root=directory / "home-manager",
                 user_state=UserStateInspection(
-                    "missing", directory / "user-state.json", UserManagedState.empty()
+                    "current",
+                    directory / "user-state.json",
+                    UserManagedState.from_mapping(
+                        {
+                            "users": {
+                                "alice": {
+                                    "integration": "nixos-module",
+                                    "packages": ["git"],
+                                    "options": {"programs.git.enable": True},
+                                }
+                            }
+                        }
+                    ),
                 ),
             ),
         )
@@ -210,6 +222,43 @@ class ServerTests(unittest.TestCase):
                 "/api/save", method="POST", body={"schemaVersion": 1, "packages": []}
             )
         self.assertEqual(context.exception.code, 403)
+        context.exception.close()
+
+    def test_home_manager_preview_is_detected_user_only_and_never_writes(self) -> None:
+        user_state_path = self.server.user_state_path
+        output_path = user_state_path.parent / "managed-home-alice.nix"
+        result = self.request_json(
+            "/api/home-manager/preview",
+            method="POST",
+            token=self.server.token,
+            body={
+                "username": "alice",
+                "integration": "nixos-module",
+                "packages": ["vlc", "firefox"],
+            },
+        )
+        self.assertEqual(result["username"], "alice")
+        self.assertIn("home.packages", result["generated"])
+        self.assertIn("pkgs.firefox", result["generated"])
+        self.assertIn("programs.git.enable = true", result["generated"])
+        self.assertFalse(result["writeEnabled"])
+        self.assertFalse(result["activationEnabled"])
+        self.assertFalse(result["flakeInputMutationEnabled"])
+        self.assertFalse(user_state_path.exists())
+        self.assertFalse(output_path.exists())
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/home-manager/preview",
+                method="POST",
+                token=self.server.token,
+                body={
+                    "username": "bob",
+                    "integration": "standalone",
+                    "packages": ["firefox"],
+                },
+            )
+        self.assertEqual(context.exception.code, 400)
         context.exception.close()
 
     def test_candidate_validation_is_authorized_and_never_enables_activation(self) -> None:

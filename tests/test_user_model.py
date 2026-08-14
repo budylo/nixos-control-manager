@@ -16,7 +16,7 @@ class UserManagedStateTests(unittest.TestCase):
             {
                 "schemaVersion": 1,
                 "users": {
-                    "alice": {
+                    "alice@laptop": {
                         "integration": "nixos-module",
                         "packages": ["git", "firefox", "git"],
                         "options": {
@@ -27,7 +27,7 @@ class UserManagedStateTests(unittest.TestCase):
                 },
             }
         )
-        profile = state.users["alice"]
+        profile = state.users["alice@laptop"]
         self.assertEqual(profile.packages, ("firefox", "git"))
         self.assertTrue(profile.options["programs.git.enable"])
 
@@ -46,6 +46,17 @@ class UserManagedStateTests(unittest.TestCase):
                     }
                 },
                 "dot-separated",
+            ),
+            (
+                {
+                    "users": {
+                        "alice": {
+                            "integration": "standalone",
+                            "options": {"home.packages": []},
+                        }
+                    }
+                },
+                "packages field",
             ),
         )
         for raw, message in cases:

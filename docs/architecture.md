@@ -55,6 +55,10 @@ The generated module remains usable without Nix Control Manager.
     and standalone configuration roots. It identifies known integration forms,
     statically named users, and the status of a separate versioned user-state.
     Its API explicitly advertises that writes and activation are disabled.
+13. **Home Manager preview generator** projects catalog package selections for
+    one exactly detected user/integration pair. It preserves unrelated profiles
+    and existing user options, renders a portable Home Manager module, and
+    computes a unified diff against a fixed per-user path without writing it.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -163,8 +167,17 @@ System state and Home Manager user-state are different ownership domains. The
 system schema drives `managed.nix`; user-state schema version 1 contains a map
 of user profiles, each with an explicit `nixos-module` or `standalone`
 integration, package attribute paths, and typed option values. The latter is
-currently validation-and-inspection only: there is no storage call, generator,
-HTTP mutation, flake-input edit, or activation path connected to it.
+currently validation-and-preview only. A token-protected HTTP request may carry
+one package candidate, but the response explicitly remains read-only and no
+storage call, source adoption, flake-input edit, build, or activation path is
+connected to it.
+
+The generated user source has the portable Home Manager module shape
+`{ pkgs, ... }: { home.packages = [ ... ]; }`. It deliberately does not encode
+the NixOS-module or standalone wiring, so a later adoption plan can show the
+appropriate import separately. The future output path is derived from the
+validated user name and server-owned user-state directory; clients cannot
+submit a path.
 
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms
