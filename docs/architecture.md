@@ -59,6 +59,12 @@ The generated module remains usable without Nix Control Manager.
     one exactly detected user/integration pair. It preserves unrelated profiles
     and existing user options, renders a portable Home Manager module, and
     computes a unified diff against a fixed per-user path without writing it.
+14. **Home Manager connection planner** creates integration-specific candidate
+    imports. NixOS-module mode uses an isolated NixOS wiring module that extends
+    `home-manager.users.<name>.imports`; standalone mode adds one import to a
+    conservative `home.nix` module body. A validator materializes the plan only
+    in a disposable copy, parses every changed Nix file, and evaluates an
+    available NixOS or standalone-flake derivation without building it.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -178,6 +184,14 @@ the NixOS-module or standalone wiring, so a later adoption plan can show the
 appropriate import separately. The future output path is derived from the
 validated user name and server-owned user-state directory; clients cannot
 submit a path.
+
+Home Manager adoption plans expose `safeToValidate`, never `safeToApply`.
+Existing files under the future `ncm/` directory must carry the generated NCM
+header before they can appear as modification candidates. Entry-point editing
+accepts only a simple multiline imports block, plus the standard standalone
+module body when a new imports block is required. All other shapes stop for
+manual review. Candidate paths are reconstructed beneath the selected root and
+checked for symlinks before temporary materialization.
 
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms

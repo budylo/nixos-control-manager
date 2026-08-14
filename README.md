@@ -40,6 +40,9 @@ This repository currently contains the first vertical slice:
 - a preview-only Home Manager package selector that renders a deterministic
   per-user module and unified diff while preserving existing user options. It
   has no save, source-adoption, flake-input, build, or activation operation.
+- a read-only Home Manager connection plan for conservative NixOS-module and
+  standalone imports, plus disposable-copy parse/evaluation. No apply endpoint
+  exists and every validation result confirms that build and activation are off.
 
 ## Try it
 
@@ -84,6 +87,8 @@ ncm generate --state state.json --output managed.nix
 ncm detect --config-root /etc/nixos --json
 ncm detect-home-manager --config-root /etc/nixos --json
 ncm preview-home-manager --user alice --integration nixos-module --package firefox --json
+ncm plan-home-manager-adoption --user alice --integration nixos-module --package firefox --json
+ncm validate-home-manager-adoption --user alice --integration nixos-module --package firefox --json
 ncm migrate-state --state /etc/nixos/ncm/state.json
 ncm plan-adoption --config-root /etc/nixos
 ncm validate-adoption --config-root /etc/nixos
@@ -268,6 +273,20 @@ server preserves unrelated profiles and existing options, validates the entire
 candidate user-state, then renders an integration-agnostic module containing
 `home.packages`. Its fixed future name is `managed-home-<user>.nix`, but the
 preview only reads that path to build a diff and never creates or changes it.
+
+The connection-plan drawer shows how this module would be wired. In
+NixOS-module mode NCM proposes a separate `ncm/home-manager-<user>.nix` module
+that extends `home-manager.users.<user>.imports`, followed by one conservative
+top-level import. In standalone mode it proposes one import from a standard
+`home.nix`. Existing non-NCM files are never replaced, and unfamiliar or inline
+module layouts stop at manual review.
+
+Validation copies the selected configuration root to a temporary directory,
+materializes the exact candidates there, parses every changed Nix file, and
+evaluates the NixOS system or standalone flake derivation when the corresponding
+entrypoint is available. Legacy standalone configurations receive syntax-only
+validation. The temporary directory is removed afterwards; build, activation,
+source writes, lock-file writes, and flake-input changes remain disabled.
 
 System and user ownership remain intentionally separate. System packages and
 NixOS options continue to live in `state.local.json` and `managed.local.nix`;

@@ -97,7 +97,9 @@
 - deterministic per-user Home Manager module and diff preview, restricted to
   an exactly detected user/integration and with all writes disabled
   (implemented);
-- Home Manager source adoption and managed module persistence (not implemented);
+- read-only, integration-specific source adoption plans with exact diffs and
+  disposable parse/evaluation (implemented; apply remains disabled);
+- Home Manager managed module and user-state persistence (not implemented);
 - user/system package scope (separate catalog selection and preview implemented;
   persistence remains);
 - profiles and reusable presets.

@@ -83,6 +83,7 @@ const ui = {
   homeManagerPackageCount: document.querySelector("#homeManagerPackageCount"),
   homeManagerSelectedUser: document.querySelector("#homeManagerSelectedUser"),
   homeManagerPreviewButton: document.querySelector("#homeManagerPreviewButton"),
+  homeManagerAdoptionButton: document.querySelector("#homeManagerAdoptionButton"),
   homeManagerCatalog: document.querySelector("#homeManagerCatalog"),
   homeManagerCatalogEmpty: document.querySelector("#homeManagerCatalogEmpty"),
   homePreviewBackdrop: document.querySelector("#homePreviewBackdrop"),
@@ -93,6 +94,20 @@ const ui = {
   homePreviewDiffTab: document.querySelector("#homePreviewDiffTab"),
   homePreviewSourceTab: document.querySelector("#homePreviewSourceTab"),
   homePreviewCode: document.querySelector("#homePreviewCode code"),
+  homeAdoptionBackdrop: document.querySelector("#homeAdoptionBackdrop"),
+  homeAdoptionDrawer: document.querySelector("#homeAdoptionDrawer"),
+  homeAdoptionTitle: document.querySelector("#homeAdoptionTitle"),
+  closeHomeAdoption: document.querySelector("#closeHomeAdoption"),
+  closeHomeAdoptionFooter: document.querySelector("#closeHomeAdoptionFooter"),
+  homeAdoptionStatus: document.querySelector("#homeAdoptionStatus"),
+  homeAdoptionFileCount: document.querySelector("#homeAdoptionFileCount"),
+  homeAdoptionCode: document.querySelector("#homeAdoptionCode code"),
+  homeAdoptionValidation: document.querySelector("#homeAdoptionValidation"),
+  homeAdoptionValidationIcon: document.querySelector("#homeAdoptionValidationIcon"),
+  homeAdoptionValidationTitle: document.querySelector("#homeAdoptionValidationTitle"),
+  homeAdoptionValidationDetail: document.querySelector("#homeAdoptionValidationDetail"),
+  homeAdoptionValidationLog: document.querySelector("#homeAdoptionValidationLog"),
+  validateHomeAdoptionButton: document.querySelector("#validateHomeAdoptionButton"),
 };
 
 const model = {
@@ -131,6 +146,8 @@ const model = {
   homePackageSelections: new Map(),
   homePreview: { diff: "", generated: "" },
   homePreviewMode: "diff",
+  homeAdoption: null,
+  homeAdoptionValidation: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -833,6 +850,7 @@ function renderHomeManagerPackages() {
   ui.homeManagerCatalogEmpty.hidden = visible.length > 0;
   ui.homeManagerPackageCount.textContent = user ? `${visible.length} із ${available.length}` : "";
   ui.homeManagerPreviewButton.disabled = !user || invalidState;
+  ui.homeManagerAdoptionButton.disabled = !user || invalidState;
   ui.homeManagerPreviewButton.textContent = user
     ? `Переглянути user-модуль (${selectedPackages.size})`
     : "Переглянути user-модуль";
@@ -959,20 +977,26 @@ function renderHomePreview() {
     : model.homePreview.generated;
 }
 
+function currentHomeCandidate() {
+  const user = selectedHomeUser();
+  if (!user) return null;
+  return {
+    username: user.name,
+    integration: user.integration,
+    packages: [...(model.homePackageSelections.get(homeUserKey(user)) || [])].sort(),
+  };
+}
+
 async function openHomePreview() {
   const user = selectedHomeUser();
-  if (!user) return;
-  const packages = [...(model.homePackageSelections.get(homeUserKey(user)) || [])].sort();
+  const candidate = currentHomeCandidate();
+  if (!user || !candidate) return;
   ui.homeManagerPreviewButton.disabled = true;
   try {
     const preview = await api("/api/home-manager/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: user.name,
-        integration: user.integration,
-        packages,
-      }),
+      body: JSON.stringify(candidate),
     });
     if (
       preview.readOnly !== true
@@ -1005,6 +1029,127 @@ function closeHomePreview() {
     ui.homePreviewBackdrop.hidden = true;
     ui.homePreviewDrawer.inert = true;
   }, 220);
+}
+
+function renderHomeAdoption() {
+  const plan = model.homeAdoption;
+  if (!plan) return;
+  const labels = {
+    ready: "готовий до перевірки",
+    "no-changes": "вже підключено",
+    manual: "потрібен ручний перегляд",
+    blocked: "заблоковано",
+  };
+  ui.homeAdoptionStatus.textContent = labels[plan.status] || plan.status;
+  ui.homeAdoptionStatus.classList.toggle("passed", plan.safeToValidate);
+  ui.homeAdoptionFileCount.textContent = `${plan.changes.length} файлів · apply вимкнено`;
+  const warningText = (plan.warnings || []).map((item) => `Попередження: ${item}`).join("\n");
+  ui.homeAdoptionCode.textContent = plan.combinedDiff
+    || warningText
+    || "Підключення вже відповідає кандидату; змін немає.";
+  ui.validateHomeAdoptionButton.disabled = !plan.safeToValidate;
+  ui.homeAdoptionValidation.className = "candidate-validation";
+  ui.homeAdoptionValidationIcon.textContent = "◇";
+  ui.homeAdoptionValidationTitle.textContent = "Кандидат ще не перевірено";
+  ui.homeAdoptionValidationDetail.textContent = "Перевірка створить тимчасову копію, виконає parse/eval і видалить її.";
+  ui.homeAdoptionValidationLog.hidden = true;
+  ui.homeAdoptionValidationLog.textContent = "";
+}
+
+async function openHomeAdoption() {
+  const candidate = currentHomeCandidate();
+  const user = selectedHomeUser();
+  if (!candidate || !user) return;
+  ui.homeManagerAdoptionButton.disabled = true;
+  try {
+    const plan = await api("/api/home-manager/adoption-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+    if (
+      plan.readOnly !== true
+      || plan.safeToApply !== false
+      || plan.writeEnabled !== false
+      || plan.activationEnabled !== false
+      || plan.flakeInputMutationEnabled !== false
+    ) {
+      throw new Error("Сервер не підтвердив read-only межу плану підключення");
+    }
+    model.homeAdoption = plan;
+    model.homeAdoptionValidation = null;
+    ui.homeAdoptionTitle.textContent = `${user.name} · план підключення`;
+    renderHomeAdoption();
+    ui.homeAdoptionBackdrop.hidden = false;
+    ui.homeAdoptionDrawer.inert = false;
+    ui.homeAdoptionDrawer.classList.add("open");
+    ui.homeAdoptionDrawer.setAttribute("aria-hidden", "false");
+    ui.closeHomeAdoption.focus();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    renderHomeManagerPackages();
+  }
+}
+
+function closeHomeAdoption() {
+  ui.homeAdoptionDrawer.classList.remove("open");
+  ui.homeAdoptionDrawer.setAttribute("aria-hidden", "true");
+  window.setTimeout(() => {
+    ui.homeAdoptionBackdrop.hidden = true;
+    ui.homeAdoptionDrawer.inert = true;
+  }, 220);
+}
+
+async function validateHomeAdoption() {
+  const candidate = currentHomeCandidate();
+  if (!candidate) return;
+  ui.validateHomeAdoptionButton.disabled = true;
+  ui.homeAdoptionValidation.className = "candidate-validation running";
+  ui.homeAdoptionValidationIcon.textContent = "◌";
+  ui.homeAdoptionValidationTitle.textContent = "Перевіряємо тимчасову копію…";
+  try {
+    const result = await api("/api/home-manager/validate-adoption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+    if (
+      result.readOnly !== true
+      || result.writeEnabled !== false
+      || result.buildEnabled !== false
+      || result.activationEnabled !== false
+      || result.flakeInputMutationEnabled !== false
+      || result.workingCopyRemoved !== true
+    ) {
+      throw new Error("Сервер не підтвердив видалення безпечної тимчасової копії");
+    }
+    model.homeAdoptionValidation = result;
+    const passed = result.status === "passed";
+    ui.homeAdoptionValidation.className = `candidate-validation ${passed ? "passed" : "failed"}`;
+    ui.homeAdoptionValidationIcon.textContent = passed ? "✓" : "!";
+    ui.homeAdoptionValidationTitle.textContent = passed
+      ? "Тимчасовий кандидат перевірено"
+      : "Перевірка кандидата не пройшла";
+    ui.homeAdoptionValidationDetail.textContent = passed
+      ? "Nix-файли прочитано, конфігурацію оцінено, тимчасову копію видалено."
+      : `Статус: ${result.status}. Джерельні файли не змінено.`;
+    const checks = (result.checks || []).map(
+      (check) => `${check.status.toUpperCase()}  ${check.name}`,
+    );
+    ui.homeAdoptionValidationLog.textContent = [
+      ...checks,
+      ...(result.warnings || []).map((item) => `WARN    ${item}`),
+    ].join("\n");
+    ui.homeAdoptionValidationLog.hidden = false;
+  } catch (error) {
+    ui.homeAdoptionValidation.className = "candidate-validation failed";
+    ui.homeAdoptionValidationIcon.textContent = "!";
+    ui.homeAdoptionValidationTitle.textContent = "Помилка безпечної перевірки";
+    ui.homeAdoptionValidationDetail.textContent = error.message;
+  } finally {
+    ui.validateHomeAdoptionButton.disabled = !model.homeAdoption?.safeToValidate;
+  }
 }
 
 function renderSystemTarget(system) {
@@ -1575,11 +1720,16 @@ ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
+ui.homeManagerAdoptionButton.addEventListener("click", openHomeAdoption);
 ui.closeHomePreview.addEventListener("click", closeHomePreview);
 ui.closeHomePreviewFooter.addEventListener("click", closeHomePreview);
 ui.homePreviewBackdrop.addEventListener("click", closeHomePreview);
 ui.homePreviewDiffTab.addEventListener("click", () => { model.homePreviewMode = "diff"; renderHomePreview(); });
 ui.homePreviewSourceTab.addEventListener("click", () => { model.homePreviewMode = "source"; renderHomePreview(); });
+ui.closeHomeAdoption.addEventListener("click", closeHomeAdoption);
+ui.closeHomeAdoptionFooter.addEventListener("click", closeHomeAdoption);
+ui.homeAdoptionBackdrop.addEventListener("click", closeHomeAdoption);
+ui.validateHomeAdoptionButton.addEventListener("click", validateHomeAdoption);
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
@@ -1602,6 +1752,7 @@ ui.recoverTestActivationButton.addEventListener("click", recoverTestActivation);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.drawer.classList.contains("open")) closePreview();
   if (event.key === "Escape" && ui.homePreviewDrawer.classList.contains("open")) closeHomePreview();
+  if (event.key === "Escape" && ui.homeAdoptionDrawer.classList.contains("open")) closeHomeAdoption();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
   const activeSearch = model.page === "settings"
     ? ui.settingsSearch

@@ -212,7 +212,10 @@
             </label>
             <div class="home-package-preview-action">
               <small id="homeManagerSelectedUser">Спочатку виберіть користувача</small>
-              <button id="homeManagerPreviewButton" class="button secondary" type="button" disabled>Переглянути user-модуль</button>
+              <div class="home-package-buttons">
+                <button id="homeManagerPreviewButton" class="button secondary" type="button" disabled>Переглянути user-модуль</button>
+                <button id="homeManagerAdoptionButton" class="button secondary" type="button" disabled>План підключення</button>
+              </div>
             </div>
           </section>
           <section id="homeManagerCatalog" class="catalog home-manager-catalog" aria-live="polite"></section>
@@ -266,6 +269,37 @@
       <footer>
         <div class="validation-state"><span>◇</span><div><strong>Лише кандидат</strong><small>Запис, flake inputs і Home Manager activation вимкнені</small></div></div>
         <button id="closeHomePreviewFooter" class="button secondary" type="button">Готово</button>
+      </footer>
+    </aside>
+
+    <div id="homeAdoptionBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="homeAdoptionDrawer" class="preview-drawer home-adoption-drawer" aria-labelledby="homeAdoptionTitle" aria-hidden="true" inert>
+      <header>
+        <div>
+          <p class="eyebrow">Home Manager · read-only adoption</p>
+          <h2 id="homeAdoptionTitle">План підключення</h2>
+        </div>
+        <button id="closeHomeAdoption" class="icon-button" type="button" aria-label="Закрити">×</button>
+      </header>
+      <div class="plan-summary">
+        <span id="homeAdoptionStatus" class="plan-status">не сформовано</span>
+        <span id="homeAdoptionFileCount"></span>
+      </div>
+      <section id="homeAdoptionValidation" class="candidate-validation">
+        <span id="homeAdoptionValidationIcon" class="candidate-validation-icon">◇</span>
+        <div class="candidate-validation-copy">
+          <strong id="homeAdoptionValidationTitle">Кандидат ще не перевірено</strong>
+          <small id="homeAdoptionValidationDetail">Перевірка створить тимчасову копію, виконає parse/eval і видалить її.</small>
+        </div>
+        <button id="validateHomeAdoptionButton" class="button secondary compact" type="button">Перевірити тимчасову копію</button>
+        <pre id="homeAdoptionValidationLog" class="candidate-validation-log" hidden></pre>
+      </section>
+      <div class="code-wrap">
+        <pre id="homeAdoptionCode"><code>Оберіть користувача та сформуйте план…</code></pre>
+      </div>
+      <footer>
+        <div class="validation-state"><span>◇</span><div><strong>Запис заборонено</strong><small>Apply, build, activation і flake input mutation відсутні</small></div></div>
+        <button id="closeHomeAdoptionFooter" class="button secondary" type="button">Готово</button>
       </footer>
     </aside>
 

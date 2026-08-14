@@ -9,6 +9,10 @@ import sys
 from .errors import NcmError
 from .adoption import plan_adoption
 from .candidate import validate_adoption
+from .home_manager_adoption import (
+    plan_home_manager_adoption,
+    validate_home_manager_adoption,
+)
 from .home_manager_generator import (
     build_home_preview,
     candidate_user_state,
@@ -26,6 +30,28 @@ from .user_model import USER_INTEGRATIONS, UserManagedState
 
 def _path(value: str) -> Path:
     return Path(value).expanduser().resolve()
+
+
+def _add_home_candidate_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_CONFIG_ROOT", "/etc/nixos")),
+    )
+    parser.add_argument(
+        "--standalone-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_HOME_MANAGER_ROOT", "~/.config/home-manager")),
+    )
+    parser.add_argument(
+        "--user-state", type=_path, default=_path("user-state.local.json")
+    )
+    parser.add_argument("--user", required=True)
+    parser.add_argument(
+        "--integration", required=True, choices=sorted(USER_INTEGRATIONS)
+    )
+    parser.add_argument("--package", action="append", default=[], dest="packages")
+    parser.add_argument("--json", action="store_true", dest="as_json")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,6 +117,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="future managed module path used only as the diff label and read source",
     )
     preview_home.add_argument("--json", action="store_true", dest="as_json")
+
+    plan_home = subparsers.add_parser(
+        "plan-home-manager-adoption",
+        help="show a read-only plan for connecting one managed user module",
+    )
+    _add_home_candidate_arguments(plan_home)
+
+    validate_home = subparsers.add_parser(
+        "validate-home-manager-adoption",
+        help="validate a Home Manager connection plan in a disposable copy",
+    )
+    _add_home_candidate_arguments(validate_home)
+    validate_home.add_argument("--flake-target")
+    validate_home.add_argument("--timeout", type=int, default=120)
 
     migrate = subparsers.add_parser(
         "migrate-state", help="preview or write a normalized managed state"
@@ -265,6 +305,54 @@ def run(args: argparse.Namespace) -> int:
             print("Activation:   disabled")
             print("Flake inputs: unchanged")
         return 0
+
+    if args.command in {
+        "plan-home-manager-adoption",
+        "validate-home-manager-adoption",
+    }:
+        inspection = inspect_home_manager(
+            args.config_root,
+            standalone_root=args.standalone_root,
+            user_state_path=args.user_state,
+        )
+        plan = plan_home_manager_adoption(
+            args.config_root,
+            standalone_root=args.standalone_root,
+            user_state_path=args.user_state,
+            username=args.user,
+            integration=args.integration,
+            packages=args.packages,
+            inspection=inspection,
+        )
+        if args.command == "plan-home-manager-adoption":
+            result = plan.to_mapping()
+        else:
+            result = validate_home_manager_adoption(
+                plan,
+                flake_target=args.flake_target,
+                timeout=args.timeout,
+            ).to_mapping()
+        if args.as_json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "plan-home-manager-adoption":
+            print(f"Status: {plan.status}")
+            for change in plan.changes:
+                print(f"{change.action.upper():6} {change.relative_path} — {change.reason}")
+            if plan.combined_diff:
+                print("\n" + plan.combined_diff, end="")
+            for warning in plan.warnings:
+                print(f"Warning: {warning}")
+            print("Writes:       disabled")
+            print("Activation:   disabled")
+        else:
+            print(f"Status: {result['status']}")
+            for check in result["checks"]:
+                print(f"{check['status'].upper():9} {check['name']}")
+            for warning in result["warnings"]:
+                print(f"Warning: {warning}")
+            print("Build:        disabled")
+            print("Activation:   disabled")
+        return 0 if result["status"] in {"ready", "no-changes", "passed"} else 2
 
     if args.command == "plan-adoption":
         plan = plan_adoption(args.config_root)

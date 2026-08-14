@@ -150,8 +150,20 @@
               home-manager.users.fixture-user = ./home.nix;
             }
             EOF
+            cat > fixture/etc-nixos/configuration.nix <<'EOF'
+            { ... }:
+            {
+              imports = [
+              ];
+              home-manager.users.fixture-user = ./home.nix;
+            }
+            EOF
             cat > fixture/home-manager/home.nix <<'EOF'
-            { ... }: { home.username = "standalone-user"; }
+            { ... }:
+            {
+              home.username = "standalone-user";
+              home.stateVersion = "26.05";
+            }
             EOF
             ncm detect-home-manager \
               --config-root fixture/etc-nixos \
@@ -188,8 +200,41 @@
             mkdir -p "$NIX_STATE_DIR/profiles"
             jq -r .generated preview.json | nix-instantiate --parse - >/dev/null
             test ! -e fixture/managed-home-fixture-user.nix
+            ncm plan-home-manager-adoption \
+              --config-root fixture/etc-nixos \
+              --standalone-root fixture/home-manager \
+              --user-state fixture/user-state.json \
+              --user fixture-user \
+              --integration nixos-module \
+              --package firefox \
+              --json > adoption.json
+            jq -e '
+              .status == "ready"
+              and .safeToValidate == true
+              and .safeToApply == false
+              and .writeEnabled == false
+              and (.changes | length) == 3
+              and (.combinedDiff | contains("home-manager-fixture-user.nix"))
+            ' adoption.json
+            test ! -e fixture/etc-nixos/ncm
+            ncm validate-home-manager-adoption \
+              --config-root fixture/etc-nixos \
+              --standalone-root fixture/home-manager \
+              --user-state fixture/user-state.json \
+              --user standalone-user \
+              --integration standalone \
+              --package git \
+              --json > validation.json
+            jq -e '
+              .status == "passed"
+              and .workingCopyRemoved == true
+              and .writeEnabled == false
+              and .buildEnabled == false
+              and .activationEnabled == false
+            ' validation.json
+            test ! -e fixture/home-manager/ncm
             mkdir "$out"
-            cp inspection.json preview.json "$out"/
+            cp inspection.json preview.json adoption.json validation.json "$out"/
           '';
           nixos-module =
             assert liveTargetEvaluation.success == false;

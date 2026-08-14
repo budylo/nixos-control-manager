@@ -18,6 +18,10 @@ from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager
 from .errors import NcmError, ValidationError
+from .home_manager_adoption import (
+    plan_home_manager_adoption,
+    validate_home_manager_adoption,
+)
 from .home_manager_generator import (
     build_home_preview,
     candidate_user_state,
@@ -60,6 +64,8 @@ class NcmServer(ThreadingHTTPServer):
             ..., EffectiveSettingsInspection
         ] = inspect_effective_settings,
         home_manager_inspector: Callable[..., HomeManagerInspection] = inspect_home_manager,
+        home_manager_planner: Callable[..., Any] = plan_home_manager_adoption,
+        home_manager_validator: Callable[..., Any] = validate_home_manager_adoption,
     ) -> None:
         super().__init__(server_address, handler)
         self.state_path = state_path
@@ -71,6 +77,8 @@ class NcmServer(ThreadingHTTPServer):
         self.validation_timeout = validation_timeout
         self.settings_inspector = settings_inspector
         self.home_manager_inspector = home_manager_inspector
+        self.home_manager_planner = home_manager_planner
+        self.home_manager_validator = home_manager_validator
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
             config_root=config_root,
@@ -127,6 +135,48 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _read_state(self) -> ManagedState:
         return ManagedState.from_mapping(self._read_json_object())
+
+    def _home_candidate(self):
+        payload = self._read_json_object()
+        if set(payload) != {"username", "integration", "packages"}:
+            raise ValidationError(
+                "Home Manager candidate requires username, integration, and packages"
+            )
+        username = payload["username"]
+        integration = payload["integration"]
+        packages = payload["packages"]
+        if not isinstance(username, str) or not isinstance(integration, str):
+            raise ValidationError("Home Manager user and integration must be strings")
+        if not isinstance(packages, list):
+            raise ValidationError("Home Manager packages must be a JSON array")
+        inspection = self.server.home_manager_inspector(
+            self.server.config_root,
+            standalone_root=self.server.home_manager_root,
+            user_state_path=self.server.user_state_path,
+        )
+        if not any(
+            user.name == username and user.integration == integration
+            for user in inspection.users
+        ):
+            raise ValidationError(
+                "Home Manager candidate is limited to an exactly detected user integration"
+            )
+        if inspection.user_state.status == "invalid":
+            raise ValidationError(
+                "Invalid user-state must be repaired before creating a candidate"
+            )
+        previous = inspection.user_state.state.users.get(username)
+        if previous is not None and previous.integration != integration:
+            raise ValidationError(
+                "Detected integration conflicts with the existing user-state profile"
+            )
+        state = candidate_user_state(
+            inspection.user_state.state,
+            username=username,
+            integration=integration,
+            packages=packages,
+        )
+        return inspection, state, username, integration, packages
 
     def _authorized(self) -> bool:
         return secrets.compare_digest(
@@ -235,45 +285,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(self.server.build_manager.start(), HTTPStatus.ACCEPTED)
                 return
             if path == "/api/home-manager/preview":
-                payload = self._read_json_object()
-                if set(payload) != {"username", "integration", "packages"}:
-                    raise ValidationError(
-                        "Home Manager preview requires username, integration, and packages"
-                    )
-                username = payload["username"]
-                integration = payload["integration"]
-                packages = payload["packages"]
-                if not isinstance(username, str) or not isinstance(integration, str):
-                    raise ValidationError("Home Manager user and integration must be strings")
-                if not isinstance(packages, list):
-                    raise ValidationError("Home Manager packages must be a JSON array")
-                inspection = self.server.home_manager_inspector(
-                    self.server.config_root,
-                    standalone_root=self.server.home_manager_root,
-                    user_state_path=self.server.user_state_path,
-                )
-                if not any(
-                    user.name == username and user.integration == integration
-                    for user in inspection.users
-                ):
-                    raise ValidationError(
-                        "Home Manager preview is limited to an exactly detected user integration"
-                    )
-                if inspection.user_state.status == "invalid":
-                    raise ValidationError(
-                        "Invalid user-state must be repaired before creating a preview"
-                    )
-                previous = inspection.user_state.state.users.get(username)
-                if previous is not None and previous.integration != integration:
-                    raise ValidationError(
-                        "Detected integration conflicts with the existing user-state profile"
-                    )
-                state = candidate_user_state(
-                    inspection.user_state.state,
-                    username=username,
-                    integration=integration,
-                    packages=packages,
-                )
+                _, state, username, _, _ = self._home_candidate()
                 self._json(
                     build_home_preview(
                         state,
@@ -283,6 +295,31 @@ class RequestHandler(BaseHTTPRequestHandler):
                         ),
                     )
                 )
+                return
+            if path in {
+                "/api/home-manager/adoption-plan",
+                "/api/home-manager/validate-adoption",
+            }:
+                inspection, _, username, integration, packages = self._home_candidate()
+                plan = self.server.home_manager_planner(
+                    self.server.config_root,
+                    standalone_root=self.server.home_manager_root,
+                    user_state_path=self.server.user_state_path,
+                    username=username,
+                    integration=integration,
+                    packages=packages,
+                    inspection=inspection,
+                )
+                if path == "/api/home-manager/adoption-plan":
+                    self._json(plan.to_mapping())
+                else:
+                    self._json(
+                        self.server.home_manager_validator(
+                            plan,
+                            flake_target=self.server.flake_target,
+                            timeout=self.server.validation_timeout,
+                        ).to_mapping()
+                    )
                 return
             if cancel_match:
                 self._json(self.server.build_manager.cancel(cancel_match.group(1)))

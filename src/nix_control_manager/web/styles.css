@@ -206,6 +206,8 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .home-package-toolbar { margin: 0 clamp(28px, 4vw, 58px) 17px; display: flex; align-items: stretch; gap: 14px; }
 .home-package-preview-action { min-width: 265px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .home-package-preview-action small { max-width: 180px; color: var(--muted); font-size: 8px; line-height: 1.45; text-align: right; }
+.home-package-buttons { display: flex; gap: 8px; }
+.home-package-buttons .button { white-space: nowrap; }
 .home-manager-catalog { padding-bottom: 12px; }
 .home-package-card .package-name { color: #6f91a7; }
 .home-package-card .app-toggle:disabled { opacity: .35; cursor: not-allowed; }
@@ -218,7 +220,9 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .preview-tabs { padding: 0 27px; display: flex; gap: 18px; border-bottom: 1px solid var(--line); }
 .plan-summary { min-height: 44px; padding: 0 27px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 .plan-status { padding: 5px 8px; border-radius: 99px; color: #ffcf7e; background: rgba(255, 202, 115, .1); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.plan-status.passed { color: #9ee8c7; background: rgba(116,228,177,.1); }
 .plan-drawer { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
+.home-adoption-drawer { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
 .candidate-validation { padding: 14px 27px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: rgba(94, 215, 255, .025); }
 .candidate-validation-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--cyan); background: rgba(94, 215, 255, .09); font-size: 12px; }
 .candidate-validation-copy strong, .candidate-validation-copy small { display: block; }
@@ -288,6 +292,7 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .home-package-toolbar, .home-package-preview-action { align-items: stretch; flex-direction: column; }
   .home-package-preview-action { min-width: 0; }
   .home-package-preview-action small { max-width: none; text-align: left; }
+  .home-package-buttons { flex-direction: column; }
   .preview-drawer > footer { align-items: stretch; flex-direction: column; }
   .preview-drawer > footer .button { width: 100%; }
   .candidate-validation { grid-template-columns: 30px 1fr; }

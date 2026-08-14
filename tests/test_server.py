@@ -93,6 +93,21 @@ class FakeHelperAdapter:
         }
 
 
+class FakeHomeManagerValidation:
+    def to_mapping(self):
+        return {
+            "status": "passed",
+            "checks": [{"name": "Parse candidate", "status": "passed"}],
+            "warnings": [],
+            "workingCopyRemoved": True,
+            "readOnly": True,
+            "writeEnabled": False,
+            "activationEnabled": False,
+            "buildEnabled": False,
+            "flakeInputMutationEnabled": False,
+        }
+
+
 class ServerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -260,6 +275,48 @@ class ServerTests(unittest.TestCase):
             )
         self.assertEqual(context.exception.code, 400)
         context.exception.close()
+
+    def test_home_manager_adoption_plan_and_validation_are_read_only(self) -> None:
+        root = self.server.config_root
+        root.mkdir()
+        configuration = root / "configuration.nix"
+        original = (
+            "{ ... }:\n{\n  imports = [\n  ];\n"
+            "  home-manager.users.alice = ./alice.nix;\n}\n"
+        )
+        configuration.write_text(original, encoding="utf-8")
+        payload = {
+            "username": "alice",
+            "integration": "nixos-module",
+            "packages": ["firefox", "git"],
+        }
+
+        plan = self.request_json(
+            "/api/home-manager/adoption-plan",
+            method="POST",
+            token=self.server.token,
+            body=payload,
+        )
+        self.assertEqual(plan["status"], "ready")
+        self.assertEqual(len(plan["changes"]), 3)
+        self.assertIn("home-manager-alice.nix", plan["combinedDiff"])
+        self.assertFalse(plan["safeToApply"])
+        self.assertFalse(plan["writeEnabled"])
+        self.assertEqual(configuration.read_text(encoding="utf-8"), original)
+        self.assertFalse((root / "ncm").exists())
+
+        self.server.home_manager_validator = lambda *args, **kwargs: FakeHomeManagerValidation()
+        validation = self.request_json(
+            "/api/home-manager/validate-adoption",
+            method="POST",
+            token=self.server.token,
+            body=payload,
+        )
+        self.assertEqual(validation["status"], "passed")
+        self.assertTrue(validation["workingCopyRemoved"])
+        self.assertFalse(validation["writeEnabled"])
+        self.assertFalse(validation["buildEnabled"])
+        self.assertFalse((root / "ncm").exists())
 
     def test_candidate_validation_is_authorized_and_never_enables_activation(self) -> None:
         with self.assertRaises(HTTPError) as context:
