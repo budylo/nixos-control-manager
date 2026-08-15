@@ -225,6 +225,11 @@ not installed on the current system.
 The opt-in deployment scaffold and sandbox are described in
 [`docs/system-helper.md`](docs/system-helper.md).
 
+The first non-mutating run against the real NixOS-WSL host, including its
+before/after hashes and the next channel-compatible deployment boundary, is
+recorded in
+[`docs/wsl-read-only-rehearsal.md`](docs/wsl-read-only-rehearsal.md).
+
 An x86_64 NixOS VM integration test boots a disposable guest, starts the real
 socket-activated root helper, verifies both denied and explicitly authorized
 Polkit paths, and completes the real-Nix fixture transaction. It is included in

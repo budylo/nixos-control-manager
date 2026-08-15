@@ -289,6 +289,25 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="commitHomeApplyButton"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
+    def test_legacy_state_is_normalized_in_memory_without_writing(self) -> None:
+        legacy = (
+            '{\n'
+            '  "schemaVersion": 1,\n'
+            '  "nixosRelease": "26.05",\n'
+            '  "generatedAt": "2026-08-10T22:12:41Z",\n'
+            '  "packages": {"firefox": true, "vlc": false},\n'
+            '  "options": {}\n'
+            '}\n'
+        )
+        self.server.state_path.write_text(legacy, encoding="utf-8")
+
+        state = self.request_json("/api/state")
+        preview = self.request_json("/api/preview")
+
+        self.assertEqual(state["packages"], ["firefox"])
+        self.assertIn("pkgs.firefox", preview["generated"])
+        self.assertEqual(self.server.state_path.read_text(encoding="utf-8"), legacy)
+
     def test_mutation_requires_token(self) -> None:
         with self.assertRaises(HTTPError) as context:
             self.request_json(

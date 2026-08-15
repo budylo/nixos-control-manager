@@ -35,6 +35,7 @@ from .home_manager_inspector import (
     inspect_home_manager,
     managed_user_state_path,
 )
+from .migration import load_migration_preview
 from .model import ManagedState
 from .nix_generator import generate_module
 from .preview import build_preview
@@ -53,6 +54,13 @@ _HOME_BUILD_JOB_PATH = re.compile(
 _HOME_BUILD_CANCEL_PATH = re.compile(
     r"^/api/home-manager/build-preview/([0-9a-f]{24})/cancel$"
 )
+
+
+def _load_ui_state(path: Path) -> ManagedState:
+    """Load current or legacy state without modifying its source file."""
+    if not path.exists():
+        return ManagedState.empty()
+    return load_migration_preview(path).state
 
 
 class NcmServer(ThreadingHTTPServer):
@@ -290,7 +298,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 self._json({"token": self.server.token})
             elif path == "/api/state":
-                self._json(load_state(self.server.state_path).to_mapping())
+                self._json(_load_ui_state(self.server.state_path).to_mapping())
             elif path == "/api/catalog":
                 self._json(load_catalog())
             elif path == "/api/settings-catalog":
@@ -313,7 +321,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     ).to_mapping()
                 )
             elif path == "/api/preview":
-                state = load_state(self.server.state_path)
+                state = _load_ui_state(self.server.state_path)
                 self._json(build_preview(state, self.server.output_path))
             elif path == "/api/system":
                 self._json(inspect_system(self.server.config_root).to_mapping())
