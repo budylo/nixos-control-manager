@@ -2,8 +2,9 @@
 
 The repository exports an opt-in NixOS module and a socket-activated
 `ncm-helper` executable. It has a transaction-capable fixture mode, a
-capability-reduced live-read-only mode, and an explicit experimental live-test
-mode. The module is not imported or enabled by
+capability-reduced live-read-only mode, an explicit experimental live-test
+mode, and a separate opt-in live Home Manager persistence mode. The module is
+not imported or enabled by
 the package itself, and this project has not changed the machine's active NixOS
 configuration.
 
@@ -26,6 +27,8 @@ configuration.
 - live-read-only mode may expose the separate `preview-activation` capability;
   it accepts only an independently verified candidate store path, runs the
   fixed dry entrypoint, and retains no receipt;
+- live-home-manager mode keeps NixOS apply disabled and exposes only one fixed
+  Home Manager root plus its external root-only transaction journal for writes;
 - the runtime configuration is a strict versioned JSON file generated into the
   Nix store.
 
@@ -67,9 +70,10 @@ services.nix-control-manager-helper = {
 };
 ```
 
-It has no option for a different live root and cannot be upgraded to a writable
-configuration target. Schema version 3 accepts `fixture`, `live-read-only`, and
-`live-test`; live-test adds only its dedicated root-owned activation journal.
+It has no option for a different system root and cannot be upgraded to a
+writable NixOS adoption target. Schema version 4 accepts `fixture`,
+`live-read-only`, `live-test`, and `live-home-manager`; each live mutation mode
+adds only its narrowly scoped journal/capability.
 
 Experimental test activation must be opted into explicitly:
 
@@ -88,6 +92,25 @@ never writes `/etc/nixos` or the system profile. Timer recovery is runtime-only
 and cannot cover a power loss or kernel panic. The operator procedure is in
 [`live-test-recovery.md`](live-test-recovery.md).
 
+Live Home Manager source persistence must also be opted into separately:
+
+```nix
+services.nix-control-manager-helper = {
+  enable = true;
+  mode = "live-home-manager";
+  targetId = "live-home";
+  allowedUsers = [ "alice" ];
+  homeManagerRoot = "/etc/nixos";
+  homeManagerJournalRoot =
+    "/var/lib/nix-control-manager/home-manager-transactions";
+};
+```
+
+System apply, test activation, permanent switching, and Home Manager activation
+remain disabled. The first sandboxed deployment slice excludes `/home` and
+`/root`; operational details are in
+[`live-home-manager.md`](live-home-manager.md).
+
 ## Sandbox highlights
 
 The generated service uses `ProtectSystem=strict`, `ProtectHome`, private
@@ -97,7 +120,9 @@ system-call filter. In fixture mode, `ReadWritePaths` contains only the fixture
 and transaction journal. In `live-read-only` there are no writable persistent
 paths. Experimental `live-test` adds only its root-owned activation journal to
 `ReadWritePaths`; `/etc/nixos` stays explicitly read-only in both live modes,
-and their capability bounding set is empty.
+and their capability bounding set is empty. `live-home-manager` exposes only
+its configured source root and journal through `ReadWritePaths`, while retaining
+the empty capability bounding set.
 `/proc` remains visible because safe Polkit process subjects require
 the client start time and real UID.
 
@@ -166,6 +191,12 @@ the root-only journal mode and final `recovered` state, unchanged
 `/nix/var/nix/profiles/system`, unchanged `/etc/nixos` hashes, and a still-live
 helper socket. It is available as `checks.x86_64-linux.live-test-recovery-vm`.
 
+A fourth x86_64 VM check covers live Home Manager source persistence. It checks
+the separate capability flags, default Polkit denial, exact allow-list,
+pre/post real Nix evaluation, committed live-mode journal, and unchanged
+`/run/current-system`. It is available as
+`checks.x86_64-linux.live-home-manager-vm`.
+
 `ncm-helper-client` is an unprivileged typed diagnostic client for capabilities,
 validation, exact dry-activation preview, receipt-based apply, and exact
 transaction recovery. The helper
@@ -191,7 +222,8 @@ same backend and never installs a system unit.
 
 ## Deliberately not implemented
 
-- writes to a live `/etc/nixos` backend;
+- live NixOS system-adoption writes (the only `/etc/nixos` exception is an
+  explicit Home Manager source plan in `live-home-manager` mode);
 - installation on the current WSL or physical NixOS system;
 - privileged/helper-mediated build, permanent `switch`, rollback-generation,
   or boot activation (local no-link build, exact dry preview, and opt-in

@@ -21,16 +21,20 @@ let
   socketGroup = "nix-control-manager";
   isFixture = cfg.mode == "fixture";
   isLiveTest = cfg.mode == "live-test";
+  isLiveHomeManager = cfg.mode == "live-home-manager";
   configurationRoot = if isFixture then cfg.fixtureRoot else "/etc/nixos";
   transactionJournal = if isFixture then cfg.journalRoot else null;
   testJournal = if isLiveTest then cfg.testJournalRoot else null;
+  homeManagerRoot = if isLiveHomeManager then cfg.homeManagerRoot else null;
+  homeManagerJournalRoot =
+    if isLiveHomeManager then cfg.homeManagerJournalRoot else null;
   pathIsSafe = path:
     path != ""
     && !(hasPrefix "/" path)
     && all (part: part != "" && part != "." && part != "..")
       (splitString "/" path);
   helperConfig = (pkgs.formats.json { }).generate "ncm-helper.json" {
-    schemaVersion = 3;
+    schemaVersion = 4;
     inherit socketPath;
     polkitExecutable = "${pkgs.polkit}/bin/pkcheck";
     validationTimeout = cfg.validationTimeout;
@@ -42,6 +46,7 @@ let
         journalRoot = transactionJournal;
         testJournalRoot = testJournal;
         testTimeoutSeconds = cfg.testActivationTimeout;
+        inherit homeManagerRoot homeManagerJournalRoot;
         allowedRelativePaths = cfg.allowedRelativePaths;
         flakeTarget = cfg.flakeTarget;
       }
@@ -53,7 +58,12 @@ in
     enable = mkEnableOption "the sandboxed Nix Control Manager helper";
 
     mode = mkOption {
-      type = types.enum [ "fixture" "live-read-only" "live-test" ];
+      type = types.enum [
+        "fixture"
+        "live-read-only"
+        "live-test"
+        "live-home-manager"
+      ];
       default = "fixture";
       description = ''
         Helper target mode. live-read-only validates an exact adoption plan
@@ -63,6 +73,9 @@ in
         an explicit opt-in extension which permits only a time-limited runtime
         test activation of that exact output, with automatic recovery; it
         still cannot write /etc/nixos, switch generations, or change boot.
+        live-home-manager is a separate opt-in that may persist only an exact,
+        validated Home Manager plan under homeManagerRoot. It does not enable
+        NixOS apply, Home Manager activation, or generation switching.
       '';
     };
 
@@ -100,6 +113,22 @@ in
       description = "Seconds before a live-test session automatically restores the previous runtime system.";
     };
 
+    homeManagerRoot = mkOption {
+      type = types.str;
+      default = "/etc/nixos";
+      description = ''
+        Configuration root writable only in live-home-manager mode. The first
+        supported deployment is Home Manager's NixOS-module integration under
+        /etc/nixos; home directories remain excluded by the service sandbox.
+      '';
+    };
+
+    homeManagerJournalRoot = mkOption {
+      type = types.str;
+      default = "/var/lib/nix-control-manager/home-manager-transactions";
+      description = "Root-only journal for live Home Manager source transactions.";
+    };
+
     targetId = mkOption {
       type = types.strMatching "[a-z][a-z0-9-]{0,31}";
       default = "fixture";
@@ -121,7 +150,7 @@ in
         "ncm/packages.nix"
         "ncm/state.json"
       ];
-      description = "Exact relative paths the fixture helper may change.";
+      description = "Exact relative paths the selected transactional workflow may change.";
     };
 
     allowedUsers = mkOption {
@@ -154,6 +183,27 @@ in
         message = "The live-test journal must remain outside /etc/nixos.";
       }
       {
+        assertion = !isLiveHomeManager || (
+          hasPrefix "/" cfg.homeManagerRoot
+          && cfg.homeManagerRoot != "/"
+          && cfg.homeManagerRoot != "/nix/store"
+          && !(hasPrefix "/nix/store/" cfg.homeManagerRoot)
+          && cfg.homeManagerRoot != "/home"
+          && !(hasPrefix "/home/" cfg.homeManagerRoot)
+          && cfg.homeManagerRoot != "/root"
+          && !(hasPrefix "/root/" cfg.homeManagerRoot)
+        );
+        message = "live-home-manager requires an absolute non-home, non-store configuration root.";
+      }
+      {
+        assertion = !isLiveHomeManager || (
+          hasPrefix "/" cfg.homeManagerJournalRoot
+          && cfg.homeManagerJournalRoot != cfg.homeManagerRoot
+          && !(hasPrefix "${cfg.homeManagerRoot}/" cfg.homeManagerJournalRoot)
+        );
+        message = "The live Home Manager journal must be absolute and outside homeManagerRoot.";
+      }
+      {
         assertion = !isFixture || (
           cfg.journalRoot != cfg.fixtureRoot
           && !(hasPrefix "${cfg.fixtureRoot}/" cfg.journalRoot)
@@ -179,7 +229,10 @@ in
       ./polkit/org.nixos.nix-control-manager.policy;
     systemd.tmpfiles.rules =
       optionals isFixture [ "d ${cfg.journalRoot} 0700 root root -" ]
-      ++ optionals isLiveTest [ "d ${cfg.testJournalRoot} 0700 root root -" ];
+      ++ optionals isLiveTest [ "d ${cfg.testJournalRoot} 0700 root root -" ]
+      ++ optionals isLiveHomeManager [
+        "d ${cfg.homeManagerJournalRoot} 0700 root root -"
+      ];
 
     systemd.sockets.${serviceName} = {
       description = "Nix Control Manager helper socket";
@@ -200,6 +253,8 @@ in
         "Fixture-only Nix Control Manager system helper"
       else if isLiveTest then
         "Time-limited test activation Nix Control Manager system helper"
+      else if isLiveHomeManager then
+        "Home Manager persistence Nix Control Manager system helper"
       else
         "Read-only Nix Control Manager system helper";
       requires = [ "polkit.service" ];
@@ -260,9 +315,11 @@ in
         # An empty Nix list is omitted by the unit renderer. The empty string
         # deliberately emits `CapabilityBoundingSet=` and clears every cap.
         CapabilityBoundingSet = "";
-        ReadOnlyPaths = [ "/etc/nixos" ];
+        ReadOnlyPaths = optionals (!isLiveHomeManager) [ "/etc/nixos" ];
       } // optionalAttrs isLiveTest {
         ReadWritePaths = [ cfg.testJournalRoot ];
+      } // optionalAttrs isLiveHomeManager {
+        ReadWritePaths = [ cfg.homeManagerRoot cfg.homeManagerJournalRoot ];
       };
     };
   };

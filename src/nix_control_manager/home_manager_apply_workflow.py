@@ -20,7 +20,10 @@ from .transaction import (
     SimulatedTransactionCrash,
     TransactionResult,
     apply_home_manager_plan_in_fixture,
+    apply_home_manager_plan_live,
     finalize_home_manager_fixture_transaction,
+    finalize_home_manager_live_transaction,
+    rollback_home_manager_live_transaction,
     rollback_fixture_transaction,
 )
 from .user_model import UserManagedState
@@ -33,6 +36,7 @@ class HomeManagerFixtureApplyWorkflowResult:
     pre_validation: HomeManagerCandidateValidation
     post_validation: HomeManagerCandidateValidation | None
     failure_reason: str | None = None
+    fixture_only: bool = True
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -43,9 +47,9 @@ class HomeManagerFixtureApplyWorkflowResult:
                 self.post_validation.to_mapping() if self.post_validation else None
             ),
             "failureReason": self.failure_reason,
-            "fixtureOnly": True,
+            "fixtureOnly": self.fixture_only,
             "writeEnabled": True,
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": not self.fixture_only,
             "activationEnabled": False,
             "buildEnabled": False,
         }
@@ -75,7 +79,7 @@ def _installed_plan(plan: HomeManagerAdoptionPlan) -> HomeManagerAdoptionPlan:
     )
 
 
-def execute_home_manager_fixture_apply_workflow(
+def _execute_home_manager_apply_workflow(
     plan: HomeManagerAdoptionPlan,
     pre_validation: HomeManagerCandidateValidation,
     *,
@@ -84,9 +88,24 @@ def execute_home_manager_fixture_apply_workflow(
     runner: Runner = subprocess.run,
     which: Which = shutil.which,
     simulate_interruption_after_commit: bool = False,
+    fixture_only: bool,
 ) -> HomeManagerFixtureApplyWorkflowResult:
-    """Commit and re-evaluate Home Manager files only in a marked fixture."""
-    provisional = apply_home_manager_plan_in_fixture(
+    apply_plan = (
+        apply_home_manager_plan_in_fixture
+        if fixture_only
+        else apply_home_manager_plan_live
+    )
+    rollback_transaction = (
+        rollback_fixture_transaction
+        if fixture_only
+        else rollback_home_manager_live_transaction
+    )
+    finalize_transaction = (
+        finalize_home_manager_fixture_transaction
+        if fixture_only
+        else finalize_home_manager_live_transaction
+    )
+    provisional = apply_plan(
         plan,
         pre_validation,
         journal_root=journal_root,
@@ -114,7 +133,7 @@ def execute_home_manager_fixture_apply_workflow(
             which=which,
         )
     except Exception as error:
-        rollback = rollback_fixture_transaction(
+        rollback = rollback_transaction(
             plan.root,
             journal_root=journal_root,
             transaction_id=provisional.transaction_id,
@@ -127,7 +146,7 @@ def execute_home_manager_fixture_apply_workflow(
 
     if post_validation.status != "passed":
         reason = f"Post-commit Home Manager validation returned {post_validation.status}"
-        rollback = rollback_fixture_transaction(
+        rollback = rollback_transaction(
             plan.root,
             journal_root=journal_root,
             transaction_id=provisional.transaction_id,
@@ -140,10 +159,11 @@ def execute_home_manager_fixture_apply_workflow(
             pre_validation=pre_validation,
             post_validation=post_validation,
             failure_reason=reason,
+            fixture_only=fixture_only,
         )
 
     try:
-        committed = finalize_home_manager_fixture_transaction(
+        committed = finalize_transaction(
             plan.root,
             journal_root=journal_root,
             transaction_id=provisional.transaction_id,
@@ -151,7 +171,7 @@ def execute_home_manager_fixture_apply_workflow(
         )
     except Exception as error:
         try:
-            rollback = rollback_fixture_transaction(
+            rollback = rollback_transaction(
                 plan.root,
                 journal_root=journal_root,
                 transaction_id=provisional.transaction_id,
@@ -169,6 +189,7 @@ def execute_home_manager_fixture_apply_workflow(
             pre_validation=pre_validation,
             post_validation=post_validation,
             failure_reason=str(error),
+            fixture_only=fixture_only,
         )
 
     return HomeManagerFixtureApplyWorkflowResult(
@@ -176,4 +197,51 @@ def execute_home_manager_fixture_apply_workflow(
         transaction=committed,
         pre_validation=pre_validation,
         post_validation=post_validation,
+        fixture_only=fixture_only,
+    )
+
+
+def execute_home_manager_fixture_apply_workflow(
+    plan: HomeManagerAdoptionPlan,
+    pre_validation: HomeManagerCandidateValidation,
+    *,
+    journal_root: Path,
+    timeout: int = 120,
+    runner: Runner = subprocess.run,
+    which: Which = shutil.which,
+    simulate_interruption_after_commit: bool = False,
+) -> HomeManagerFixtureApplyWorkflowResult:
+    """Commit and re-evaluate Home Manager files only in a marked fixture."""
+    return _execute_home_manager_apply_workflow(
+        plan,
+        pre_validation,
+        journal_root=journal_root,
+        timeout=timeout,
+        runner=runner,
+        which=which,
+        simulate_interruption_after_commit=simulate_interruption_after_commit,
+        fixture_only=True,
+    )
+
+
+def execute_home_manager_live_apply_workflow(
+    plan: HomeManagerAdoptionPlan,
+    pre_validation: HomeManagerCandidateValidation,
+    *,
+    journal_root: Path,
+    timeout: int = 120,
+    runner: Runner = subprocess.run,
+    which: Which = shutil.which,
+    simulate_interruption_after_commit: bool = False,
+) -> HomeManagerFixtureApplyWorkflowResult:
+    """Persist Home Manager source files atomically without activation."""
+    return _execute_home_manager_apply_workflow(
+        plan,
+        pre_validation,
+        journal_root=journal_root,
+        timeout=timeout,
+        runner=runner,
+        which=which,
+        simulate_interruption_after_commit=simulate_interruption_after_commit,
+        fixture_only=False,
     )

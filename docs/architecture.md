@@ -21,21 +21,23 @@ The generated module remains usable without Nix Control Manager.
    helper adapter accepts only protocol-v1 live targets that explicitly report
    read-only, apply-disabled, recovery-disabled, activation-disabled, and no
    arbitrary commands.
-6. **Fixture transaction engine** exercises locking, atomic replacement,
-   journaling, rollback, and crash recovery only in marked temporary roots. It
-   rejects `/etc/nixos` and is not exposed by the CLI or server.
+6. **Transaction engine** exercises locking, atomic replacement, journaling,
+   rollback, and crash recovery. NixOS adoption entrypoints remain restricted
+   to marked fixtures; Home Manager has distinct fixture and configured-live
+   entrypoints with the safety mode recorded in every manifest.
 7. **Helper protocol and test service** implement versioned typed operations,
    exact target/path allow-lists, UID-bound one-time validation receipts, mock
-   Polkit authorization, and Linux `SO_PEERCRED`. A fixture-only backend rebuilds
-   the plan locally and connects the protocol to the complete transaction
-   workflow. A separate live-read-only backend validates an exact `/etc/nixos`
+   Polkit authorization, and Linux `SO_PEERCRED`. The transaction backend
+   rebuilds fixture plans and explicit live Home Manager plans locally. A
+   separate live-read-only backend validates an exact `/etc/nixos`
    adoption plan in a disposable copy and cannot issue a write receipt. A
    recording backend remains available for zero-write protocol tests.
 8. **System helper scaffold** provides an opt-in NixOS module, systemd-owned
    socket, strict service sandbox, and a real fail-closed `pkcheck` authorizer.
-   It routes explicitly marked fixtures to the transaction backend and
-   `/etc/nixos` to a capability-reduced read-only backend. The module is not
-   installed by default and never accepts arbitrary shell commands.
+   It routes explicitly marked fixtures and opt-in live Home Manager source
+   plans to the transaction backend, while ordinary `/etc/nixos` targets use a
+   capability-reduced read-only backend. The module is not installed by default
+   and never accepts arbitrary shell commands.
 9. **Candidate build manager** owns at most one asynchronous job, materializes
    the exact adoption plan in a temporary directory, invokes one fixed
    channel/flake build argument vector without a shell, streams bounded logs,
@@ -217,7 +219,7 @@ copy. Its result deliberately sets configuration write, activation, test,
 switch, flake-input mutation, and lock-file write capabilities to false; the
 only expected mutation is ordinary unprivileged Nix store population.
 
-The internal fixture workflow does not weaken that public contract. Fixture
+The transaction workflow does not weaken that public contract. Fixture
 writes require the exact transaction marker and reject `/etc/nixos`,
 `/etc/home-manager`, and the resolved default `~/.config/home-manager`. The
 journal is outside the configuration root and records
@@ -227,6 +229,13 @@ commit. Its validation/apply receipt store and Polkit actions are separate from
 system adoption. The legacy external state is never deleted or edited;
 its compatible profiles are migration input only when canonical state is
 missing them.
+
+An explicit `live-home-manager` helper target reuses the exact-plan transaction
+only after a second capability gate. Its Home Manager root and journal are
+daemon configuration, not request fields; the system apply flag remains false.
+The service mount namespace exposes only those two paths as writable, records
+the live safety mode in every manifest, re-evaluates the installed sources, and
+never invokes `home-manager switch` or another activation entrypoint.
 
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms

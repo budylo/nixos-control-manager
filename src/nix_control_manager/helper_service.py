@@ -51,6 +51,9 @@ class HelperTarget:
     test_activation_enabled: bool = False
     test_journal_root: Path | None = None
     test_timeout_seconds: int = 300
+    home_manager_apply_enabled: bool = False
+    home_manager_root: Path | None = None
+    home_manager_journal_root: Path | None = None
 
     def __post_init__(self) -> None:
         if not _TARGET_ID.fullmatch(self.target_id):
@@ -66,6 +69,22 @@ class HelperTarget:
             object.__setattr__(
                 self, "test_journal_root", self.test_journal_root.expanduser().resolve()
             )
+        if self.home_manager_root is not None:
+            if self.home_manager_root.expanduser().is_symlink():
+                raise ValueError("The live Home Manager root cannot be a symbolic link")
+            object.__setattr__(
+                self, "home_manager_root", self.home_manager_root.expanduser().resolve()
+            )
+        if self.home_manager_journal_root is not None:
+            if self.home_manager_journal_root.expanduser().is_symlink():
+                raise ValueError(
+                    "The live Home Manager journal cannot be a symbolic link"
+                )
+            object.__setattr__(
+                self,
+                "home_manager_journal_root",
+                self.home_manager_journal_root.expanduser().resolve(),
+            )
         if not self.allowed_relative_paths:
             raise ValueError("A helper target requires at least one allowed path")
         if not self.fixture_only and self.apply_enabled:
@@ -76,6 +95,26 @@ class HelperTarget:
             raise ValueError("Test activation requires a non-writing live target and journal")
         if not self.test_activation_enabled and self.test_journal_root is not None:
             raise ValueError("A test journal is valid only when test activation is enabled")
+        if self.home_manager_apply_enabled:
+            if self.fixture_only or self.apply_enabled or self.test_activation_enabled:
+                raise ValueError(
+                    "Live Home Manager writes require their own non-activating live target"
+                )
+            if self.home_manager_root is None or self.home_manager_journal_root is None:
+                raise ValueError(
+                    "Live Home Manager writes require a root and transaction journal"
+                )
+            if (
+                self.home_manager_journal_root == self.home_manager_root
+                or self.home_manager_journal_root.is_relative_to(self.home_manager_root)
+            ):
+                raise ValueError(
+                    "The Home Manager journal must be outside its configuration root"
+                )
+        elif self.home_manager_root is not None or self.home_manager_journal_root is not None:
+            raise ValueError(
+                "Home Manager root and journal are valid only when live writes are enabled"
+            )
         if not 30 <= self.test_timeout_seconds <= 1800:
             raise ValueError("test_timeout_seconds must be between 30 and 1800")
         for label in self.allowed_relative_paths:
@@ -260,9 +299,9 @@ class RecordingMockBackend:
         )
         return {
             "status": self.validation_status,
-            "fixtureOnly": True,
+            "fixtureOnly": target.fixture_only,
             "workingCopyRemoved": True,
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": target.home_manager_apply_enabled,
             "activationEnabled": False,
         }
 
@@ -278,9 +317,9 @@ class RecordingMockBackend:
         return {
             "state": "mock-home-manager-applied",
             "transactionId": secrets.token_hex(12),
-            "fixtureOnly": True,
+            "fixtureOnly": target.fixture_only,
             "filesWritten": 0,
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": target.home_manager_apply_enabled,
             "activationEnabled": False,
         }
 
@@ -293,9 +332,9 @@ class RecordingMockBackend:
         return {
             "state": "mock-home-manager-recovered",
             "transactionId": transaction_id,
-            "fixtureOnly": True,
+            "fixtureOnly": target.fixture_only,
             "filesWritten": 0,
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": target.home_manager_apply_enabled,
             "activationEnabled": False,
         }
 
@@ -466,7 +505,16 @@ class HelperDispatcher:
                                 "homeManagerFixtureEnabled": (
                                     target.fixture_only and target.apply_enabled
                                 ),
-                                "dryActivatePreviewEnabled": not target.fixture_only,
+                                "homeManagerApplyEnabled": (
+                                    target.fixture_only and target.apply_enabled
+                                ) or target.home_manager_apply_enabled,
+                                "homeManagerLiveWriteEnabled": (
+                                    target.home_manager_apply_enabled
+                                ),
+                                "dryActivatePreviewEnabled": (
+                                    not target.fixture_only
+                                    and not target.home_manager_apply_enabled
+                                ),
                                 "testActivationEnabled": target.test_activation_enabled,
                             }
                             for target in self.targets.values()
@@ -629,10 +677,13 @@ class HelperDispatcher:
     ) -> dict[str, Any]:
         payload = ValidateHomeManagerPlanPayload.from_mapping(raw)
         target = self._target(payload.target_id)
-        if not target.fixture_only or not target.apply_enabled:
+        if not (
+            (target.fixture_only and target.apply_enabled)
+            or target.home_manager_apply_enabled
+        ):
             raise HelperProtocolError(
                 "operation-disabled",
-                "Home Manager helper writes are restricted to fixture targets",
+                "The target does not permit Home Manager apply operations",
             )
         for change in payload.changes:
             if change.relative_path not in target.allowed_relative_paths:
@@ -670,8 +721,8 @@ class HelperDispatcher:
                 "username": payload.username,
                 "integration": payload.integration,
                 "validation": validation,
-                "fixtureOnly": True,
-                "liveWriteEnabled": False,
+                "fixtureOnly": target.fixture_only,
+                "liveWriteEnabled": target.home_manager_apply_enabled,
                 "activationEnabled": False,
             },
         )
@@ -681,10 +732,13 @@ class HelperDispatcher:
     ) -> dict[str, Any]:
         payload = ApplyValidatedHomeManagerPlanPayload.from_mapping(raw)
         target = self._target(payload.target_id)
-        if not target.fixture_only or not target.apply_enabled:
+        if not (
+            (target.fixture_only and target.apply_enabled)
+            or target.home_manager_apply_enabled
+        ):
             raise HelperProtocolError(
                 "operation-disabled",
-                "Home Manager helper writes are restricted to fixture targets",
+                "The target does not permit Home Manager apply operations",
             )
         pending = self._pending_home_manager.get(payload.validation_receipt)
         if (
@@ -723,7 +777,11 @@ class HelperDispatcher:
     ) -> dict[str, Any]:
         payload = PreviewActivationPayload.from_mapping(raw)
         target = self._target(payload.target_id)
-        if target.fixture_only or target.apply_enabled:
+        if (
+            target.fixture_only
+            or target.apply_enabled
+            or target.home_manager_apply_enabled
+        ):
             raise HelperProtocolError(
                 "operation-disabled",
                 "Dry-activation preview is restricted to a read-only live target",
@@ -854,10 +912,13 @@ class HelperDispatcher:
     ) -> dict[str, Any]:
         payload = RecoverHomeManagerTransactionPayload.from_mapping(raw)
         target = self._target(payload.target_id)
-        if not target.fixture_only or not target.apply_enabled:
+        if not (
+            (target.fixture_only and target.apply_enabled)
+            or target.home_manager_apply_enabled
+        ):
             raise HelperProtocolError(
                 "operation-disabled",
-                "Home Manager recovery is restricted to fixture targets",
+                "The target does not permit Home Manager recovery operations",
             )
         details = {
             "targetId": payload.target_id,

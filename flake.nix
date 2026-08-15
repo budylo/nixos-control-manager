@@ -40,6 +40,11 @@
             ncmPackage = self.packages.${system}.default;
             ncmModule = self.nixosModules.default;
           };
+          live-home-manager-vm-test = import ./tests/nixos/live-home-manager-vm-test.nix {
+            inherit pkgs;
+            ncmPackage = self.packages.${system}.default;
+            ncmModule = self.nixosModules.default;
+          };
         });
 
       apps = forAllSystems (system: {
@@ -104,6 +109,22 @@
               })
             ];
           };
+          evaluatedLiveHomeManager = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              ({ ... }: {
+                system.stateVersion = "26.05";
+                users.users.live-home-user.isNormalUser = true;
+                services.nix-control-manager-helper = {
+                  enable = true;
+                  mode = "live-home-manager";
+                  targetId = "live-home";
+                  allowedUsers = [ "live-home-user" ];
+                };
+              })
+            ];
+          };
           service = evaluated.config.systemd.services.nix-control-manager-helper;
           socket = evaluated.config.systemd.sockets.nix-control-manager-helper;
           serviceUnit = evaluated.config.systemd.units."nix-control-manager-helper.service".unit;
@@ -112,6 +133,8 @@
           liveServiceUnit = evaluatedLiveReadOnly.config.systemd.units."nix-control-manager-helper.service".unit;
           liveTestService = evaluatedLiveTest.config.systemd.services.nix-control-manager-helper;
           liveTestServiceUnit = evaluatedLiveTest.config.systemd.units."nix-control-manager-helper.service".unit;
+          liveHomeService = evaluatedLiveHomeManager.config.systemd.services.nix-control-manager-helper;
+          liveHomeServiceUnit = evaluatedLiveHomeManager.config.systemd.units."nix-control-manager-helper.service".unit;
           liveTargetEvaluation = builtins.tryEval (
             (nixpkgs.lib.nixosSystem {
               inherit system;
@@ -278,6 +301,12 @@
             assert liveTestService.serviceConfig.ReadWritePaths == [ "/var/lib/nix-control-manager/test-activations" ];
             assert liveTestService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveTestService.serviceConfig);
+            assert liveHomeService.serviceConfig.ReadWritePaths == [
+              "/etc/nixos"
+              "/var/lib/nix-control-manager/home-manager-transactions"
+            ];
+            assert liveHomeService.serviceConfig.CapabilityBoundingSet == "";
+            assert !(builtins.hasAttr "StateDirectory" liveHomeService.serviceConfig);
             assert socket.socketConfig.SocketMode == "0660";
             assert socket.socketConfig.SocketGroup == "nix-control-manager";
             pkgs.runCommand "nix-control-manager-module-check" { } ''
@@ -293,6 +322,9 @@
               grep -F 'ReadOnlyPaths=/etc/nixos' ${liveTestServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/test-activations' ${liveTestServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveTestServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/etc/nixos' ${liveHomeServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/var/lib/nix-control-manager/home-manager-transactions' ${liveHomeServiceUnit}/nix-control-manager-helper.service
+              grep -x 'CapabilityBoundingSet=' ${liveHomeServiceUnit}/nix-control-manager-helper.service
               if grep -F 'ReadWritePaths=' ${liveServiceUnit}/nix-control-manager-helper.service; then
                 echo 'live-read-only service unexpectedly has ReadWritePaths' >&2
                 exit 1
@@ -310,12 +342,14 @@
               cp ${socketUnit}/nix-control-manager-helper.socket "$out/"
               cp ${liveServiceUnit}/nix-control-manager-helper.service "$out/live-read-only.service"
               cp ${liveTestServiceUnit}/nix-control-manager-helper.service "$out/live-test.service"
+              cp ${liveHomeServiceUnit}/nix-control-manager-helper.service "$out/live-home-manager.service"
               touch "$out/passed"
             '';
         } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           helper-vm = self.packages.${system}.helper-vm-test;
           live-read-only-ui-vm = self.packages.${system}.live-read-only-ui-vm-test;
           live-test-recovery-vm = self.packages.${system}.live-test-recovery-vm-test;
+          live-home-manager-vm = self.packages.${system}.live-home-manager-vm-test;
         });
 
       devShells = forAllSystems (system:

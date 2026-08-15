@@ -56,8 +56,8 @@
 - unprivileged closure diff plus Polkit-authorized `dry-activate` report bound
   to the exact validated build output, with explicit incomplete-report warning
   and VM proof of unchanged source/current generation (implemented);
-- live-target helper (read-only validation implemented; Polkit-backed writes
-  remain unimplemented);
+- live-target helper (read-only system validation implemented; NixOS adoption
+  writes remain unimplemented; Home Manager has a separate narrow write mode);
 - opt-in exact-output `test` activation with a UID-bound receipt, root-only
   journal, timer-first automatic runtime recovery, and separate manual recovery
   (implemented experimentally; permanent `switch` remains disabled);
@@ -93,12 +93,14 @@
 - read-only discovery of Home Manager in NixOS-module and standalone modes,
   including statically identifiable users and source files (implemented);
 - separate versioned user-state model with explicit integration per user and a
-  canonical per-root path (implemented; live writes remain disabled);
+  canonical per-root path (implemented; live persistence requires the explicit
+  helper mode);
 - deterministic per-user Home Manager module and diff preview, restricted to
   an exactly detected user/integration and with all writes disabled
   (implemented);
 - read-only, integration-specific source adoption plans with exact diffs and
-  disposable parse/evaluation (implemented; live apply remains disabled);
+  disposable parse/evaluation (implemented; graphical live apply remains
+  disabled, typed helper/CLI apply is opt-in);
 - fingerprint-bound, unprivileged build-preview for the exact Home Manager
   `activationPackage`, with streamed logs, cancellation, timeout, disposable
   cleanup, and no activation (implemented; legacy standalone remains unavailable);
@@ -107,14 +109,15 @@
   unchanged source, canonical state, result link, and user profile guarantees
   (implemented as part of the live read-only UI flake check);
 - atomic Home Manager module/import persistence with fingerprint, journal,
-  post-commit evaluation, rollback, and crash recovery (implemented only for
-  explicitly marked disposable fixtures; typed diagnostic helper path
-  implemented, with no HTTP/GUI/live endpoint);
+  post-commit evaluation, rollback, and crash recovery (implemented for marked
+  fixtures and the explicit `live-home-manager` helper mode; no HTTP/GUI apply);
 - separate Home Manager fixture validation/apply/recovery operations, UID-bound
   single-use receipts, exact allow-lists, and Polkit actions (implemented);
 - atomic canonical user-state persistence in the same marked-fixture
   transaction as modules/imports (implemented; legacy source remains read-only);
-- Home Manager live managed-module and user-state persistence (not implemented);
+- Home Manager live managed-module and user-state persistence (implemented as
+  an opt-in typed helper/CLI vertical slice with VM proof; graphical apply and
+  activation remain unimplemented);
 - user/system package scope (separate catalog selection and preview implemented;
   persistence remains);
 - profiles and reusable presets.

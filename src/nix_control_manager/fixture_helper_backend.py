@@ -25,9 +25,13 @@ from .home_manager_adoption import (
     HomeManagerCandidateValidation,
     validate_home_manager_adoption,
 )
-from .home_manager_apply_workflow import execute_home_manager_fixture_apply_workflow
+from .home_manager_apply_workflow import (
+    execute_home_manager_fixture_apply_workflow,
+    execute_home_manager_live_apply_workflow,
+)
 from .transaction import (
     recover_pending_fixture_transactions,
+    recover_pending_home_manager_live_transactions,
 )
 
 
@@ -46,7 +50,7 @@ class _PreparedHomeManagerFixturePlan:
 
 
 class FixtureWorkflowHelperBackend:
-    """Connect the helper protocol to the apply workflow, still fixture-only."""
+    """Run transactional fixture workflows and opt-in Home Manager persistence."""
 
     def __init__(
         self,
@@ -155,9 +159,14 @@ class FixtureWorkflowHelperBackend:
         peer_uid: int,
     ) -> Mapping[str, Any]:
         try:
-            if target.journal_root is None:
+            journal_root = (
+                target.journal_root
+                if target.fixture_only
+                else target.home_manager_journal_root
+            )
+            if journal_root is None:
                 raise HelperBackendError(
-                    "invalid-target", "The fixture target has no transaction journal root"
+                    "invalid-target", "The target has no Home Manager transaction journal"
                 )
             local_plan, effective_target = match_local_home_manager_plan(target, payload)
             validation = validate_home_manager_adoption(
@@ -180,9 +189,9 @@ class FixtureWorkflowHelperBackend:
                 "warnings": list(validation.warnings),
                 "checks": [check.to_mapping() for check in validation.checks],
                 "workingCopyRemoved": validation.working_copy_removed,
-                "fixtureOnly": True,
+                "fixtureOnly": target.fixture_only,
                 "writeEnabled": False,
-                "liveWriteEnabled": False,
+                "liveWriteEnabled": target.home_manager_apply_enabled,
                 "activationEnabled": False,
                 "buildEnabled": False,
             }
@@ -205,9 +214,9 @@ class FixtureWorkflowHelperBackend:
                 for check in validation.checks
             ],
             "workingCopyRemoved": validation.working_copy_removed,
-            "fixtureOnly": True,
+            "fixtureOnly": target.fixture_only,
             "writeEnabled": False,
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": target.home_manager_apply_enabled,
             "activationEnabled": False,
             "buildEnabled": False,
         }
@@ -225,12 +234,25 @@ class FixtureWorkflowHelperBackend:
                 "validated-plan-missing",
                 "The backend no longer holds the validated Home Manager plan",
             )
-        assert target.journal_root is not None
+        journal_root = (
+            target.journal_root
+            if target.fixture_only
+            else target.home_manager_journal_root
+        )
+        if journal_root is None:
+            raise HelperBackendError(
+                "invalid-target", "The target has no Home Manager transaction journal"
+            )
         try:
-            result = execute_home_manager_fixture_apply_workflow(
+            workflow = (
+                execute_home_manager_fixture_apply_workflow
+                if target.fixture_only
+                else execute_home_manager_live_apply_workflow
+            )
+            result = workflow(
                 prepared.plan,
                 prepared.validation,
-                journal_root=target.journal_root,
+                journal_root=journal_root,
                 timeout=self.timeout,
                 runner=self.runner,
                 which=self.which,
@@ -277,31 +299,50 @@ class FixtureWorkflowHelperBackend:
     def recover_home_manager_transaction(
         self, target: HelperTarget, transaction_id: str, peer_uid: int
     ) -> Mapping[str, Any]:
-        if not target.fixture_only or target.journal_root is None:
-            raise HelperBackendError("fixture-required", "Recovery target is not a fixture")
-        try:
-            recovered = recover_pending_fixture_transactions(
-                target.configuration_root,
-                journal_root=target.journal_root,
-                transaction_id=transaction_id,
-                transaction_kind="home-manager-adoption",
+        journal_root = (
+            target.journal_root
+            if target.fixture_only
+            else target.home_manager_journal_root
+        )
+        root = (
+            target.configuration_root
+            if target.fixture_only
+            else target.home_manager_root
+        )
+        if journal_root is None or root is None:
+            raise HelperBackendError(
+                "invalid-target", "The target has no Home Manager recovery configuration"
             )
+        try:
+            if target.fixture_only:
+                recovered = recover_pending_fixture_transactions(
+                    root,
+                    journal_root=journal_root,
+                    transaction_id=transaction_id,
+                    transaction_kind="home-manager-adoption",
+                )
+            else:
+                recovered = recover_pending_home_manager_live_transactions(
+                    root,
+                    journal_root=journal_root,
+                    transaction_id=transaction_id,
+                )
         except (OSError, TransactionError, ValueError) as error:
             raise HelperBackendError("recovery-failed", str(error)) from error
         if not recovered:
             return {
                 "state": "no-pending-transaction",
                 "transactionId": transaction_id,
-                "fixtureOnly": True,
+                "fixtureOnly": target.fixture_only,
                 "filesWritten": 0,
-                "liveWriteEnabled": False,
+                "liveWriteEnabled": target.home_manager_apply_enabled,
                 "activationEnabled": False,
             }
         result = recovered[0]
         return {
             **result.to_mapping(),
             "filesWritten": len(result.changed_files),
-            "liveWriteEnabled": False,
+            "liveWriteEnabled": target.home_manager_apply_enabled,
             "activationEnabled": False,
         }
 

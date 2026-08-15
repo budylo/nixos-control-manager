@@ -1,16 +1,16 @@
 # Atomic apply and recovery protocol
 
-This document specifies the future privileged write boundary. The journaled
-transaction core and helper adapter are implemented only for explicitly marked
-disposable fixtures. A typed diagnostic CLI can invoke the configured fixture
-helper, but there is no HTTP, GUI, or live-write endpoint. The engine rejects
-the standard live NixOS and Home Manager roots; the current application cannot apply
-an adoption plan to the live system or activate a generation. The separate
+This document specifies the privileged source-write boundary. NixOS system
+adoption remains implemented only for explicitly marked disposable fixtures.
+Home Manager additionally has a separate opt-in `live-home-manager` mode with a
+fixed configuration root and external journal. A typed diagnostic CLI can
+invoke either configured path, but there is no HTTP/GUI apply endpoint. Neither
+path can activate a generation. The separate
 local build-preview API can build the
 same candidate as an unprivileged user into `/nix/store`, with no output link;
 it grants no write or activation authority to this protocol.
 
-## Implemented fixture transaction core
+## Implemented transaction core
 
 The test-only engine currently provides:
 
@@ -35,14 +35,17 @@ The test-only engine currently provides:
 - `recovery-required` escalation instead of overwriting a file edited after the
   crash.
 
-This is infrastructure for the future helper, not permission to connect it to a
-live configuration.
+Fixture entrypoints preserve the marker and live-root refusal. Live Home Manager
+uses separate public entrypoints that require daemon-provided roots, record
+`fixtureOnly = false`, reject `/`, `/nix/store`, symlink roots, nested journals,
+and any file outside the exact target allow-list.
 
 The same core now supports a distinct `home-manager-adoption` journal kind for
 both NixOS-module and standalone plans. It requires a successful full evaluation
 in addition to parse checks, binds the exact root, user, integration, candidate
 state, target and file digests into the fingerprint, and performs a second
-evaluation after provisional commit. This path remains fixture-only. Canonical
+evaluation after provisional commit. This path is fixture-only by default and
+available live only through `mode = "live-home-manager"`. Canonical
 `ncm/user-state.json` is validated and committed in the
 same transaction as the module and import changes; external legacy state is
 never modified.
@@ -85,16 +88,15 @@ restore.
    scoped to writing those exact files.
 4. **Prepare** — lock the NCM transaction directory, recheck original digests,
    create same-filesystem temporary files, flush them, and create recoverable
-   backups of existing targets. Implemented for fixtures.
+   backups of existing targets.
 5. **Commit** — replace files atomically one at a time and flush their parent
-   directories. Update a journal after every replacement. Implemented for
-   fixtures.
+   directories. Update a journal after every replacement.
 6. **Verify** — while the journal is `awaiting-verification`, copy the installed
    fixture and rerun the workflow-specific evaluation without proposing any
-   additional changes. No activation is performed. Implemented for fixtures.
+   additional changes. No activation is performed.
 7. **Finish** — recheck installed candidate digests, mark the journal committed,
    and retain the manifest and backups according to the recovery policy.
-   Implemented for fixtures.
+   Implemented for fixture and opt-in live Home Manager transactions.
 
 ## Failure and recovery
 

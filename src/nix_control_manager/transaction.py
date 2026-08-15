@@ -37,6 +37,7 @@ class TransactionResult:
     state: str
     journal_path: Path
     changed_files: tuple[str, ...]
+    fixture_only: bool = True
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -44,7 +45,7 @@ class TransactionResult:
             "state": self.state,
             "journalPath": str(self.journal_path),
             "changedFiles": list(self.changed_files),
-            "fixtureOnly": True,
+            "fixtureOnly": self.fixture_only,
             "activationEnabled": False,
         }
 
@@ -97,6 +98,29 @@ def _require_fixture_root(root: Path) -> Path:
 def require_transaction_fixture(root: Path) -> Path:
     """Public read-only fixture gate used by the mock helper backend."""
     return _require_fixture_root(root)
+
+
+def _require_live_home_manager_root(root: Path) -> Path:
+    candidate = root.expanduser()
+    if candidate.is_symlink():
+        raise TransactionError("The live Home Manager root cannot be a symbolic link")
+    resolved = candidate.resolve()
+    if not resolved.is_dir():
+        raise TransactionError("The live Home Manager root must be an existing directory")
+    if resolved == Path("/") or resolved.is_relative_to(Path("/nix/store")):
+        raise TransactionError("Unsafe live Home Manager configuration root")
+    return resolved
+
+
+def require_live_home_manager_root(root: Path) -> Path:
+    """Validate a configured live Home Manager source root without writing."""
+    return _require_live_home_manager_root(root)
+
+
+def _transaction_root(root: Path, *, fixture_only: bool) -> Path:
+    if fixture_only:
+        return _require_fixture_root(root)
+    return _require_live_home_manager_root(root)
 
 
 def _digest_bytes(content: bytes) -> str:
@@ -410,13 +434,14 @@ def _restore_from_manifest(
     _cleanup_stages_and_directories(root, manifest)
 
 
-def _apply_validated_changes_in_fixture(
+def _apply_validated_changes(
     *,
     root: Path,
     changes: tuple[PlannedFileChange, ...],
     fingerprint: str,
     journal_root: Path,
     transaction_kind: str,
+    fixture_only: bool,
     fault_after_commits: int | None = None,
     simulate_crash: bool = False,
 ) -> TransactionResult:
@@ -442,6 +467,7 @@ def _apply_validated_changes_in_fixture(
         "transactionId": transaction_id,
         "configurationRoot": str(root),
         "transactionKind": transaction_kind,
+        "fixtureOnly": fixture_only,
         "planFingerprint": fingerprint,
         "state": "preparing",
         "createdDirectories": [],
@@ -514,6 +540,7 @@ def _apply_validated_changes_in_fixture(
             state="awaiting-verification",
             journal_path=transaction_dir / _MANIFEST_NAME,
             changed_files=tuple(change.relative_path for change in changes),
+            fixture_only=fixture_only,
         )
     except SimulatedTransactionCrash:
         raise
@@ -548,12 +575,13 @@ def apply_plan_in_fixture(
     """Apply a NixOS adoption plan only to a marked disposable fixture."""
     root = _require_fixture_root(plan.inspection.config_root)
     fingerprint = _validate_plan(plan, validation, root)
-    return _apply_validated_changes_in_fixture(
+    return _apply_validated_changes(
         root=root,
         changes=plan.changes,
         fingerprint=fingerprint,
         journal_root=journal_root,
         transaction_kind="nixos-adoption",
+        fixture_only=True,
         fault_after_commits=fault_after_commits,
         simulate_crash=simulate_crash,
     )
@@ -570,35 +598,62 @@ def apply_home_manager_plan_in_fixture(
     """Apply a Home Manager plan only to a marked disposable fixture."""
     root = _require_fixture_root(plan.root)
     fingerprint = _validate_home_manager_plan(plan, validation, root)
-    return _apply_validated_changes_in_fixture(
+    return _apply_validated_changes(
         root=root,
         changes=plan.changes,
         fingerprint=fingerprint,
         journal_root=journal_root,
         transaction_kind="home-manager-adoption",
+        fixture_only=True,
         fault_after_commits=fault_after_commits,
         simulate_crash=simulate_crash,
     )
 
 
-def _finalize_validated_fixture_transaction(
+def apply_home_manager_plan_live(
+    plan: HomeManagerAdoptionPlan,
+    validation: HomeManagerCandidateValidation,
+    *,
+    journal_root: Path,
+    fault_after_commits: int | None = None,
+    simulate_crash: bool = False,
+) -> TransactionResult:
+    """Apply an exact validated Home Manager plan without activating it."""
+    root = _require_live_home_manager_root(plan.root)
+    fingerprint = _validate_home_manager_plan(plan, validation, root)
+    return _apply_validated_changes(
+        root=root,
+        changes=plan.changes,
+        fingerprint=fingerprint,
+        journal_root=journal_root,
+        transaction_kind="home-manager-adoption",
+        fixture_only=False,
+        fault_after_commits=fault_after_commits,
+        simulate_crash=simulate_crash,
+    )
+
+
+def _finalize_validated_transaction(
     root: Path,
     *,
     journal_root: Path,
     transaction_id: str,
     verification: CandidateValidation | HomeManagerCandidateValidation,
     transaction_kind: str,
+    fixture_only: bool,
 ) -> TransactionResult:
-    fixture_root = _require_fixture_root(root)
+    transaction_root = _transaction_root(root, fixture_only=fixture_only)
     journal, transaction_dir = _transaction_paths(
-        fixture_root, journal_root, transaction_id
+        transaction_root, journal_root, transaction_id
     )
     lock_descriptor, lock_path = _acquire_lock(journal)
     try:
         manifest_path = transaction_dir / _MANIFEST_NAME
         manifest = _load_manifest(manifest_path)
-        if manifest.get("configurationRoot") != str(fixture_root):
+        if manifest.get("configurationRoot") != str(transaction_root):
             raise TransactionError("Transaction journal targets a different root")
+        if manifest.get("fixtureOnly", True) is not fixture_only:
+            raise TransactionError("Transaction journal has a different safety mode")
         if manifest.get("transactionKind", "nixos-adoption") != transaction_kind:
             raise TransactionError("Transaction journal belongs to a different workflow")
         if manifest.get("state") != "awaiting-verification":
@@ -616,7 +671,7 @@ def _finalize_validated_fixture_transaction(
             for check in verification.checks
         ):
             raise TransactionError("The post-commit evaluation check is missing")
-        _verify_installed_candidates(fixture_root, manifest)
+        _verify_installed_candidates(transaction_root, manifest)
         manifest["postVerification"] = _verification_summary(verification)
         manifest["state"] = "committed"
         _atomic_json(manifest_path, manifest)
@@ -625,6 +680,7 @@ def _finalize_validated_fixture_transaction(
             state="committed",
             journal_path=manifest_path,
             changed_files=tuple(entry["path"] for entry in manifest["changes"]),
+            fixture_only=fixture_only,
         )
     finally:
         _release_lock(lock_descriptor, lock_path)
@@ -637,12 +693,13 @@ def finalize_fixture_transaction(
     transaction_id: str,
     verification: CandidateValidation,
 ) -> TransactionResult:
-    return _finalize_validated_fixture_transaction(
+    return _finalize_validated_transaction(
         root,
         journal_root=journal_root,
         transaction_id=transaction_id,
         verification=verification,
         transaction_kind="nixos-adoption",
+        fixture_only=True,
     )
 
 
@@ -653,33 +710,54 @@ def finalize_home_manager_fixture_transaction(
     transaction_id: str,
     verification: HomeManagerCandidateValidation,
 ) -> TransactionResult:
-    return _finalize_validated_fixture_transaction(
+    return _finalize_validated_transaction(
         root,
         journal_root=journal_root,
         transaction_id=transaction_id,
         verification=verification,
         transaction_kind="home-manager-adoption",
+        fixture_only=True,
     )
 
 
-def rollback_fixture_transaction(
+def finalize_home_manager_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    verification: HomeManagerCandidateValidation,
+) -> TransactionResult:
+    return _finalize_validated_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        verification=verification,
+        transaction_kind="home-manager-adoption",
+        fixture_only=False,
+    )
+
+
+def _rollback_transaction(
     root: Path,
     *,
     journal_root: Path,
     transaction_id: str,
     reason: str,
     verification: CandidateValidation | HomeManagerCandidateValidation | None = None,
+    fixture_only: bool,
 ) -> TransactionResult:
-    fixture_root = _require_fixture_root(root)
+    transaction_root = _transaction_root(root, fixture_only=fixture_only)
     journal, transaction_dir = _transaction_paths(
-        fixture_root, journal_root, transaction_id
+        transaction_root, journal_root, transaction_id
     )
     lock_descriptor, lock_path = _acquire_lock(journal)
     try:
         manifest_path = transaction_dir / _MANIFEST_NAME
         manifest = _load_manifest(manifest_path)
-        if manifest.get("configurationRoot") != str(fixture_root):
+        if manifest.get("configurationRoot") != str(transaction_root):
             raise TransactionError("Transaction journal targets a different root")
+        if manifest.get("fixtureOnly", True) is not fixture_only:
+            raise TransactionError("Transaction journal has a different safety mode")
         if manifest.get("state") in {"committed", "rolled-back", "recovered"}:
             raise TransactionError(
                 f"Transaction cannot be rolled back from state {manifest.get('state')}"
@@ -689,7 +767,7 @@ def rollback_fixture_transaction(
         manifest["postVerification"] = _verification_summary(verification)
         _atomic_json(manifest_path, manifest)
         try:
-            _restore_from_manifest(fixture_root, transaction_dir, manifest)
+            _restore_from_manifest(transaction_root, transaction_dir, manifest)
         except Exception as error:
             manifest["state"] = "recovery-required"
             manifest["recoveryError"] = str(error)
@@ -704,19 +782,57 @@ def rollback_fixture_transaction(
             state="rolled-back",
             journal_path=manifest_path,
             changed_files=tuple(entry["path"] for entry in manifest["changes"]),
+            fixture_only=fixture_only,
         )
     finally:
         _release_lock(lock_descriptor, lock_path)
 
 
-def recover_pending_fixture_transactions(
+def rollback_fixture_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    reason: str,
+    verification: CandidateValidation | HomeManagerCandidateValidation | None = None,
+) -> TransactionResult:
+    return _rollback_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        reason=reason,
+        verification=verification,
+        fixture_only=True,
+    )
+
+
+def rollback_home_manager_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    reason: str,
+    verification: HomeManagerCandidateValidation | None = None,
+) -> TransactionResult:
+    return _rollback_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        reason=reason,
+        verification=verification,
+        fixture_only=False,
+    )
+
+
+def _recover_pending_transactions(
     root: Path,
     *,
     journal_root: Path,
     transaction_id: str | None = None,
     transaction_kind: str | None = None,
+    fixture_only: bool,
 ) -> tuple[TransactionResult, ...]:
-    fixture_root = _require_fixture_root(root)
+    transaction_root = _transaction_root(root, fixture_only=fixture_only)
     if transaction_id is not None and not _TRANSACTION_ID.fullmatch(transaction_id):
         raise TransactionError("Invalid transaction identifier")
     journal_input = journal_root.expanduser()
@@ -739,7 +855,13 @@ def recover_pending_fixture_transactions(
             if not transaction_dir.is_dir() or not manifest_path.is_file():
                 continue
             manifest = _load_manifest(manifest_path)
-            if manifest.get("configurationRoot") != str(fixture_root):
+            if manifest.get("configurationRoot") != str(transaction_root):
+                continue
+            if manifest.get("fixtureOnly", True) is not fixture_only:
+                if transaction_id is not None:
+                    raise TransactionError(
+                        "Transaction journal has a different safety mode"
+                    )
                 continue
             manifest_kind = manifest.get("transactionKind", "nixos-adoption")
             if transaction_kind is not None and manifest_kind != transaction_kind:
@@ -753,7 +875,7 @@ def recover_pending_fixture_transactions(
             manifest["state"] = "recovering"
             _atomic_json(manifest_path, manifest)
             try:
-                _restore_from_manifest(fixture_root, transaction_dir, manifest)
+                _restore_from_manifest(transaction_root, transaction_dir, manifest)
             except Exception as error:
                 manifest["state"] = "recovery-required"
                 manifest["recoveryError"] = str(error)
@@ -769,8 +891,40 @@ def recover_pending_fixture_transactions(
                     state="recovered",
                     journal_path=manifest_path,
                     changed_files=tuple(entry["path"] for entry in manifest["changes"]),
+                    fixture_only=fixture_only,
                 )
             )
     finally:
         _release_lock(lock_descriptor, lock_path)
     return tuple(recovered)
+
+
+def recover_pending_fixture_transactions(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str | None = None,
+    transaction_kind: str | None = None,
+) -> tuple[TransactionResult, ...]:
+    return _recover_pending_transactions(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        transaction_kind=transaction_kind,
+        fixture_only=True,
+    )
+
+
+def recover_pending_home_manager_live_transactions(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str | None = None,
+) -> tuple[TransactionResult, ...]:
+    return _recover_pending_transactions(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        transaction_kind="home-manager-adoption",
+        fixture_only=False,
+    )

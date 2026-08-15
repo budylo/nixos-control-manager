@@ -145,7 +145,11 @@ class LiveReadOnlyHelperBackend:
         peer_uid: int,
     ) -> Mapping[str, Any]:
         """Run only the verified NixOS dry-activation entrypoint as root."""
-        if target.fixture_only or target.apply_enabled:
+        if (
+            target.fixture_only
+            or target.apply_enabled
+            or target.home_manager_apply_enabled
+        ):
             raise HelperBackendError(
                 "read-only-target-required", "A read-only live target is required"
             )
@@ -522,6 +526,11 @@ class RoutingHelperBackend:
     def _backend(self, target: HelperTarget) -> Any:
         return self.fixture_backend if target.fixture_only else self.live_backend
 
+    def _home_manager_backend(self, target: HelperTarget) -> Any:
+        if target.fixture_only or target.home_manager_apply_enabled:
+            return self.fixture_backend
+        return self.live_backend
+
     def validate_plan(self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int):
         return self._backend(target).validate_plan(target, plan, peer_uid)
 
@@ -543,7 +552,7 @@ class RoutingHelperBackend:
         plan: ValidateHomeManagerPlanPayload,
         peer_uid: int,
     ):
-        return self._backend(target).validate_home_manager_plan(
+        return self._home_manager_backend(target).validate_home_manager_plan(
             target, plan, peer_uid
         )
 
@@ -553,14 +562,14 @@ class RoutingHelperBackend:
         plan: PendingValidatedHomeManagerPlan,
         peer_uid: int,
     ):
-        return self._backend(target).apply_validated_home_manager_plan(
+        return self._home_manager_backend(target).apply_validated_home_manager_plan(
             target, plan, peer_uid
         )
 
     def recover_home_manager_transaction(
         self, target: HelperTarget, transaction_id: str, peer_uid: int
     ):
-        return self._backend(target).recover_home_manager_transaction(
+        return self._home_manager_backend(target).recover_home_manager_transaction(
             target, transaction_id, peer_uid
         )
 
@@ -593,7 +602,9 @@ class RoutingHelperBackend:
         peer_uid: int,
     ) -> None:
         discard = getattr(
-            self._backend(target), "discard_validated_home_manager_plan", None
+            self._home_manager_backend(target),
+            "discard_validated_home_manager_plan",
+            None,
         )
         if discard is not None:
             discard(target, plan, peer_uid)

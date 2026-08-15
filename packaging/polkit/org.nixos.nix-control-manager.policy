@@ -26,8 +26,8 @@
   </action>
 
   <action id="org.nixos.nix-control-manager.apply-validated-home-manager-plan">
-    <description>Apply a validated Home Manager fixture plan</description>
-    <message>Authentication is required to write the validated Home Manager fixture files</message>
+    <description>Persist a validated Home Manager plan</description>
+    <message>Authentication is required to write the exact validated Home Manager source files</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -36,8 +36,8 @@
   </action>
 
   <action id="org.nixos.nix-control-manager.recover-home-manager-transaction">
-    <description>Recover an incomplete Home Manager fixture transaction</description>
-    <message>Authentication is required to recover the Home Manager fixture transaction</message>
+    <description>Recover an incomplete Home Manager source transaction</description>
+    <message>Authentication is required to recover the Home Manager source transaction</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>

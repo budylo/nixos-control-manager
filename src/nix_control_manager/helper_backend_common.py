@@ -16,7 +16,7 @@ from .home_manager_adoption import (
     plan_home_manager_adoption,
 )
 from .home_manager_inspector import inspect_home_manager
-from .transaction import require_transaction_fixture
+from .transaction import require_live_home_manager_root, require_transaction_fixture
 
 
 def _change_mapping(plan: AdoptionPlan) -> dict[str, CandidateFile]:
@@ -86,21 +86,29 @@ def match_local_home_manager_plan(
     target: HelperTarget,
     payload: ValidateHomeManagerPlanPayload,
 ) -> tuple[HomeManagerAdoptionPlan, str | None]:
-    if not target.fixture_only or not target.apply_enabled:
+    fixture_enabled = target.fixture_only and target.apply_enabled
+    if not fixture_enabled and not target.home_manager_apply_enabled:
         raise HelperBackendError(
-            "fixture-required", "Home Manager helper writes require a fixture target"
+            "operation-disabled", "Home Manager helper writes are disabled"
         )
-    require_transaction_fixture(target.configuration_root)
-    legacy_state = target.configuration_root / "user-state.local.json"
+    if target.fixture_only:
+        root = require_transaction_fixture(target.configuration_root)
+    else:
+        if target.home_manager_root is None:
+            raise HelperBackendError(
+                "invalid-target", "The live Home Manager root is not configured"
+            )
+        root = require_live_home_manager_root(target.home_manager_root)
+    legacy_state = root / "user-state.local.json"
     inspection = inspect_home_manager(
-        target.configuration_root,
-        standalone_root=target.configuration_root,
+        root,
+        standalone_root=root,
         user_state_path=legacy_state,
         current_user=payload.username,
     )
     plan = plan_home_manager_adoption(
-        target.configuration_root,
-        standalone_root=target.configuration_root,
+        root,
+        standalone_root=root,
         user_state_path=legacy_state,
         username=payload.username,
         integration=payload.integration,

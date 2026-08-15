@@ -1,7 +1,7 @@
 # Privileged helper protocol
 
 Protocol version 1 is implemented with recording, fixture-workflow, and
-live backends. The daemon configuration schema is version 3; this is
+live backends. The daemon configuration schema is version 4; this is
 separate from the stable wire-protocol version. The service remains opt-in.
 
 ## Transport and identity
@@ -21,13 +21,14 @@ systemd-owned socket descriptor; its socket is `0660` and group-restricted.
   return a receipt;
 - `apply-validated-plan` — accepts only target ID, plan fingerprint, and receipt;
   it cannot resubmit file content;
-- `validate-home-manager-plan` — fixture targets only; accepts one detected user,
+- `validate-home-manager-plan` — marked fixture or explicit
+  `live-home-manager` targets only; accepts one detected user,
   an explicit integration, at most 500 typed package attribute paths, and the
   exact candidate files. The helper independently reconstructs and evaluates
   the same plan before issuing a workflow-specific receipt;
-- `apply-validated-home-manager-plan` — fixture targets only; accepts only the
+- `apply-validated-home-manager-plan` — accepts only the
   target, fingerprint, and Home Manager validation receipt;
-- `recover-home-manager-transaction` — fixture targets only; recovers one exact
+- `recover-home-manager-transaction` — recovers one exact
   24-character transaction ID only when its journal kind is
   `home-manager-adoption`;
 - `preview-activation` — live modes only; accepts the same exact typed
@@ -94,7 +95,7 @@ The system authorizer invokes `pkcheck` without a shell, using the peer's
 agent, dismissal, timeout, malformed details, or any nonzero result. The policy
 is installed only when the NixOS module is explicitly enabled.
 
-## Fixture backend boundary
+## Transaction backend boundary
 
 The fixture backend independently rebuilds the local adoption plan and requires
 the submitted fingerprint, digests, paths, actions, and complete candidate
@@ -117,13 +118,20 @@ only legacy migration input is the fixed
 `<configurationRoot>/user-state.local.json`; no request may submit a state path
 or another standalone root.
 
-The backend requires the exact fixture marker and still hard-refuses
+Fixture targets require the exact fixture marker and still hard-refuse
 `/etc/nixos`. The Linux integration script copies a real configuration into a
 temporary directory, runs the protocol over a Unix socket with real Nix
 evaluation, compares all source hashes, and removes the copy. Production
-service sandboxing and real Polkit integration are implemented for fixtures;
-a live target uses a separate backend and can never enter this transaction
-path.
+service sandboxing and real Polkit integration are implemented for fixtures.
+
+Schema 4 adds one deliberately separate exception: `mode: "live-home-manager"`.
+It keeps system `applyEnabled` and `recoveryEnabled` false while advertising
+`homeManagerApplyEnabled` and `homeManagerLiveWriteEnabled`. Its configured
+`homeManagerRoot` and external `homeManagerJournalRoot` are fixed at daemon
+startup; neither comes from a wire request. The same exact-plan engine is used
+with `fixtureOnly: false` recorded in the journal and result. System apply,
+test/switch activation, arbitrary paths, and Home Manager activation remain
+unavailable.
 
 A second Linux integration creates a standalone Home Manager fixture, carries
 the exact three-file plan through a real Unix socket and kernel peer UID, and
@@ -151,9 +159,10 @@ Successful validation returns `readOnly: true` and `applyEnabled: false` but no
 `operation-disabled` before receipt lookup, Polkit, or any backend write method.
 Capabilities publish `liveTarget`, `readOnly`, `applyEnabled`, and
 `recoveryEnabled` for every configured target, plus
-`homeManagerFixtureEnabled` only for writable marked fixtures. All Home Manager
-write operations on a live target return `operation-disabled` before receipt
-lookup, backend dispatch, or Polkit.
+`homeManagerFixtureEnabled` only for writable marked fixtures. Capabilities
+publish the separate Home Manager apply/live-write flags. Ordinary live modes
+return `operation-disabled` before receipt lookup, backend dispatch, or Polkit;
+only `live-home-manager` enters the Home Manager transaction backend.
 
 The booted NixOS VM check additionally exercises the installed policy, real
 systemd socket activation, one denied user and one VM-authorized user, and the

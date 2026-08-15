@@ -179,6 +179,42 @@ class HelperDaemonConfigurationTests(unittest.TestCase):
         with self.assertRaises(HelperConfigurationError):
             HelperDaemonConfig.load(self.config_path)
 
+    def test_schema_v4_live_home_manager_is_separate_from_system_apply(self) -> None:
+        live = Path(self.temporary.name) / "live-home-manager"
+        live.mkdir()
+        home_journal = Path(self.temporary.name) / "home-manager-journal"
+        raw = json.loads(json.dumps(self.raw))
+        raw["schemaVersion"] = 4
+        raw["targets"] = [
+            {
+                "targetId": "live-home",
+                "mode": "live-home-manager",
+                "configurationRoot": str(live),
+                "journalRoot": None,
+                "testJournalRoot": None,
+                "testTimeoutSeconds": 300,
+                "homeManagerRoot": str(live),
+                "homeManagerJournalRoot": str(home_journal),
+                "allowedRelativePaths": ["ncm/user-state.json"],
+                "flakeTarget": None,
+            }
+        ]
+        self.write(raw)
+
+        target = HelperDaemonConfig.load(self.config_path).targets[0]
+
+        self.assertFalse(target.fixture_only)
+        self.assertFalse(target.apply_enabled)
+        self.assertFalse(target.test_activation_enabled)
+        self.assertTrue(target.home_manager_apply_enabled)
+        self.assertEqual(target.home_manager_root, live.resolve())
+        self.assertEqual(target.home_manager_journal_root, home_journal.resolve())
+
+        raw["targets"][0]["homeManagerJournalRoot"] = str(live / "journal")
+        self.write(raw)
+        with self.assertRaisesRegex(HelperConfigurationError, "outside"):
+            HelperDaemonConfig.load(self.config_path)
+
 
 if __name__ == "__main__":
     unittest.main()

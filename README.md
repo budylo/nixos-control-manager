@@ -17,7 +17,8 @@ This repository currently contains the first vertical slice:
 - a versioned helper protocol with exact path allow-lists, UID-bound one-time
   receipts, mock Polkit authorization, and a fixture-workflow backend;
 - a real fail-closed `pkcheck` authorizer and an opt-in, sandboxed NixOS
-  socket/service module with fixture, live-read-only, and live-test targets;
+  socket/service module with fixture, live-read-only, live-test, and
+  live-home-manager targets;
 - direct `/etc/nixos` validation in a disposable copy, with no receipt, write,
   recovery, build, or activation authority for the live target.
 - a local UI adapter that detects the configured Unix helper, exposes its
@@ -46,11 +47,12 @@ This repository currently contains the first vertical slice:
   fingerprint. It builds only the selected user's `activationPackage`, streams
   logs, supports cancellation and timeout, and never writes configuration or
   runs activation / `home-manager switch`;
-- a fault-tested Home Manager transaction workflow that can write the validated
-  module/import set and canonical `ncm/user-state.json` only inside an explicitly
-  marked disposable fixture. A typed diagnostic helper client can exercise this
-  fixture-only path with separate receipts and Polkit actions; HTTP, GUI,
-  live-write and activation endpoints remain absent.
+- a fault-tested Home Manager transaction workflow that can persist the exact
+  validated module/import set and canonical `ncm/user-state.json` either in a
+  marked fixture or in the separate opt-in `live-home-manager` target. Live
+  writes require their own UID-bound receipt, Polkit action, root-only journal,
+  allow-list, post-commit evaluation, rollback, and recovery. HTTP/GUI apply and
+  every Home Manager activation operation remain absent.
 
 ## Try it
 
@@ -170,23 +172,23 @@ copied to `managed.nix.bak`, then the new file is atomically moved into place.
 ## Safety boundary
 
 The current milestone intentionally does **not** run `sudo`, `pkexec`,
-`nixos-rebuild`, apply the adoption plan to an existing `configuration.nix`, or
-perform `switch`. Default live-read-only mode stops at dry preview. Separate
+`nixos-rebuild`, apply a NixOS system-adoption plan, or perform `switch`.
+Default live-read-only mode stops at dry preview. Separate
 experimental live-test mode can select only `test` after a bound receipt and a
 pre-armed recovery timer; it never creates a boot generation or `result` link.
 The transaction and recovery boundary is specified in
 [`docs/apply-protocol.md`](docs/apply-protocol.md). Those capabilities remain
-restricted to disposable fixtures. The dedicated live target can validate the
-exact locally reconstructed plan and produce a bound dry-activation report,
-but still has no configuration-write or permanent activation authority.
+restricted to disposable fixtures for NixOS system adoption. The dedicated
+`live-home-manager` mode can persist only the exact validated Home Manager
+source plan; system apply and all permanent activation authority remain false.
 
-The repository already contains the underlying transaction and recovery engine.
-Its diagnostic CLI can apply only through a configured, marked fixture helper;
-there is no HTTP, GUI, or live apply endpoint, and the engine refuses live
-`/etc/nixos`, `/etc/home-manager`, and the default
-`~/.config/home-manager` path. Its success, rollback, crash-recovery,
-concurrent-edit, and manual-recovery cases run only against temporary test
-fixtures.
+The diagnostic CLI can also exercise explicitly configured live Home Manager
+persistence. This is not a generic live transaction engine: daemon schema 4
+must name the Home Manager root and external journal, the NixOS module exposes
+only those paths to the service, and the submitted files must match both the
+locally reconstructed plan and the exact allow-list. The service sandbox keeps
+home directories unavailable in this first deployment slice. There is still no
+HTTP/GUI apply endpoint.
 
 The fixture workflow also performs a second NixOS evaluation after provisional
 commit. The journal reaches `committed` only when that installed snapshot needs
@@ -197,16 +199,17 @@ The same journal engine now has a separate Home Manager transaction kind. It
 requires a fingerprint-bound validation with a successful evaluation check,
 commits only the exact planned NixOS-module or standalone files, including
 canonical `ncm/user-state.json`, reconstructs a no-changes plan from the
-installed fixture, and evaluates it again before finalization. The state file
+installed root, and evaluates it again before finalization. The state file
 participates in the same fingerprint, commit, and rollback as the Nix files;
-every live Home Manager write remains unimplemented.
+neither commit nor recovery activates a Home Manager generation.
 
-The helper exposes Home Manager fixtures through distinct
+The helper exposes Home Manager transactions through distinct
 `validate-home-manager-plan`, `apply-validated-home-manager-plan`, and
 `recover-home-manager-transaction` operations. Their receipts and Polkit
 actions cannot be reused by the NixOS adoption workflow. The helper reconstructs
-the plan locally, enforces its exact path allow-list, and rejects all three
-operations for live targets before backend or Polkit execution.
+the plan locally and enforces its exact path allow-list. Ordinary live-read-only
+and live-test targets reject all three write operations; only an explicit
+`live-home-manager` target may issue the dedicated receipt.
 
 The helper protocol is documented in
 [`docs/helper-protocol.md`](docs/helper-protocol.md). Its Unix transport and
@@ -246,6 +249,14 @@ pre-armed systemd timer restore the previous runtime closure. The root-only
 recovery journal must finish in `recovered` state. This regression is exposed as
 `checks.x86_64-linux.live-test-recovery-vm` and
 `packages.x86_64-linux.live-test-recovery-vm-test`.
+
+A fourth disposable VM exercises `live-home-manager`: it proves default Polkit
+denial leaves `/etc/nixos` unchanged, authorizes one exact source plan, performs
+real pre/post Nix evaluation, commits the root-only live journal, and verifies
+that `/run/current-system` never changes. It is exposed as
+`checks.x86_64-linux.live-home-manager-vm` and
+`packages.x86_64-linux.live-home-manager-vm-test`. Deployment details are in
+[`docs/live-home-manager.md`](docs/live-home-manager.md).
 
 ## Typed system settings
 

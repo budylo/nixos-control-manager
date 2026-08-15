@@ -249,6 +249,106 @@ def _target_v3(raw: Any) -> HelperTarget:
         raise HelperConfigurationError(str(error)) from error
 
 
+def _target_v4(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "testJournalRoot",
+            "testTimeoutSeconds",
+            "homeManagerRoot",
+            "homeManagerJournalRoot",
+            "allowedRelativePaths",
+            "flakeTarget",
+        },
+        "target",
+    )
+    mode = mapping["mode"]
+    if mode not in {
+        "fixture",
+        "live-read-only",
+        "live-test",
+        "live-home-manager",
+    }:
+        raise HelperConfigurationError(
+            "target mode must be fixture, live-read-only, live-test, or "
+            "live-home-manager"
+        )
+    base = {
+        key: mapping[key]
+        for key in (
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "testJournalRoot",
+            "testTimeoutSeconds",
+            "allowedRelativePaths",
+            "flakeTarget",
+        )
+    }
+    if mode != "live-home-manager":
+        if (
+            mapping["homeManagerRoot"] is not None
+            or mapping["homeManagerJournalRoot"] is not None
+        ):
+            raise HelperConfigurationError(
+                "Only live-home-manager targets may configure Home Manager paths"
+            )
+        return _target_v3(base)
+
+    if mapping["journalRoot"] is not None or mapping["testJournalRoot"] is not None:
+        raise HelperConfigurationError(
+            "live-home-manager targets must disable system and test journals"
+        )
+    timeout = mapping["testTimeoutSeconds"]
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int)
+        or not 30 <= timeout <= 1800
+    ):
+        raise HelperConfigurationError("testTimeoutSeconds must be between 30 and 1800")
+    config_root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    home_root = _absolute_path(mapping["homeManagerRoot"], "homeManagerRoot")
+    raw_home_root = Path(mapping["homeManagerRoot"]).expanduser()
+    if raw_home_root.is_symlink():
+        raise HelperConfigurationError("homeManagerRoot cannot be a symbolic link")
+    home_journal = _absolute_path(
+        mapping["homeManagerJournalRoot"], "homeManagerJournalRoot"
+    )
+    raw_home_journal = Path(mapping["homeManagerJournalRoot"]).expanduser()
+    if raw_home_journal.is_symlink():
+        raise HelperConfigurationError(
+            "homeManagerJournalRoot cannot be a symbolic link"
+        )
+    if home_root == Path("/") or home_root.is_relative_to(Path("/nix/store")):
+        raise HelperConfigurationError("homeManagerRoot is unsafe")
+    if home_journal == home_root or home_journal.is_relative_to(home_root):
+        raise HelperConfigurationError(
+            "homeManagerJournalRoot must be outside homeManagerRoot"
+        )
+    try:
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=config_root,
+            journal_root=None,
+            allowed_relative_paths=_allowed_paths(mapping["allowedRelativePaths"]),
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target=_flake_target(mapping["flakeTarget"]),
+            test_timeout_seconds=timeout,
+            home_manager_apply_enabled=True,
+            home_manager_root=home_root,
+            home_manager_journal_root=home_journal,
+        )
+    except (TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
 @dataclass(frozen=True, slots=True)
 class HelperDaemonConfig:
     socket_path: Path
@@ -275,9 +375,9 @@ class HelperDaemonConfig:
             "helper configuration",
         )
         schema_version = mapping["schemaVersion"]
-        if schema_version not in {1, 2, 3}:
+        if schema_version not in {1, 2, 3, 4}:
             raise HelperConfigurationError(
-                "Only helper configuration schemaVersion 1, 2, and 3 are supported"
+                "Only helper configuration schemaVersion 1, 2, 3, and 4 are supported"
             )
         timeout = mapping["validationTimeout"]
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 900:
@@ -289,6 +389,7 @@ class HelperDaemonConfig:
             1: _target_v1,
             2: _target_v2,
             3: _target_v3,
+            4: _target_v4,
         }[schema_version]
         targets = tuple(target_loader(item) for item in targets_raw)
         if len({target.target_id for target in targets}) != len(targets):
