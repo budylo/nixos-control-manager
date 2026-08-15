@@ -12,7 +12,6 @@ let
     mkOption
     optionalAttrs
     optionals
-    optionalString
     splitString
     types
     ;
@@ -21,6 +20,7 @@ let
   serviceName = "nix-control-manager-helper";
   socketPath = "/run/nix-control-manager/helper.sock";
   socketGroup = "nix-control-manager";
+  guiServiceName = "nix-control-manager-gui";
   isFixture = cfg.mode == "fixture";
   isLiveTest = cfg.mode == "live-test";
   isLiveHomeManager = cfg.mode == "live-home-manager";
@@ -56,15 +56,93 @@ let
   };
   clientLauncher = pkgs.writeShellApplication {
     name = "ncm-gui";
-    runtimeInputs = [ clientCfg.package ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.curl
+      pkgs.gnugrep
+      pkgs.systemd
+      pkgs.xdg-utils
+    ];
     text = ''
-      exec ncm serve \
-        --state /etc/nixos/ncm/state.json \
-        --user-state /etc/nixos/ncm/user-state.json \
-        --output /etc/nixos/ncm/packages.nix \
-        --config-root /etc/nixos \
-        --port ${toString clientCfg.port} \
-        --read-only${optionalString clientCfg.openBrowser " --open"}
+      service=${guiServiceName}.service
+      url=http://127.0.0.1:${toString clientCfg.port}/
+      open_browser=${if clientCfg.openBrowser then "true" else "false"}
+      action=start
+
+      usage() {
+        echo 'Usage: ncm-gui [--open|--no-open|--status|--stop]'
+      }
+
+      valid_response() {
+        local payload="$1"
+        grep -Fq '"application": "nix-control-manager"' <<< "$payload" \
+          && grep -Fq '"apiVersion": 1' <<< "$payload" \
+          && grep -Fq '"localWriteEnabled": false' <<< "$payload"
+      }
+
+      if (( $# > 1 )); then
+        usage >&2
+        exit 2
+      elif (( $# == 1 )); then
+        action="$1"
+      fi
+
+      case "$action" in
+        start) ;;
+        --open) open_browser=true ;;
+        --no-open) open_browser=false ;;
+        --stop)
+          systemctl --user stop "$service"
+          echo "Nix Control Manager stopped."
+          exit 0
+          ;;
+        --status)
+          if ! systemctl --user is-active --quiet "$service"; then
+            echo "Nix Control Manager is stopped."
+            exit 3
+          fi
+          if response="$(curl -fsS --max-time 1 "''${url}api/config")" \
+            && valid_response "$response"; then
+            echo "Nix Control Manager is running at $url (read-only)."
+            exit 0
+          fi
+          echo "Nix Control Manager service is active but its API is not ready." >&2
+          exit 4
+          ;;
+        --help|-h)
+          usage
+          exit 0
+          ;;
+        *)
+          usage >&2
+          exit 2
+          ;;
+      esac
+
+      systemctl --user start "$service"
+      response=
+      attempt=0
+      while (( attempt < 100 )); do
+        (( attempt += 1 ))
+        if response="$(curl -fsS --max-time 1 "''${url}api/config" 2>/dev/null)" \
+          && valid_response "$response"; then
+          echo "Nix Control Manager is running at $url (read-only)."
+          if [[ "$open_browser" == true ]]; then
+            if ! xdg-open "$url" >/dev/null 2>&1; then
+              echo "Could not open a browser automatically; open $url manually." >&2
+            fi
+          fi
+          exit 0
+        fi
+        if systemctl --user is-failed --quiet "$service"; then
+          break
+        fi
+        sleep 0.1
+      done
+
+      echo "Nix Control Manager did not become ready at $url." >&2
+      systemctl --user status "$service" --no-pager >&2 || true
+      exit 1
     '';
   };
   desktopItem = pkgs.makeDesktopItem {
@@ -213,7 +291,7 @@ in
     openBrowser = mkOption {
       type = types.bool;
       default = true;
-      description = "Open the loopback graphical interface after launching it.";
+      description = "Open the loopback graphical interface after starting or reusing its user service.";
     };
   };
 
@@ -377,6 +455,44 @@ in
     })
     (mkIf clientCfg.enable {
       environment.systemPackages = [ clientBundle ];
+      systemd.user.services.${guiServiceName} = {
+        description = "Nix Control Manager read-only graphical server";
+        path = [ clientCfg.package pkgs.nix ];
+        environment = {
+          HOME = "/tmp";
+          NIX_PATH = concatStringsSep ":" config.nix.nixPath;
+          PYTHONUNBUFFERED = "1";
+        };
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = concatStringsSep " " [
+            "${clientCfg.package}/bin/ncm"
+            "serve"
+            "--state /etc/nixos/ncm/state.json"
+            "--user-state /etc/nixos/ncm/user-state.json"
+            "--output /etc/nixos/ncm/packages.nix"
+            "--config-root /etc/nixos"
+            "--home-manager-root %h/.config/home-manager"
+            "--port ${toString clientCfg.port}"
+            "--read-only"
+          ];
+          UMask = "0077";
+          Restart = "on-failure";
+          RestartSec = "1s";
+          KillSignal = "SIGINT";
+          TimeoutStopSec = "10s";
+          NoNewPrivileges = true;
+          PrivateDevices = true;
+          PrivateTmp = true;
+          ProtectHome = "read-only";
+          ProtectSystem = "strict";
+          ReadOnlyPaths = [ "/etc/nixos" ];
+          RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          LockPersonality = true;
+        };
+      };
     })
   ];
 }

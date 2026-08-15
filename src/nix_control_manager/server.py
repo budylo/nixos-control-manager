@@ -300,6 +300,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 self._json(
                     {
+                        "application": "nix-control-manager",
+                        "apiVersion": 1,
                         "token": self.server.token,
                         "localWriteEnabled": self.server.local_write_enabled,
                     }

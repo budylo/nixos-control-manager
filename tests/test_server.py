@@ -614,6 +614,8 @@ class ServerTests(unittest.TestCase):
         self.server.local_write_enabled = False
 
         config = self.request_json("/api/config")
+        self.assertEqual(config["application"], "nix-control-manager")
+        self.assertEqual(config["apiVersion"], 1)
         self.assertFalse(config["localWriteEnabled"])
         with self.assertRaises(HTTPError) as context:
             self.request_json(

@@ -150,6 +150,10 @@
           channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
           channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
           channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
+          channelGuiService =
+            evaluatedChannel.config.systemd.user.services.nix-control-manager-gui;
+          channelGuiUnit =
+            evaluatedChannel.config.systemd.user.units."nix-control-manager-gui.service".unit;
           channelClient = nixpkgs.lib.findFirst
             (package: nixpkgs.lib.getName package == "nix-control-manager-client")
             null
@@ -372,14 +376,30 @@
             assert channelSocket.socketConfig.SocketMode == "0660";
             assert evaluatedChannel.config.users.groups.nix-control-manager.members == [ "channel-user" ];
             assert channelClient != null;
+            assert channelGuiService.serviceConfig.ProtectSystem == "strict";
+            assert channelGuiService.serviceConfig.ReadOnlyPaths == [ "/etc/nixos" ];
+            assert channelGuiService.serviceConfig.KillSignal == "SIGINT";
             pkgs.runCommand "nix-control-manager-channel-module-check" { } ''
               test -x ${channelPackage}/bin/ncm
               test -x ${channelPackage}/bin/ncm-helper
               test -x ${channelClient}/bin/ncm-gui
-              grep -F -- '--read-only' ${channelClient}/bin/ncm-gui
+              grep -F -- 'systemctl --user start' ${channelClient}/bin/ncm-gui
+              grep -F -- 'systemctl --user stop' ${channelClient}/bin/ncm-gui
+              grep -F -- 'localWriteEnabled' ${channelClient}/bin/ncm-gui
               desktop_exec="$(sed -n 's/^Exec=//p' \
                 ${channelClient}/share/applications/nix-control-manager.desktop)"
               test -x "$desktop_exec"
+              grep -F -- '--read-only' \
+                ${channelGuiUnit}/nix-control-manager-gui.service
+              grep -F 'KillSignal=SIGINT' \
+                ${channelGuiUnit}/nix-control-manager-gui.service
+              grep -F 'ProtectSystem=strict' \
+                ${channelGuiUnit}/nix-control-manager-gui.service
+              if grep -F '[Install]' \
+                ${channelGuiUnit}/nix-control-manager-gui.service; then
+                echo 'GUI user service must remain on-demand' >&2
+                exit 1
+              fi
               touch "$out"
             '';
         } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {

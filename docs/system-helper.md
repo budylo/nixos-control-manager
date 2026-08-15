@@ -120,12 +120,19 @@ programs.nix-control-manager = {
 };
 ```
 
-This adds `ncm`, the `ncm-gui` launcher, and
-`nix-control-manager.desktop` to the system environment. `ncm-gui` binds the
-local server to loopback, points it at `/etc/nixos`, and always passes
-`--read-only`; consequently `/api/save` cannot persist the local state or
-generated module. `openBrowser = false` keeps the same boundary but prints the
-loopback URL instead of asking the desktop to open it. Helper operations remain
+This adds `ncm`, the `ncm-gui` launcher, `nix-control-manager.desktop`, and an
+on-demand `nix-control-manager-gui.service` user unit to the system environment.
+The unit is deliberately not enabled at login. `ncm-gui` starts or reuses the
+single user-service instance, waits for a loopback health response, and verifies
+the NCM application name, API version, and read-only flag before opening it.
+Use `ncm-gui --status`, `ncm-gui --stop`, and `journalctl --user -u
+nix-control-manager-gui.service` for explicit lifecycle and diagnostics.
+
+The user service points at `/etc/nixos` and always passes `--read-only`;
+consequently `/api/save` cannot persist the local state or generated module. It
+receives `SIGINT` for an orderly HTTP shutdown and uses a read-only system/home
+sandbox. `openBrowser = false` keeps the same boundary but prints the loopback
+URL instead of asking the desktop to open it. Helper operations remain
 separately capability-gated, so pairing the launcher with `live-read-only`
 keeps apply, recovery, test activation, Home Manager persistence, and permanent
 switch unavailable.

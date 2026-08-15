@@ -16,9 +16,9 @@ This repository currently contains the first vertical slice:
 - a CLI and a Nix flake;
 - a channel-compatible NixOS module entrypoint that builds the package from the
   same pinned source snapshot;
-- an opt-in `programs.nix-control-manager` module that installs `ncm`, a
-  read-only `ncm-gui` launcher, and a desktop entry without granting the GUI
-  privileged write authority;
+- an opt-in `programs.nix-control-manager` module that installs `ncm`, an
+  on-demand read-only GUI user service, an idempotent `ncm-gui` lifecycle
+  launcher, and a desktop entry without granting privileged write authority;
 - a fault-tested journaled transaction engine restricted to marked disposable
   fixtures;
 - a versioned helper protocol with exact path allow-lists, UID-bound one-time
@@ -139,6 +139,23 @@ validation, unprivileged builds, and capability-gated helper reports remain
 available. The NixOS `programs.nix-control-manager` launcher always selects
 this mode; the installed helper independently determines which privileged
 operations exist.
+
+With `programs.nix-control-manager.enable = true`, `ncm-gui` manages one
+on-demand `nix-control-manager-gui.service` instance per logged-in user. The
+service is not enabled at login. Repeated desktop launches reuse the healthy
+server after verifying the application name, API version, and read-only flag:
+
+```console
+ncm-gui --no-open  # start or reuse, but only print the URL
+ncm-gui --status
+ncm-gui --open     # start or reuse and ask the desktop to open the URL
+ncm-gui --stop
+journalctl --user -u nix-control-manager-gui.service
+```
+
+The server receives `SIGINT` on stop so that its HTTP socket is closed through
+the normal shutdown path. A process on the configured port that does not expose
+the expected NCM identity is rejected rather than reused.
 
 `detect` is read-only. `migrate-state` also defaults to a JSON preview and does
 not change its input. Pass `--output <path>` explicitly to write normalized
