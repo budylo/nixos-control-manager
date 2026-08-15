@@ -98,9 +98,9 @@
 - deterministic per-user Home Manager module and diff preview, restricted to
   an exactly detected user/integration and with all writes disabled
   (implemented);
-- read-only, integration-specific source adoption plans with exact diffs and
-  disposable parse/evaluation (implemented; graphical live apply remains
-  disabled, typed helper/CLI apply is opt-in);
+- preview-first, integration-specific source adoption plans with exact diffs
+  and disposable parse/evaluation (implemented; graphical live persistence is
+  available only through the opt-in helper mode);
 - fingerprint-bound, unprivileged build-preview for the exact Home Manager
   `activationPackage`, with streamed logs, cancellation, timeout, disposable
   cleanup, and no activation (implemented; legacy standalone remains unavailable);
@@ -110,14 +110,15 @@
   (implemented as part of the live read-only UI flake check);
 - atomic Home Manager module/import persistence with fingerprint, journal,
   post-commit evaluation, rollback, and crash recovery (implemented for marked
-  fixtures and the explicit `live-home-manager` helper mode; no HTTP/GUI apply);
+  fixtures and the explicit `live-home-manager` helper mode, including the
+  confirmation-gated local HTTP/GUI path);
 - separate Home Manager fixture validation/apply/recovery operations, UID-bound
   single-use receipts, exact allow-lists, and Polkit actions (implemented);
 - atomic canonical user-state persistence in the same marked-fixture
   transaction as modules/imports (implemented; legacy source remains read-only);
 - Home Manager live managed-module and user-state persistence (implemented as
-  an opt-in typed helper/CLI vertical slice with VM proof; graphical apply and
-  activation remain unimplemented);
+  an opt-in typed helper/CLI/UI vertical slice; activation remains
+  unimplemented by design);
 - user/system package scope (separate catalog selection and preview implemented;
   persistence remains);
 - profiles and reusable presets.

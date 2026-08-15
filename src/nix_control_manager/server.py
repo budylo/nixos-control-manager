@@ -8,7 +8,9 @@ import mimetypes
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import socket
 import threading
+import time
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
@@ -19,6 +21,7 @@ from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
 from .errors import NcmError, ValidationError
 from .home_manager_adoption import (
+    home_manager_plan_identity,
     plan_home_manager_adoption,
     validate_home_manager_adoption,
 )
@@ -111,6 +114,48 @@ class NcmServer(ThreadingHTTPServer):
             )
         )
         self.token = secrets.token_urlsafe(32)
+        self.home_manager_apply_intents: dict[str, dict[str, Any]] = {}
+        self.home_manager_apply_intents_lock = threading.Lock()
+
+    def create_home_manager_apply_intent(
+        self, result: dict[str, Any]
+    ) -> tuple[str, int]:
+        raw_ttl = result.get("expiresInSeconds")
+        ttl = raw_ttl if isinstance(raw_ttl, int) and 1 <= raw_ttl <= 3600 else 300
+        now = time.monotonic()
+        intent_id = secrets.token_urlsafe(24)
+        with self.home_manager_apply_intents_lock:
+            self.home_manager_apply_intents = {
+                key: value
+                for key, value in self.home_manager_apply_intents.items()
+                if value["expiresAt"] > now
+            }
+            if len(self.home_manager_apply_intents) >= 64:
+                oldest = min(
+                    self.home_manager_apply_intents,
+                    key=lambda key: self.home_manager_apply_intents[key]["expiresAt"],
+                )
+                del self.home_manager_apply_intents[oldest]
+            self.home_manager_apply_intents[intent_id] = {
+                "expiresAt": now + ttl,
+                "planFingerprint": result["planFingerprint"],
+                "validationReceipt": result["validationReceipt"],
+            }
+        return intent_id, ttl
+
+    def consume_home_manager_apply_intent(
+        self, intent_id: str, plan_fingerprint: str
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self.home_manager_apply_intents_lock:
+            intent = self.home_manager_apply_intents.pop(intent_id, None)
+        if intent is None or intent["expiresAt"] <= now:
+            raise ValidationError(
+                "Home Manager confirmation expired; validate the plan again"
+            )
+        if not secrets.compare_digest(intent["planFingerprint"], plan_fingerprint):
+            raise ValidationError("Home Manager confirmation does not match the plan")
+        return intent
 
     def server_close(self) -> None:
         self.build_manager.close()
@@ -373,6 +418,82 @@ class RequestHandler(BaseHTTPRequestHandler):
                     )
                 )
                 return
+            if path == "/api/helper/home-manager/validate":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                inspection, _, username, integration, packages = self._home_candidate()
+                plan = self.server.home_manager_planner(
+                    self.server.config_root,
+                    standalone_root=self.server.home_manager_root,
+                    user_state_path=self.server.user_state_path,
+                    username=username,
+                    integration=integration,
+                    packages=packages,
+                    inspection=inspection,
+                )
+                if plan.status != "ready" or not plan.safe_to_validate or not plan.changes:
+                    raise ValidationError(
+                        "A ready Home Manager source plan with changes is required"
+                    )
+                effective_target = self.server.flake_target
+                if (
+                    effective_target is None
+                    and integration == "nixos-module"
+                    and (plan.root / "flake.nix").is_file()
+                ):
+                    effective_target = socket.gethostname()
+                fingerprint, _ = home_manager_plan_identity(plan, effective_target)
+                result = self.server.helper_adapter.validate_home_manager(
+                    username=username,
+                    integration=integration,
+                    packages=tuple(packages),
+                    expected_plan_fingerprint=fingerprint,
+                )
+                intent_id, ttl = self.server.create_home_manager_apply_intent(result)
+                public = {
+                    key: value
+                    for key, value in result.items()
+                    if key != "validationReceipt"
+                }
+                self._json(
+                    {
+                        **public,
+                        "intentId": intent_id,
+                        "expiresInSeconds": ttl,
+                        "confirmationRequired": True,
+                    }
+                )
+                return
+            if path == "/api/helper/home-manager/apply":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if set(payload) != {"intentId", "planFingerprint", "confirmed"}:
+                    raise ValidationError(
+                        "Home Manager apply requires intentId, planFingerprint, and confirmed"
+                    )
+                intent_id = payload.get("intentId")
+                fingerprint = payload.get("planFingerprint")
+                if (
+                    not isinstance(intent_id, str)
+                    or not 16 <= len(intent_id) <= 128
+                    or not isinstance(fingerprint, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+                    or payload.get("confirmed") is not True
+                ):
+                    raise ValidationError(
+                        "An exact, explicitly confirmed Home Manager plan is required"
+                    )
+                intent = self.server.consume_home_manager_apply_intent(
+                    intent_id, fingerprint
+                )
+                self._json(
+                    self.server.helper_adapter.apply_home_manager(
+                        plan_fingerprint=fingerprint,
+                        validation_receipt=intent["validationReceipt"],
+                    )
+                )
+                return
             if path in {
                 "/api/home-manager/adoption-plan",
                 "/api/home-manager/validate-adoption",
@@ -581,11 +702,15 @@ def serve(
     print(f"User state: {user_state_path} (read-only foundation)")
     print(f"Module: {output_path}")
     print(f"Target: {config_root} (read-only inspection)")
-    print(f"Home Manager: {home_manager_root} (read-only inspection)")
+    print(
+        f"Home Manager: {home_manager_root} "
+        "(inspection; source persistence is helper capability-gated)"
+    )
     print("Validation: disposable candidate only")
     print("Build preview: unprivileged Nix store build; permanent switch disabled")
     print(
-        f"System helper: {helper_socket} (target {helper_target_id}, read-only)"
+        f"System helper: {helper_socket} "
+        f"(target {helper_target_id}, capability-gated)"
         if helper_socket is not None
         else "System helper: disabled"
     )

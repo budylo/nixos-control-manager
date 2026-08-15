@@ -222,7 +222,7 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .plan-status { padding: 5px 8px; border-radius: 99px; color: #ffcf7e; background: rgba(255, 202, 115, .1); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .plan-status.passed { color: #9ee8c7; background: rgba(116,228,177,.1); }
 .plan-drawer { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
-.home-adoption-drawer { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
+.home-adoption-drawer { grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto; }
 .candidate-validation { padding: 14px 27px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: rgba(94, 215, 255, .025); }
 .candidate-validation-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--cyan); background: rgba(94, 215, 255, .09); font-size: 12px; }
 .candidate-validation-copy strong, .candidate-validation-copy small { display: block; }
@@ -251,6 +251,11 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .helper-button { border: 1px solid rgba(116, 228, 177, .3); background: rgba(116, 228, 177, .08); color: #a8f3d2; }
 .helper-button:hover:not(:disabled) { border-color: rgba(116, 228, 177, .55); background: rgba(116, 228, 177, .13); }
 .helper-button:disabled { border-color: var(--line); background: rgba(255,255,255,.02); color: #596678; cursor: not-allowed; }
+.home-apply-flow { background: rgba(255, 202, 115, .025); }
+.home-apply-actions { min-width: 175px; }
+.home-apply-confirmation { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 9px; padding: 9px 11px; border: 1px solid rgba(255, 202, 115, .22); border-radius: 8px; color: #d2dae5; background: rgba(255, 202, 115, .04); font-size: 8px; line-height: 1.5; cursor: pointer; }
+.home-apply-confirmation[hidden] { display: none; }
+.home-apply-confirmation input { margin-top: 1px; accent-color: var(--cyan); }
 @keyframes validation-pulse { to { opacity: .45; transform: scale(.9); } }
 .preview-tab { padding: 12px 0; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 11px; font-weight: 750; cursor: pointer; }
 .preview-tab.active { border-bottom-color: var(--cyan); color: var(--text); }

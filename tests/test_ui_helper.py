@@ -2,7 +2,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nix_control_manager.helper_client import build_validate_request
+from nix_control_manager.helper_client import (
+    build_home_manager_validate_request,
+    build_validate_request,
+)
 from nix_control_manager.ui_helper import HelperUiAdapter, HelperUiError
 
 
@@ -21,6 +24,13 @@ class SequenceSender:
             request["operation"] == "validate-plan"
             and isinstance(response.get("result"), dict)
             and response["result"].get("planFingerprint") == "a" * 64
+        ):
+            response["result"]["planFingerprint"] = request["payload"][
+                "planFingerprint"
+            ]
+        if (
+            request["operation"] == "validate-home-manager-plan"
+            and isinstance(response.get("result"), dict)
         ):
             response["result"]["planFingerprint"] = request["payload"][
                 "planFingerprint"
@@ -64,10 +74,76 @@ def capabilities(*, safe: bool = True, test_enabled: bool = False) -> dict:
                     "recoveryEnabled": False,
                     "dryActivatePreviewEnabled": True,
                     "testActivationEnabled": test_enabled,
+                    "homeManagerApplyEnabled": False,
+                    "homeManagerLiveWriteEnabled": False,
                 }
             ],
             "arbitraryCommandsAccepted": False,
             "activationEnabled": False,
+        },
+        "error": None,
+    }
+
+
+def home_manager_capabilities() -> dict:
+    result = capabilities()
+    target = result["result"]["targets"][0]
+    target["dryActivatePreviewEnabled"] = False
+    target["homeManagerApplyEnabled"] = True
+    target["homeManagerLiveWriteEnabled"] = True
+    result["result"]["operations"].extend(
+        ["validate-home-manager-plan", "apply-validated-home-manager-plan"]
+    )
+    return result
+
+
+def home_manager_validation() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "home-validation",
+        "status": "ok",
+        "result": {
+            "validationReceipt": "H" * 43,
+            "expiresInSeconds": 300,
+            "targetId": "live",
+            "planFingerprint": "a" * 64,
+            "username": "alice",
+            "integration": "nixos-module",
+            "fixtureOnly": False,
+            "liveWriteEnabled": True,
+            "activationEnabled": False,
+            "validation": {
+                "status": "passed",
+                "checks": [{"name": "Parse", "status": "passed"}],
+                "warnings": [],
+                "workingCopyRemoved": True,
+            },
+        },
+        "error": None,
+    }
+
+
+def home_manager_apply_result() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "home-apply",
+        "status": "ok",
+        "result": {
+            "state": "committed",
+            "fixtureOnly": False,
+            "writeEnabled": True,
+            "liveWriteEnabled": True,
+            "activationEnabled": False,
+            "buildEnabled": False,
+            "filesWritten": 4,
+            "transaction": {
+                "transactionId": "c" * 24,
+                "state": "committed",
+                "journalPath": "/var/lib/ncm/example",
+                "changedFiles": ["configuration.nix"],
+                "fixtureOnly": False,
+                "activationEnabled": False,
+            },
         },
         "error": None,
     }
@@ -194,7 +270,9 @@ class HelperUiAdapterTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "etc-nixos"
         self.root.mkdir()
         (self.root / "configuration.nix").write_text(
-            "{ ... }: {\n  imports = [\n  ];\n}\n", encoding="utf-8"
+            "{ ... }: {\n  imports = [\n  ];\n"
+            "  home-manager.users.alice = ./alice.nix;\n}\n",
+            encoding="utf-8",
         )
         self.socket = Path(self.temporary.name) / "helper.sock"
 
@@ -314,6 +392,60 @@ class HelperUiAdapterTests(unittest.TestCase):
         self.assertEqual(
             sender.requests[3][1]["operation"], "recover-test-activation"
         )
+
+    def test_live_home_manager_validation_and_apply_are_exact_and_non_activating(self) -> None:
+        validation_request = build_home_manager_validate_request(
+            self.root,
+            target_id="live",
+            username="alice",
+            integration="nixos-module",
+            packages=("firefox",),
+            flake_target=None,
+        )
+        fingerprint = validation_request["payload"]["planFingerprint"]
+        sender = SequenceSender(
+            home_manager_capabilities(),
+            home_manager_validation(),
+            home_manager_capabilities(),
+            home_manager_apply_result(),
+        )
+        adapter = self.adapter(sender)
+
+        validated = adapter.validate_home_manager(
+            username="alice",
+            integration="nixos-module",
+            packages=("firefox",),
+            expected_plan_fingerprint=fingerprint,
+        )
+        self.assertEqual(validated["planFingerprint"], fingerprint)
+        self.assertTrue(validated["liveWriteEnabled"])
+        self.assertFalse(validated["activationEnabled"])
+        self.assertEqual(
+            sender.requests[1][1]["operation"], "validate-home-manager-plan"
+        )
+
+        applied = adapter.apply_home_manager(
+            plan_fingerprint=fingerprint,
+            validation_receipt=validated["validationReceipt"],
+        )
+        self.assertEqual(applied["state"], "committed")
+        self.assertTrue(applied["authorizedByPolkit"])
+        self.assertFalse(applied["homeManagerActivationEnabled"])
+        self.assertFalse(applied["switchEnabled"])
+        self.assertEqual(
+            sender.requests[3][1]["operation"],
+            "apply-validated-home-manager-plan",
+        )
+
+    def test_live_home_manager_fails_closed_on_displayed_plan_mismatch(self) -> None:
+        adapter = self.adapter(SequenceSender(home_manager_capabilities()))
+        with self.assertRaisesRegex(HelperUiError, "displayed Home Manager plan"):
+            adapter.validate_home_manager(
+                username="alice",
+                integration="nixos-module",
+                packages=("firefox",),
+                expected_plan_fingerprint="f" * 64,
+            )
 
 
 if __name__ == "__main__":

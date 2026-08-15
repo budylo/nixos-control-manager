@@ -73,14 +73,21 @@ The generated module remains usable without Nix Control Manager.
     standalone or NixOS-module `activationPackage` target without a result link
     or lock-file update. The worker streams bounded logs, supports cancellation
     and timeout, rejects effective UID 0, and never invokes activation.
-16. **Home Manager fixture transaction workflow** reuses the shared atomic
+16. **Home Manager transaction workflow** reuses the shared atomic
     replacement, journal, rollback, and crash-recovery engine under a distinct
     transaction kind. It accepts only a marked disposable root, a matching
     validation fingerprint and digest set, and a successful evaluation check.
     The exact file set includes canonical `ncm/user-state.json`. After
     provisional commit it reconstructs a no-changes plan and evaluates the
-    installed fixture before finalization. A typed diagnostic helper exposes
-    this only for marked fixtures; no HTTP, GUI, or live-write endpoint does.
+    installed root before finalization. It is available to marked fixtures and
+    the explicitly configured `live-home-manager` root.
+17. **Home Manager UI persistence boundary** holds helper receipts only in
+    server memory behind opaque, expiring, single-use intent IDs. The browser
+    receives the exact fingerprint but not the receipt, requires a separate
+    confirmation checkbox, and submits only that intent and fingerprint. The
+    server consumes the intent before asking the helper to invoke the dedicated
+    Polkit action. All responses require activation and switching to remain
+    false.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is

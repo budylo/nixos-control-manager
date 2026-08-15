@@ -38,6 +38,8 @@ class FakeHelperAdapter:
             "activationEnabled": False,
             "dryActivatePreviewEnabled": True,
             "testActivationEnabled": True,
+            "homeManagerApplyEnabled": True,
+            "homeManagerLiveWriteEnabled": True,
         }
 
     def validate_adoption(self):
@@ -95,6 +97,55 @@ class FakeHelperAdapter:
             "testEnabled": True,
             "switchEnabled": False,
             "configurationWriteEnabled": False,
+        }
+
+    def validate_home_manager(
+        self,
+        *,
+        username,
+        integration,
+        packages,
+        expected_plan_fingerprint,
+    ):
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": "live",
+            "username": username,
+            "integration": integration,
+            "planFingerprint": expected_plan_fingerprint,
+            "validationReceipt": "H" * 43,
+            "expiresInSeconds": 300,
+            "checks": [],
+            "warnings": [],
+            "workingCopyRemoved": True,
+            "fixtureOnly": False,
+            "liveWriteEnabled": True,
+            "activationEnabled": False,
+            "homeManagerActivationEnabled": False,
+        }
+
+    def apply_home_manager(self, *, plan_fingerprint, validation_receipt):
+        if validation_receipt != "H" * 43:
+            raise ValueError("bad Home Manager receipt")
+        return {
+            "source": "system-helper",
+            "state": "committed",
+            "fixtureOnly": False,
+            "writeEnabled": True,
+            "liveWriteEnabled": True,
+            "activationEnabled": False,
+            "homeManagerActivationEnabled": False,
+            "buildEnabled": False,
+            "switchEnabled": False,
+            "authorizedByPolkit": True,
+            "filesWritten": 4,
+            "transaction": {
+                "transactionId": "c" * 24,
+                "state": "committed",
+                "fixtureOnly": False,
+                "activationEnabled": False,
+            },
         }
 
 
@@ -234,6 +285,8 @@ class ServerTests(unittest.TestCase):
         with urlopen(self.base_url + "/", timeout=2) as response:
             html = response.read().decode("utf-8")
             self.assertIn("Nix Control Manager", html)
+            self.assertIn('id="homeApplyConfirmation"', html)
+            self.assertIn('id="commitHomeApplyButton"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
     def test_mutation_requires_token(self) -> None:
@@ -421,6 +474,77 @@ class ServerTests(unittest.TestCase):
         latest = self.request_json("/api/home-manager/build-preview")
         self.assertEqual(latest["jobId"], job_id)
         self.assertEqual(latest["activationPackagePath"], result["outputPaths"][0])
+
+    def test_home_manager_live_apply_requires_exact_one_time_confirmation(self) -> None:
+        root = self.server.config_root
+        root.mkdir()
+        configuration = root / "configuration.nix"
+        original = (
+            "{ ... }:\n{\n  imports = [\n  ];\n"
+            "  home-manager.users.alice = ./alice.nix;\n}\n"
+        )
+        configuration.write_text(original, encoding="utf-8")
+        payload = {
+            "username": "alice",
+            "integration": "nixos-module",
+            "packages": ["firefox", "git"],
+        }
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/helper/home-manager/validate", method="POST", body=payload
+            )
+        self.assertEqual(context.exception.code, 403)
+        context.exception.close()
+
+        prepared = self.request_json(
+            "/api/helper/home-manager/validate",
+            method="POST",
+            token=self.server.token,
+            body=payload,
+        )
+        self.assertTrue(prepared["confirmationRequired"])
+        self.assertTrue(prepared["liveWriteEnabled"])
+        self.assertNotIn("validationReceipt", prepared)
+        self.assertRegex(prepared["planFingerprint"], r"^[0-9a-f]{64}$")
+        self.assertEqual(configuration.read_text(encoding="utf-8"), original)
+
+        apply_payload = {
+            "intentId": prepared["intentId"],
+            "planFingerprint": prepared["planFingerprint"],
+            "confirmed": False,
+        }
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/helper/home-manager/apply",
+                method="POST",
+                token=self.server.token,
+                body=apply_payload,
+            )
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
+
+        apply_payload["confirmed"] = True
+        applied = self.request_json(
+            "/api/helper/home-manager/apply",
+            method="POST",
+            token=self.server.token,
+            body=apply_payload,
+        )
+        self.assertEqual(applied["state"], "committed")
+        self.assertTrue(applied["authorizedByPolkit"])
+        self.assertFalse(applied["homeManagerActivationEnabled"])
+        self.assertFalse(applied["switchEnabled"])
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/helper/home-manager/apply",
+                method="POST",
+                token=self.server.token,
+                body=apply_payload,
+            )
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
 
     def test_candidate_validation_is_authorized_and_never_enables_activation(self) -> None:
         with self.assertRaises(HTTPError) as context:

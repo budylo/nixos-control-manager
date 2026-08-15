@@ -133,6 +133,13 @@ with `fixtureOnly: false` recorded in the journal and result. System apply,
 test/switch activation, arbitrary paths, and Home Manager activation remain
 unavailable.
 
+The local HTTP adapter does not relay `validationReceipt` to the browser. It
+stores the receipt in memory with the helper TTL and returns an opaque intent
+plus the exact plan fingerprint. Applying requires the token-protected endpoint,
+an explicit boolean confirmation, the matching fingerprint, and consumption of
+that one-time intent before the typed helper request is sent. This browser-side
+protocol does not add any helper operation or authorization action.
+
 A second Linux integration creates a standalone Home Manager fixture, carries
 the exact three-file plan through a real Unix socket and kernel peer UID, and
 performs both pre-commit and post-commit real Nix evaluations.

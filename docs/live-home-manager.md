@@ -48,10 +48,29 @@ For a detected NixOS-module user named `alice`, an example opt-in is:
 Changing the detected user or integration requires reviewing and updating this
 allow-list through the ordinary NixOS configuration. The helper cannot widen it.
 
+## Graphical flow
+
+The Home Manager connection-plan drawer exposes live persistence only when the
+configured helper target advertises both `homeManagerApplyEnabled` and
+`homeManagerLiveWriteEnabled`. The user must:
+
+1. inspect the exact source diff;
+2. run disposable local validation;
+3. ask the helper to reconstruct and validate the same fingerprint;
+4. explicitly tick the confirmation for that fingerprint;
+5. authorize the dedicated Home Manager Polkit action.
+
+The helper receipt never reaches browser JavaScript. The local server retains
+it in memory behind an opaque intent ID for at most the helper TTL. The intent
+is consumed before the apply request, so a denial, network error, or repeated
+click requires a fresh validation. A successful UI result is accepted only when
+the transaction and its nested result report `committed`, `fixtureOnly = false`,
+and activation/switch remain false.
+
 ## Diagnostic CLI flow
 
-The graphical application does not expose live apply yet. The typed diagnostic
-client can validate and then submit only the returned fingerprint and receipt:
+The typed diagnostic client remains available for recovery and troubleshooting.
+It can validate and then submit the returned fingerprint and receipt directly:
 
 ```console
 ncm-helper-client validate-home-manager-plan \
@@ -100,7 +119,8 @@ commit.
 ## Remaining boundary
 
 This mode does not install itself, add Home Manager flake inputs, stage Git
-files, run `home-manager switch`, run `nixos-rebuild`, or expose an HTTP/GUI
-apply endpoint. The VM regression proves default Polkit denial, exact-source
-commit after authorization, real pre/post evaluation, root-only journaling,
-and an unchanged `/run/current-system`.
+files, run `home-manager switch`, or run `nixos-rebuild`. The VM regression
+proves default Polkit denial, exact-source commit after authorization, real
+pre/post evaluation, root-only journaling, and an unchanged
+`/run/current-system`. The local HTTP/UI boundary adds exact confirmation but
+does not widen helper authority.

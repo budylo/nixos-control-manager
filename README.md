@@ -35,12 +35,13 @@ This repository currently contains the first vertical slice:
   output. A root-only journal is created and automatic recovery is armed before
   the fixed `switch-to-configuration test` entrypoint runs. It never selects
   `switch` or changes the boot profile.
-- a read-only Home Manager inspector for both NixOS-module and standalone
+- a preview-first Home Manager inspector for both NixOS-module and standalone
   configurations, with conservative user discovery and a separate versioned
-  user-state boundary. Home Manager writes and activation remain disabled.
-- a preview-only Home Manager package selector that renders a deterministic
+  user-state boundary. Writes require the separate opt-in helper mode; Home
+  Manager activation remains disabled.
+- a Home Manager package selector that renders a deterministic
   per-user module and unified diff while preserving existing user options. It
-  has no save, source-adoption, flake-input, or activation operation.
+  has no flake-input or activation operation;
 - a read-only Home Manager connection plan for conservative NixOS-module and
   standalone imports, plus disposable-copy parse/evaluation;
 - an unprivileged Home Manager build-preview bound to the exact validation
@@ -51,8 +52,10 @@ This repository currently contains the first vertical slice:
   validated module/import set and canonical `ncm/user-state.json` either in a
   marked fixture or in the separate opt-in `live-home-manager` target. Live
   writes require their own UID-bound receipt, Polkit action, root-only journal,
-  allow-list, post-commit evaluation, rollback, and recovery. HTTP/GUI apply and
-  every Home Manager activation operation remain absent.
+  allow-list, post-commit evaluation, rollback, and recovery. The GUI keeps the
+  receipt server-side, requires an exact one-time confirmation, and then asks
+  Polkit to persist only those sources. Every Home Manager activation operation
+  remains absent.
 
 ## Try it
 
@@ -187,8 +190,9 @@ persistence. This is not a generic live transaction engine: daemon schema 4
 must name the Home Manager root and external journal, the NixOS module exposes
 only those paths to the service, and the submitted files must match both the
 locally reconstructed plan and the exact allow-list. The service sandbox keeps
-home directories unavailable in this first deployment slice. There is still no
-HTTP/GUI apply endpoint.
+home directories unavailable in this first deployment slice. The local HTTP/UI
+flow exposes only exact helper validation and a one-time confirmed apply intent;
+the helper receipt is never returned to browser JavaScript.
 
 The fixture workflow also performs a second NixOS evaluation after provisional
 commit. The journal reaches `committed` only when that installed snapshot needs
@@ -342,13 +346,22 @@ remain unavailable because they do not expose a fixed safe build target. The
 build may populate `/nix/store`, but it never executes the result and removes
 its disposable source copy on success, failure, cancellation, or timeout.
 
+When the configured target explicitly advertises `live-home-manager`, the same
+drawer adds a persistence step after disposable validation. The server and
+helper independently reconstruct the displayed plan and compare its complete
+fingerprint. A short-lived UID-bound receipt stays in server memory behind an
+opaque, single-use intent. The browser displays the fingerprint, requires a
+separate confirmation checkbox, and only then triggers the dedicated Polkit
+action. A successful response means the atomic transaction and post-commit
+evaluation both reached `committed`; it does not mean activation ran.
+
 System and user ownership remain intentionally separate. System packages and
 NixOS options continue to live in `state.local.json` and `managed.local.nix`;
 per-user Home Manager packages and options belong to the selected configuration
-root's `ncm/user-state.json` and distinct generated user modules. The internal
-fixture workflow commits them atomically, but the application still has no
-user-state save endpoint, live source-writing operation, Home Manager activation,
-or flake-input mutation.
+root's `ncm/user-state.json` and distinct generated user modules. The opt-in
+helper can commit them atomically through the confirmed live source-writing
+flow. The application still has no Home Manager activation or flake-input
+mutation operation.
 
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).

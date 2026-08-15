@@ -18,7 +18,7 @@ pkgs.testers.runNixOSTest {
 
     users.users.hm-denied.isNormalUser = true;
     users.users.hm-authorized.isNormalUser = true;
-    environment.systemPackages = [ ncmPackage pkgs.jq ];
+    environment.systemPackages = [ ncmPackage pkgs.curl pkgs.jq ];
 
     services.nix-control-manager-helper = {
       enable = true;
@@ -82,11 +82,44 @@ pkgs.testers.runNixOSTest {
       requires = [ "ncm-live-home-setup.service" ];
       after = [ "ncm-live-home-setup.service" ];
     };
+
+    systemd.services.ncm-live-home-ui = {
+      description = "Nix Control Manager live Home Manager UI test server";
+      path = [ pkgs.nix ];
+      wantedBy = [ "multi-user.target" ];
+      requires = [
+        "ncm-live-home-setup.service"
+        "nix-control-manager-helper.socket"
+      ];
+      after = [
+        "ncm-live-home-setup.service"
+        "nix-control-manager-helper.socket"
+      ];
+      environment.PYTHONUNBUFFERED = "1";
+      serviceConfig = {
+        User = "hm-authorized";
+        RuntimeDirectory = "ncm-live-home-ui";
+        WorkingDirectory = "/run/ncm-live-home-ui";
+        ExecStart = ''
+          ${ncmPackage}/bin/ncm serve \
+            --state /run/ncm-live-home-ui/state.json \
+            --user-state /run/ncm-live-home-ui/user-state.local.json \
+            --output /run/ncm-live-home-ui/managed.nix \
+            --config-root /etc/nixos \
+            --home-manager-root /etc/nixos \
+            --helper-socket ${socketPath} \
+            --helper-target live-home \
+            --validation-timeout 300 \
+            --port 8765
+        '';
+      };
+    };
   };
 
   testScript = ''
     from datetime import timedelta
     import json
+    import shlex
 
     timeout = timedelta(seconds=300)
 
@@ -94,6 +127,8 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("ncm-live-home-setup.service")
     machine.wait_for_unit("nix-control-manager-helper.socket")
+    machine.wait_for_unit("ncm-live-home-ui.service")
+    machine.wait_for_open_port(8765)
 
     capabilities = json.loads(machine.succeed(
         "${runAs "hm-denied"} ${client} capabilities"
@@ -144,24 +179,52 @@ pkgs.testers.runNixOSTest {
     )
     machine.fail("test -e /etc/nixos/ncm")
 
-    validation = json.loads(machine.succeed(
-        "${runAs "hm-authorized"} ${client} validate-home-manager-plan "
-        "--target live-home --config-root /etc/nixos --user hm-authorized "
-        "--integration standalone --package git",
-        timeout=timeout,
-    ))
-    result = validation["result"]
-    applied = json.loads(machine.succeed(
-        "${runAs "hm-authorized"} ${client} apply-home-manager-plan --target live-home "
-        f"--plan-fingerprint {result['planFingerprint']} "
-        f"--receipt {result['validationReceipt']}",
-        timeout=timeout,
-    ))
-    t.assertEqual(applied["status"], "ok")
-    t.assertEqual(applied["result"]["state"], "committed")
-    t.assertFalse(applied["result"]["fixtureOnly"])
-    t.assertTrue(applied["result"]["liveWriteEnabled"])
-    t.assertFalse(applied["result"]["activationEnabled"])
+    token = json.loads(machine.succeed(
+        "curl --fail --silent http://127.0.0.1:8765/api/config"
+    ))["token"]
+
+    def ui_post(path, payload):
+        return json.loads(machine.succeed(
+            "curl --fail-with-body --silent --show-error "
+            f"-H {shlex.quote('X-NCM-Token: ' + token)} "
+            "-H 'Content-Type: application/json' "
+            f"--data {shlex.quote(json.dumps(payload))} "
+            f"http://127.0.0.1:8765{path}",
+            timeout=timeout,
+        ))
+
+    candidate = {
+        "username": "hm-authorized",
+        "integration": "standalone",
+        "packages": ["git"],
+    }
+    plan = ui_post("/api/home-manager/adoption-plan", candidate)
+    t.assertEqual(plan["status"], "ready")
+    t.assertIn("ncm/managed-home-hm-authorized.nix", plan["combinedDiff"])
+
+    local_validation = ui_post("/api/home-manager/validate-adoption", candidate)
+    t.assertEqual(local_validation["status"], "passed")
+    t.assertTrue(local_validation["workingCopyRemoved"])
+
+    prepared = ui_post("/api/helper/home-manager/validate", candidate)
+    t.assertEqual(prepared["status"], "passed")
+    t.assertTrue(prepared["confirmationRequired"])
+    t.assertTrue(prepared["liveWriteEnabled"])
+    t.assertFalse(prepared["activationEnabled"])
+    t.assertNotIn("validationReceipt", prepared)
+
+    applied = ui_post("/api/helper/home-manager/apply", {
+        "intentId": prepared["intentId"],
+        "planFingerprint": prepared["planFingerprint"],
+        "confirmed": True,
+    })
+    t.assertEqual(applied["state"], "committed")
+    t.assertFalse(applied["fixtureOnly"])
+    t.assertTrue(applied["liveWriteEnabled"])
+    t.assertTrue(applied["authorizedByPolkit"])
+    t.assertFalse(applied["activationEnabled"])
+    t.assertFalse(applied["homeManagerActivationEnabled"])
+    t.assertFalse(applied["switchEnabled"])
     machine.succeed("test -f /etc/nixos/ncm/user-state.json")
     machine.succeed("grep -F 'pkgs.git' /etc/nixos/ncm/managed-home-hm-authorized.nix")
     t.assertEqual(machine.succeed("readlink -f /run/current-system").strip(), current_before)

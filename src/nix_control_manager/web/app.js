@@ -115,6 +115,15 @@ const ui = {
   homeBuildPreviewLog: document.querySelector("#homeBuildPreviewLog"),
   startHomeBuildPreviewButton: document.querySelector("#startHomeBuildPreviewButton"),
   cancelHomeBuildPreviewButton: document.querySelector("#cancelHomeBuildPreviewButton"),
+  homeApplyFlow: document.querySelector("#homeApplyFlow"),
+  homeApplyIcon: document.querySelector("#homeApplyIcon"),
+  homeApplyTitle: document.querySelector("#homeApplyTitle"),
+  homeApplyDetail: document.querySelector("#homeApplyDetail"),
+  prepareHomeApplyButton: document.querySelector("#prepareHomeApplyButton"),
+  commitHomeApplyButton: document.querySelector("#commitHomeApplyButton"),
+  homeApplyConfirmationWrap: document.querySelector("#homeApplyConfirmationWrap"),
+  homeApplyConfirmation: document.querySelector("#homeApplyConfirmation"),
+  homeApplyLog: document.querySelector("#homeApplyLog"),
 };
 
 const model = {
@@ -157,6 +166,7 @@ const model = {
   homeAdoptionValidation: null,
   homeBuildPreview: { jobId: null, status: "idle", nextCursor: 0, events: [] },
   homeBuildLog: [],
+  homeApplyIntent: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -864,8 +874,11 @@ function renderHomeManagerPackages() {
     ? `Переглянути user-модуль (${selectedPackages.size})`
     : "Переглянути user-модуль";
   const integration = user?.integration === "nixos-module" ? "Модуль NixOS" : "Standalone";
+  const writeMode = model.helper?.homeManagerLiveWriteEnabled === true
+    ? "opt-in запис доступний"
+    : "запис вимкнено";
   ui.homeManagerSelectedUser.textContent = user
-    ? `${user.name} · ${integration} · запис вимкнено`
+    ? `${user.name} · ${integration} · ${writeMode}`
     : "Спочатку виберіть користувача";
 }
 
@@ -939,7 +952,9 @@ function renderHomeManager() {
       ? (state.warning || "Файл не буде використано до ручного виправлення.")
       : "Канонічний ncm/user-state.json ще відсутній; зовнішній legacy state використовується лише як джерело міграції.";
   const boundary = document.createElement("small");
-  boundary.textContent = "Запис у вебзастосунку вимкнено · активація вимкнена · flake inputs не змінюються";
+  boundary.textContent = model.helper?.homeManagerLiveWriteEnabled === true
+    ? "Opt-in запис через helper · активація вимкнена · flake inputs не змінюються"
+    : "Запис вимкнено · активація вимкнена · flake inputs не змінюються";
   stateCard.append(title, path, detail, boundary);
   ui.homeManagerState.replaceChildren(stateCard);
   renderHomeManagerPackages();
@@ -1063,7 +1078,153 @@ function renderHomeAdoption() {
   ui.homeAdoptionValidationDetail.textContent = "Перевірка створить тимчасову копію, виконає parse/eval і видалить її.";
   ui.homeAdoptionValidationLog.hidden = true;
   ui.homeAdoptionValidationLog.textContent = "";
+  resetHomeApplyFlow();
   updateHomeBuildPreviewControls();
+}
+
+function resetHomeApplyFlow() {
+  model.homeApplyIntent = null;
+  ui.homeApplyFlow.className = "candidate-validation home-apply-flow";
+  ui.homeApplyIcon.textContent = "◇";
+  ui.homeApplyTitle.textContent = "Live-збереження ще не підготовлено";
+  ui.homeApplyDetail.textContent = model.helper?.homeManagerLiveWriteEnabled === true
+    ? "Після локальної перевірки helper незалежно звірить точний план і видасть короткоживуче підтвердження."
+    : "Потрібен окремо налаштований live-home-manager helper; активація за будь-яких умов вимкнена.";
+  ui.homeApplyConfirmation.checked = false;
+  ui.homeApplyConfirmationWrap.hidden = true;
+  ui.commitHomeApplyButton.hidden = true;
+  ui.homeApplyLog.hidden = true;
+  ui.homeApplyLog.textContent = "";
+  updateHomeApplyControls();
+}
+
+function updateHomeApplyControls() {
+  const exactLocalValidation = model.homeAdoptionValidation?.status === "passed";
+  const helperReady = model.helper?.homeManagerLiveWriteEnabled === true
+    && model.helper?.homeManagerApplyEnabled === true;
+  const preparing = ui.homeApplyFlow.classList.contains("running");
+  ui.prepareHomeApplyButton.disabled = preparing
+    || !helperReady
+    || !exactLocalValidation
+    || model.homeAdoption?.status !== "ready";
+  const intentReady = typeof model.homeApplyIntent?.intentId === "string"
+    && typeof model.homeApplyIntent?.planFingerprint === "string";
+  ui.commitHomeApplyButton.disabled = preparing
+    || !intentReady
+    || ui.homeApplyConfirmation.checked !== true;
+}
+
+async function prepareHomeApply() {
+  const candidate = currentHomeCandidate();
+  if (!candidate) return;
+  model.homeApplyIntent = null;
+  ui.homeApplyFlow.className = "candidate-validation home-apply-flow running";
+  ui.homeApplyIcon.textContent = "◌";
+  ui.homeApplyTitle.textContent = "Helper звіряє точний план…";
+  ui.homeApplyDetail.textContent = "Створюється одноразовий UID-bound receipt; цільові файли ще не змінюються.";
+  ui.homeApplyConfirmationWrap.hidden = true;
+  ui.commitHomeApplyButton.hidden = true;
+  updateHomeApplyControls();
+  try {
+    const result = await api("/api/helper/home-manager/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate),
+    });
+    if (
+      result.status !== "passed"
+      || result.fixtureOnly !== false
+      || result.liveWriteEnabled !== true
+      || result.activationEnabled !== false
+      || result.homeManagerActivationEnabled !== false
+      || result.confirmationRequired !== true
+      || typeof result.intentId !== "string"
+      || !/^[0-9a-f]{64}$/.test(result.planFingerprint || "")
+    ) {
+      throw new Error("Helper не підтвердив межу точного live-збереження");
+    }
+    model.homeApplyIntent = result;
+    ui.homeApplyFlow.className = "candidate-validation home-apply-flow passed";
+    ui.homeApplyIcon.textContent = "✓";
+    ui.homeApplyTitle.textContent = "Точний план готовий до підтвердження";
+    ui.homeApplyDetail.textContent = `Fingerprint ${result.planFingerprint.slice(0, 12)}… · receipt діє ${result.expiresInSeconds} с.`;
+    ui.homeApplyConfirmation.checked = false;
+    ui.homeApplyConfirmationWrap.hidden = false;
+    ui.commitHomeApplyButton.hidden = false;
+    ui.homeApplyLog.textContent = [
+      `TARGET       ${result.targetId}`,
+      `USER         ${result.username} · ${result.integration}`,
+      `FINGERPRINT  ${result.planFingerprint}`,
+      "ACTIVATION   disabled",
+    ].join("\n");
+    ui.homeApplyLog.hidden = false;
+  } catch (error) {
+    ui.homeApplyFlow.className = "candidate-validation home-apply-flow failed";
+    ui.homeApplyIcon.textContent = "!";
+    ui.homeApplyTitle.textContent = "Helper не підготував збереження";
+    ui.homeApplyDetail.textContent = error.message;
+  } finally {
+    updateHomeApplyControls();
+  }
+}
+
+async function commitHomeApply() {
+  const intent = model.homeApplyIntent;
+  if (!intent || ui.homeApplyConfirmation.checked !== true) return;
+  ui.homeApplyFlow.className = "candidate-validation home-apply-flow running";
+  ui.homeApplyIcon.textContent = "◌";
+  ui.homeApplyTitle.textContent = "Очікуємо Polkit-авторизацію…";
+  ui.homeApplyDetail.textContent = "Після дозволу helper атомарно запише файли, повторно оцінить їх і за потреби виконає rollback.";
+  updateHomeApplyControls();
+  try {
+    const result = await api("/api/helper/home-manager/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intentId: intent.intentId,
+        planFingerprint: intent.planFingerprint,
+        confirmed: true,
+      }),
+    });
+    if (
+      result.state !== "committed"
+      || result.fixtureOnly !== false
+      || result.liveWriteEnabled !== true
+      || result.activationEnabled !== false
+      || result.homeManagerActivationEnabled !== false
+      || result.switchEnabled !== false
+      || result.authorizedByPolkit !== true
+    ) {
+      throw new Error("Helper не підтвердив завершену неактивуючу транзакцію");
+    }
+    model.homeApplyIntent = null;
+    ui.homeApplyFlow.className = "candidate-validation home-apply-flow passed";
+    ui.homeApplyIcon.textContent = "✓";
+    ui.homeApplyTitle.textContent = "Джерельні файли безпечно збережено";
+    ui.homeApplyDetail.textContent = `Транзакція ${result.transaction.transactionId} завершена. Home Manager не активовано.`;
+    ui.homeApplyConfirmationWrap.hidden = true;
+    ui.commitHomeApplyButton.hidden = true;
+    ui.prepareHomeApplyButton.disabled = true;
+    ui.homeApplyLog.textContent += `\nCOMMITTED     ${result.filesWritten} файлів\nACTIVATION    not executed`;
+    showToast("Home Manager джерела збережено; активацію не виконано");
+    try {
+      model.homeManager = await api("/api/home-manager");
+      initializeHomePackageSelections();
+      renderHomeManager();
+    } catch (refreshError) {
+      showToast(`Джерела збережено, але стан сторінки не оновлено: ${refreshError.message}`, true);
+    }
+  } catch (error) {
+    model.homeApplyIntent = null;
+    ui.homeApplyFlow.className = "candidate-validation home-apply-flow failed";
+    ui.homeApplyIcon.textContent = "!";
+    ui.homeApplyTitle.textContent = "Збереження не завершено";
+    ui.homeApplyDetail.textContent = `${error.message}. Для повтору заново підготуйте точний план.`;
+    ui.homeApplyConfirmationWrap.hidden = true;
+    ui.commitHomeApplyButton.hidden = true;
+  } finally {
+    updateHomeApplyControls();
+  }
 }
 
 async function openHomeAdoption() {
@@ -1155,6 +1316,7 @@ async function validateHomeAdoption() {
     ].join("\n");
     ui.homeAdoptionValidationLog.hidden = false;
     updateHomeBuildPreviewControls();
+    updateHomeApplyControls();
   } catch (error) {
     ui.homeAdoptionValidation.className = "candidate-validation failed";
     ui.homeAdoptionValidationIcon.textContent = "!";
@@ -1163,6 +1325,7 @@ async function validateHomeAdoption() {
   } finally {
     ui.validateHomeAdoptionButton.disabled = !model.homeAdoption?.safeToValidate;
     updateHomeBuildPreviewControls();
+    updateHomeApplyControls();
   }
 }
 
@@ -1366,10 +1529,14 @@ function renderHelperStatus(helper) {
   ui.helperTarget.classList.toggle("connected", available);
   ui.helperTarget.classList.toggle("warning", !available);
   title.textContent = available
-    ? (helper.testActivationEnabled ? "Test helper підключено" : "Read-only helper підключено")
+    ? (helper.homeManagerLiveWriteEnabled
+      ? "Home Manager helper підключено"
+      : helper.testActivationEnabled ? "Test helper підключено" : "Read-only helper підключено")
     : "Системний helper недоступний";
   detail.textContent = available
-    ? `${helper.targetId} · без apply/switch${helper.testActivationEnabled ? " · test з auto-recovery" : " · test вимкнено"}${helper.dryActivatePreviewEnabled ? " · dry-preview" : ""}`
+    ? (helper.homeManagerLiveWriteEnabled
+      ? `${helper.targetId} · точний source-write · activation/switch вимкнено`
+      : `${helper.targetId} · без apply/switch${helper.testActivationEnabled ? " · test з auto-recovery" : " · test вимкнено"}${helper.dryActivatePreviewEnabled ? " · dry-preview" : ""}`)
     : (helper.reason || "Unix socket не відповідає");
 
   const planReady = model.adoption?.safeToApply === true && model.adoption.changes.length > 0;
@@ -1377,9 +1544,12 @@ function renderHelperStatus(helper) {
   ui.helperAvailability.classList.toggle("available", available);
   ui.helperAvailability.classList.toggle("unavailable", !available);
   ui.helperAvailability.querySelector("small").textContent = available
-    ? `Live target «${helper.targetId}»: перевірка${helper.dryActivatePreviewEnabled ? " та авторизований dry-preview" : ""}${helper.testActivationEnabled ? "; test лише з одноразовим receipt та auto-recovery" : "; test вимкнено"}`
+    ? (helper.homeManagerLiveWriteEnabled
+      ? `Live target «${helper.targetId}»: Home Manager source-write лише після точного receipt, підтвердження та Polkit; activation вимкнена`
+      : `Live target «${helper.targetId}»: перевірка${helper.dryActivatePreviewEnabled ? " та авторизований dry-preview" : ""}${helper.testActivationEnabled ? "; test лише з одноразовим receipt та auto-recovery" : "; test вимкнено"}`)
     : (helper.reason || "Системний helper не налаштовано");
   updateActivationPreviewControls();
+  if (ui.homeApplyFlow) updateHomeApplyControls();
 }
 
 function openAdoptionPlan() {
@@ -1882,6 +2052,9 @@ ui.homeAdoptionBackdrop.addEventListener("click", closeHomeAdoption);
 ui.validateHomeAdoptionButton.addEventListener("click", validateHomeAdoption);
 ui.startHomeBuildPreviewButton.addEventListener("click", startHomeBuildPreview);
 ui.cancelHomeBuildPreviewButton.addEventListener("click", cancelHomeBuildPreview);
+ui.prepareHomeApplyButton.addEventListener("click", prepareHomeApply);
+ui.commitHomeApplyButton.addEventListener("click", commitHomeApply);
+ui.homeApplyConfirmation.addEventListener("change", updateHomeApplyControls);
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);

@@ -162,7 +162,7 @@
             <div>
               <span class="hero-tag">Окрема конфігурація користувача</span>
               <h2>Home Manager.<br><em>Спочатку розуміємо наявний стан.</em></h2>
-              <p>Цей етап лише читає спосіб інтеграції, користувачів і джерела конфігурації. NCM не додає flake inputs, не створює home.nix і не запускає активацію.</p>
+              <p>NCM читає спосіб інтеграції, користувачів і джерела конфігурації. В окремому opt-in режимі helper може атомарно зберегти лише показаний і підтверджений план; flake inputs та активація залишаються вимкненими.</p>
             </div>
             <div class="hero-orbit" aria-hidden="true">
               <span class="orbit orbit-one"></span>
@@ -177,7 +177,7 @@
               <strong id="homeManagerStatusTitle">Пошук Home Manager…</strong>
               <small id="homeManagerStatusDetail">Лише читання локальних Nix-файлів.</small>
             </div>
-            <span class="read-only-badge">read-only</span>
+            <span class="read-only-badge">activation off</span>
           </section>
 
           <section class="catalog-heading">
@@ -199,7 +199,7 @@
 
           <section class="catalog-heading home-package-heading">
             <div>
-              <p class="section-kicker">home.packages · preview-only</p>
+              <p class="section-kicker">home.packages · preview-first</p>
               <h2>Пакунки користувача</h2>
             </div>
             <p id="homeManagerPackageCount" class="result-count"></p>
@@ -306,11 +306,27 @@
         </div>
         <pre id="homeBuildPreviewLog" class="candidate-validation-log build-preview-log" hidden></pre>
       </section>
+      <section id="homeApplyFlow" class="candidate-validation home-apply-flow">
+        <span id="homeApplyIcon" class="candidate-validation-icon">◇</span>
+        <div class="candidate-validation-copy">
+          <strong id="homeApplyTitle">Live-збереження ще не підготовлено</strong>
+          <small id="homeApplyDetail">Доступне лише через opt-in live-home-manager helper. Спочатку перевірте точний кандидат.</small>
+        </div>
+        <div class="candidate-validation-actions home-apply-actions">
+          <button id="prepareHomeApplyButton" class="button helper-button compact" type="button" disabled>Підготувати збереження</button>
+          <button id="commitHomeApplyButton" class="button danger compact" type="button" disabled hidden>Авторизувати й зберегти</button>
+        </div>
+        <label id="homeApplyConfirmationWrap" class="home-apply-confirmation" hidden>
+          <input id="homeApplyConfirmation" type="checkbox">
+          <span>Я перевірив показаний diff і підтверджую запис саме цього fingerprint. Home Manager не буде активовано.</span>
+        </label>
+        <pre id="homeApplyLog" class="candidate-validation-log" hidden></pre>
+      </section>
       <div class="code-wrap">
         <pre id="homeAdoptionCode"><code>Оберіть користувача та сформуйте план…</code></pre>
       </div>
       <footer>
-        <div class="validation-state"><span>◇</span><div><strong>Конфігурація й activation захищені</strong><small>Дозволена лише непривілейована збірка у Nix store; apply, activation і flake input mutation відсутні</small></div></div>
+        <div class="validation-state"><span>◇</span><div><strong>Активація завжди вимкнена</strong><small>Opt-in helper може записати лише точний підтверджений план; nixos-rebuild, home-manager switch та flake input mutation відсутні</small></div></div>
         <button id="closeHomeAdoptionFooter" class="button secondary" type="button">Готово</button>
       </footer>
     </aside>

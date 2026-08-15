@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from .errors import NcmError
 from .helper_client import (
     build_activation_preview_request,
+    build_home_manager_validate_request,
     build_test_activation_request,
     build_test_recovery_request,
     build_validate_request,
@@ -76,6 +77,8 @@ class HelperUiAdapter:
             "activationEnabled": False,
             "dryActivatePreviewEnabled": False,
             "testActivationEnabled": False,
+            "homeManagerApplyEnabled": False,
+            "homeManagerLiveWriteEnabled": False,
         }
         try:
             response = self._send(self._request("capabilities", {}))
@@ -121,6 +124,22 @@ class HelperUiAdapter:
                     target.get("testActivationEnabled") is True
                     and "test-activation" in (result.get("operations") or [])
                     and "recover-test-activation" in (result.get("operations") or [])
+                ),
+                "homeManagerApplyEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("homeManagerApplyEnabled") is True
+                    and target.get("homeManagerLiveWriteEnabled") is True
+                    and "validate-home-manager-plan" in (result.get("operations") or [])
+                    and "apply-validated-home-manager-plan"
+                    in (result.get("operations") or [])
+                ),
+                "homeManagerLiveWriteEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("homeManagerApplyEnabled") is True
+                    and target.get("homeManagerLiveWriteEnabled") is True
+                    and "validate-home-manager-plan" in (result.get("operations") or [])
+                    and "apply-validated-home-manager-plan"
+                    in (result.get("operations") or [])
                 ),
                 "reason": None,
             }
@@ -187,6 +206,132 @@ class HelperUiAdapter:
             "validationReceiptIssued": False,
             "transportStatus": response.get("status"),
             "error": dict(error) if isinstance(error, Mapping) else None,
+        }
+
+    def validate_home_manager(
+        self,
+        *,
+        username: str,
+        integration: str,
+        packages: tuple[str, ...],
+        expected_plan_fingerprint: str,
+    ) -> dict[str, Any]:
+        status = self.status()
+        if status.get("homeManagerApplyEnabled") is not True:
+            raise HelperUiError(
+                "System helper does not permit live Home Manager source writes"
+            )
+        try:
+            request = build_home_manager_validate_request(
+                self.config_root,
+                target_id=self.target_id,
+                username=username,
+                integration=integration,
+                packages=packages,
+                flake_target=self.flake_target,
+            )
+            if request["payload"]["planFingerprint"] != expected_plan_fingerprint:
+                raise HelperUiError(
+                    "The displayed Home Manager plan differs from the helper plan"
+                )
+            response = self._send(request)
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(
+                str(error.get("message") or "Home Manager helper validation failed")
+            )
+        result = _mapping(response.get("result"), "Home Manager validation result")
+        validation = _mapping(result.get("validation"), "Home Manager validation details")
+        receipt = result.get("validationReceipt")
+        if (
+            result.get("targetId") != self.target_id
+            or result.get("planFingerprint") != expected_plan_fingerprint
+            or result.get("username") != username
+            or result.get("integration") != integration
+            or result.get("fixtureOnly") is not False
+            or result.get("liveWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or validation.get("status") != "passed"
+            or validation.get("workingCopyRemoved") is not True
+            or not isinstance(receipt, str)
+            or len(receipt) < 32
+        ):
+            raise HelperUiError(
+                "Home Manager validation crossed the bounded live-write boundary"
+            )
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": self.target_id,
+            "username": username,
+            "integration": integration,
+            "planFingerprint": expected_plan_fingerprint,
+            "validationReceipt": receipt,
+            "expiresInSeconds": result.get("expiresInSeconds"),
+            "checks": list(validation.get("checks") or []),
+            "warnings": list(validation.get("warnings") or []),
+            "workingCopyRemoved": True,
+            "fixtureOnly": False,
+            "liveWriteEnabled": True,
+            "activationEnabled": False,
+            "homeManagerActivationEnabled": False,
+        }
+
+    def apply_home_manager(
+        self, *, plan_fingerprint: str, validation_receipt: str
+    ) -> dict[str, Any]:
+        status = self.status()
+        if status.get("homeManagerApplyEnabled") is not True:
+            raise HelperUiError(
+                "System helper does not permit live Home Manager source writes"
+            )
+        try:
+            response = self._send(
+                self._request(
+                    "apply-validated-home-manager-plan",
+                    {
+                        "targetId": self.target_id,
+                        "planFingerprint": plan_fingerprint,
+                        "validationReceipt": validation_receipt,
+                    },
+                )
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(
+                str(error.get("message") or "Home Manager source persistence failed")
+            )
+        result = _mapping(response.get("result"), "Home Manager apply result")
+        transaction = _mapping(result.get("transaction"), "Home Manager transaction")
+        if (
+            result.get("state") != "committed"
+            or result.get("fixtureOnly") is not False
+            or result.get("writeEnabled") is not True
+            or result.get("liveWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or result.get("buildEnabled") is not False
+            or transaction.get("state") != "committed"
+            or transaction.get("fixtureOnly") is not False
+            or transaction.get("activationEnabled") is not False
+            or not isinstance(result.get("filesWritten"), int)
+            or result.get("filesWritten") < 1
+            or not isinstance(transaction.get("transactionId"), str)
+            or not re.fullmatch(r"[0-9a-f]{24}", transaction["transactionId"])
+        ):
+            raise HelperUiError(
+                "Home Manager apply result crossed the bounded live-write boundary"
+            )
+        return {
+            **dict(result),
+            "transaction": dict(transaction),
+            "source": "system-helper",
+            "authorizedByPolkit": True,
+            "homeManagerActivationEnabled": False,
+            "switchEnabled": False,
         }
 
     def preview_activation(

@@ -3,9 +3,10 @@
 This document specifies the privileged source-write boundary. NixOS system
 adoption remains implemented only for explicitly marked disposable fixtures.
 Home Manager additionally has a separate opt-in `live-home-manager` mode with a
-fixed configuration root and external journal. A typed diagnostic CLI can
-invoke either configured path, but there is no HTTP/GUI apply endpoint. Neither
-path can activate a generation. The separate
+fixed configuration root and external journal. A typed diagnostic CLI and the
+local GUI can invoke that configured path. The GUI retains the helper receipt
+server-side, exposes only an opaque one-time confirmation intent, and consumes
+it before Polkit authorization. Neither path can activate a generation. The separate
 local build-preview API can build the
 same candidate as an unprivileged user into `/nix/store`, with no output link;
 it grants no write or activation authority to this protocol.
