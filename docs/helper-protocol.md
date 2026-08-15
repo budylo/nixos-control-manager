@@ -21,10 +21,21 @@ systemd-owned socket descriptor; its socket is `0660` and group-restricted.
   return a receipt;
 - `apply-validated-plan` — accepts only target ID, plan fingerprint, and receipt;
   it cannot resubmit file content;
+- `validate-home-manager-plan` — fixture targets only; accepts one detected user,
+  an explicit integration, at most 500 typed package attribute paths, and the
+  exact candidate files. The helper independently reconstructs and evaluates
+  the same plan before issuing a workflow-specific receipt;
+- `apply-validated-home-manager-plan` — fixture targets only; accepts only the
+  target, fingerprint, and Home Manager validation receipt;
+- `recover-home-manager-transaction` — fixture targets only; recovers one exact
+  24-character transaction ID only when its journal kind is
+  `home-manager-adoption`;
 - `preview-activation` — live modes only; accepts the same exact typed
   candidate set plus one top-level Nix store path, requires its own Polkit
   action, independently resolves the validated derivation output, and invokes
   only that closure's `switch-to-configuration dry-activate`;
+- `test-activation` and `recover-test-activation` — explicit live-test mode
+  only; consume a dry-preview receipt or one exact recovery session ID;
 - `recover-transaction` — requests recovery of one 24-character transaction ID.
 
 There is no operation for an arbitrary command, arbitrary absolute path,
@@ -59,7 +70,9 @@ A receipt is stored inside the helper and binds:
 - the complete validated candidate content;
 - target ID and plan fingerprint;
 - kernel-derived peer UID;
-- expiration time.
+- expiration time;
+- workflow kind; Home Manager receipts additionally bind user, integration, and
+  the normalized package selection through the fingerprint and stored payload.
 
 It is consumed before the apply backend is invoked and cannot be replayed.
 A denied Polkit prompt does not consume it, allowing an intentional retry.
@@ -68,6 +81,8 @@ A denied Polkit prompt does not consume it, allowing an intentional retry.
 
 - `org.nixos.nix-control-manager.apply-validated-plan`;
 - `org.nixos.nix-control-manager.recover-transaction`;
+- `org.nixos.nix-control-manager.apply-validated-home-manager-plan`;
+- `org.nixos.nix-control-manager.recover-home-manager-transaction`;
 - `org.nixos.nix-control-manager.preview-activation`;
 - `org.nixos.nix-control-manager.test-activation`;
 - `org.nixos.nix-control-manager.recover-test-activation`.
@@ -88,6 +103,20 @@ owner. After authorization it runs provisional commit, installed-copy Nix
 evaluation, and finalize/rollback through the journaled transaction engine.
 Recovery is scoped to one exact transaction ID.
 
+Home Manager fixture operations use a separate in-memory pending-plan store,
+receipt namespace, apply action, and recovery action. A receipt issued by
+`validate-plan` cannot authorize Home Manager apply, nor can a Home Manager
+receipt authorize system adoption. The backend re-detects the exact user and
+integration from the configured root, reconstructs canonical
+`ncm/user-state.json` and all Nix candidates, and compares their complete
+content before retaining the plan. Generic system recovery rejects a Home
+Manager journal and vice versa.
+
+The configuration root is helper-owned. For this fixture diagnostic path the
+only legacy migration input is the fixed
+`<configurationRoot>/user-state.local.json`; no request may submit a state path
+or another standalone root.
+
 The backend requires the exact fixture marker and still hard-refuses
 `/etc/nixos`. The Linux integration script copies a real configuration into a
 temporary directory, runs the protocol over a Unix socket with real Nix
@@ -95,6 +124,10 @@ evaluation, compares all source hashes, and removes the copy. Production
 service sandboxing and real Polkit integration are implemented for fixtures;
 a live target uses a separate backend and can never enter this transaction
 path.
+
+A second Linux integration creates a standalone Home Manager fixture, carries
+the exact three-file plan through a real Unix socket and kernel peer UID, and
+performs both pre-commit and post-commit real Nix evaluations.
 
 ## Live-read-only backend boundary
 
@@ -117,7 +150,10 @@ Successful validation returns `readOnly: true` and `applyEnabled: false` but no
 `validationReceipt`. Apply and recovery requests are rejected as
 `operation-disabled` before receipt lookup, Polkit, or any backend write method.
 Capabilities publish `liveTarget`, `readOnly`, `applyEnabled`, and
-`recoveryEnabled` for every configured target.
+`recoveryEnabled` for every configured target, plus
+`homeManagerFixtureEnabled` only for writable marked fixtures. All Home Manager
+write operations on a live target return `operation-disabled` before receipt
+lookup, backend dispatch, or Polkit.
 
 The booted NixOS VM check additionally exercises the installed policy, real
 systemd socket activation, one denied user and one VM-authorized user, and the

@@ -11,6 +11,7 @@ PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 2_000_000
 MAX_CANDIDATE_BYTES = 1_000_000
 MAX_CHANGES = 16
+MAX_HOME_MANAGER_PACKAGES = 500
 SUPPORTED_OPERATIONS = frozenset(
     {
         "capabilities",
@@ -20,6 +21,9 @@ SUPPORTED_OPERATIONS = frozenset(
         "recover-test-activation",
         "apply-validated-plan",
         "recover-transaction",
+        "validate-home-manager-plan",
+        "apply-validated-home-manager-plan",
+        "recover-home-manager-transaction",
     }
 )
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -28,6 +32,10 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RECEIPT = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _TRANSACTION_ID = re.compile(r"^[0-9a-f]{24}$")
 _STORE_PATH = re.compile(r"^/nix/store/[0-9a-z]{32}-[^/\s]+$")
+_USER_NAME = re.compile(r"^[a-z_][a-z0-9_.@-]{0,63}$")
+_ATTRIBUTE_PATH = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*$"
+)
 
 
 class HelperProtocolError(ValueError):
@@ -199,6 +207,73 @@ class ValidatePlanPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class ValidateHomeManagerPlanPayload:
+    target_id: str
+    plan_fingerprint: str
+    username: str
+    integration: str
+    packages: tuple[str, ...]
+    changes: tuple[CandidateFile, ...]
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ValidateHomeManagerPlanPayload":
+        mapping = _mapping(raw, "validate-home-manager-plan payload")
+        _exact_keys(
+            mapping,
+            {
+                "targetId",
+                "planFingerprint",
+                "username",
+                "integration",
+                "packages",
+                "changes",
+            },
+            "validate-home-manager-plan payload",
+        )
+        username = _string(mapping["username"], "username")
+        if not _USER_NAME.fullmatch(username):
+            raise HelperProtocolError("invalid-user", "username has an invalid format")
+        integration = _string(mapping["integration"], "integration")
+        if integration not in {"nixos-module", "standalone"}:
+            raise HelperProtocolError(
+                "invalid-integration",
+                "integration must be nixos-module or standalone",
+            )
+        packages_raw = mapping["packages"]
+        if not isinstance(packages_raw, list) or len(packages_raw) > MAX_HOME_MANAGER_PACKAGES:
+            raise HelperProtocolError(
+                "invalid-request",
+                f"packages must be an array with at most {MAX_HOME_MANAGER_PACKAGES} items",
+            )
+        packages: list[str] = []
+        for value in packages_raw:
+            package = _string(value, "package")
+            if not _ATTRIBUTE_PATH.fullmatch(package):
+                raise HelperProtocolError(
+                    "invalid-package", f"Invalid Home Manager package path: {package!r}"
+                )
+            packages.append(package)
+        if len(packages) != len(set(packages)):
+            raise HelperProtocolError("invalid-request", "Duplicate packages are not allowed")
+
+        validated = ValidatePlanPayload.from_mapping(
+            {
+                "targetId": mapping["targetId"],
+                "planFingerprint": mapping["planFingerprint"],
+                "changes": mapping["changes"],
+            }
+        )
+        return cls(
+            target_id=validated.target_id,
+            plan_fingerprint=validated.plan_fingerprint,
+            username=username,
+            integration=integration,
+            packages=tuple(sorted(packages)),
+            changes=validated.changes,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewActivationPayload:
     target_id: str
     plan_fingerprint: str
@@ -313,6 +388,30 @@ class ApplyValidatedPlanPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyValidatedHomeManagerPlanPayload:
+    target_id: str
+    plan_fingerprint: str
+    validation_receipt: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ApplyValidatedHomeManagerPlanPayload":
+        mapping = _mapping(raw, "apply-validated-home-manager-plan payload")
+        _exact_keys(
+            mapping,
+            {"targetId", "planFingerprint", "validationReceipt"},
+            "apply-validated-home-manager-plan payload",
+        )
+        receipt = _string(mapping["validationReceipt"], "validationReceipt")
+        if not _RECEIPT.fullmatch(receipt):
+            raise HelperProtocolError("invalid-receipt", "validationReceipt has an invalid format")
+        return cls(
+            target_id=_target_id(mapping["targetId"]),
+            plan_fingerprint=_sha256(mapping["planFingerprint"], "planFingerprint"),
+            validation_receipt=receipt,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RecoverTransactionPayload:
     target_id: str
     transaction_id: str
@@ -322,6 +421,25 @@ class RecoverTransactionPayload:
         mapping = _mapping(raw, "recover-transaction payload")
         _exact_keys(
             mapping, {"targetId", "transactionId"}, "recover-transaction payload"
+        )
+        transaction_id = _string(mapping["transactionId"], "transactionId")
+        if not _TRANSACTION_ID.fullmatch(transaction_id):
+            raise HelperProtocolError("invalid-request", "transactionId has an invalid format")
+        return cls(target_id=_target_id(mapping["targetId"]), transaction_id=transaction_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverHomeManagerTransactionPayload:
+    target_id: str
+    transaction_id: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "RecoverHomeManagerTransactionPayload":
+        mapping = _mapping(raw, "recover-home-manager-transaction payload")
+        _exact_keys(
+            mapping,
+            {"targetId", "transactionId"},
+            "recover-home-manager-transaction payload",
         )
         transaction_id = _string(mapping["transactionId"], "transactionId")
         if not _TRANSACTION_ID.fullmatch(transaction_id):

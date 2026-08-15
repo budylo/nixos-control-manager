@@ -6,6 +6,7 @@ from nix_control_manager.adoption import plan_adoption
 from nix_control_manager.candidate import plan_identity
 from nix_control_manager.helper_client import (
     build_activation_preview_request,
+    build_home_manager_validate_request,
     build_test_activation_request,
     build_test_recovery_request,
     build_validate_request,
@@ -65,6 +66,36 @@ class HelperClientTests(unittest.TestCase):
                 build_validate_request(
                     Path(temporary), target_id="fixture", flake_target=None
                 )
+
+    def test_builds_exact_home_manager_fixture_request_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home.nix"
+            original = '{ ... }:\n{\n  home.username = "alice";\n}\n'
+            home.write_text(original, encoding="utf-8")
+            (root / "flake.nix").write_text(
+                "{ outputs = { ... }: { }; }\n", encoding="utf-8"
+            )
+
+            request = build_home_manager_validate_request(
+                root,
+                target_id="home-fixture",
+                username="alice",
+                integration="standalone",
+                packages=("git", "firefox"),
+                flake_target=None,
+            )
+
+            self.assertEqual(request["operation"], "validate-home-manager-plan")
+            self.assertEqual(request["payload"]["username"], "alice")
+            self.assertEqual(request["payload"]["integration"], "standalone")
+            self.assertEqual(len(request["payload"]["changes"]), 3)
+            self.assertIn(
+                "ncm/user-state.json",
+                [change["relativePath"] for change in request["payload"]["changes"]],
+            )
+            self.assertEqual(home.read_text(encoding="utf-8"), original)
+            self.assertFalse((root / "ncm").exists())
 
     def test_test_activation_requests_accept_no_command_or_rebuild_mode(self) -> None:
         system_path = "/nix/store/" + "a" * 32 + "-nixos-system-test"

@@ -3,7 +3,12 @@ import subprocess
 import tempfile
 import unittest
 
-from nix_control_manager.helper_service import APPLY_ACTION_ID, PeerIdentity
+from nix_control_manager.helper_service import (
+    APPLY_ACTION_ID,
+    HOME_MANAGER_APPLY_ACTION_ID,
+    HOME_MANAGER_RECOVER_ACTION_ID,
+    PeerIdentity,
+)
 from nix_control_manager.polkit_authorizer import PolkitAuthorizer
 
 
@@ -74,6 +79,24 @@ class PolkitAuthorizerTests(unittest.TestCase):
             )
         )
         self.assertEqual(self.commands, [])
+
+    def test_accepts_separate_home_manager_actions_and_user_detail(self) -> None:
+        authorizer = PolkitAuthorizer(
+            self.executable, proc_root=self.proc, runner=self.passing_runner
+        )
+
+        for action in (
+            HOME_MANAGER_APPLY_ACTION_ID,
+            HOME_MANAGER_RECOVER_ACTION_ID,
+        ):
+            self.assertTrue(
+                authorizer.authorize(
+                    action,
+                    PeerIdentity(pid=4321, uid=1000),
+                    {"targetId": "fixture", "username": "alice@laptop"},
+                )
+            )
+        self.assertEqual(len(self.commands), 2)
 
     def test_denies_invalid_details_and_pkcheck_failure(self) -> None:
         authorizer = PolkitAuthorizer(

@@ -25,10 +25,15 @@ from .candidate import (
     validate_adoption,
 )
 from .helper_backend_common import match_local_adoption_plan
-from .helper_protocol import PreviewActivationPayload, ValidatePlanPayload
+from .helper_protocol import (
+    PreviewActivationPayload,
+    ValidateHomeManagerPlanPayload,
+    ValidatePlanPayload,
+)
 from .helper_service import (
     HelperBackendError,
     HelperTarget,
+    PendingValidatedHomeManagerPlan,
     PendingValidatedPlan,
 )
 
@@ -532,6 +537,33 @@ class RoutingHelperBackend:
             target, transaction_id, peer_uid
         )
 
+    def validate_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: ValidateHomeManagerPlanPayload,
+        peer_uid: int,
+    ):
+        return self._backend(target).validate_home_manager_plan(
+            target, plan, peer_uid
+        )
+
+    def apply_validated_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedHomeManagerPlan,
+        peer_uid: int,
+    ):
+        return self._backend(target).apply_validated_home_manager_plan(
+            target, plan, peer_uid
+        )
+
+    def recover_home_manager_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ):
+        return self._backend(target).recover_home_manager_transaction(
+            target, transaction_id, peer_uid
+        )
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ):
@@ -551,5 +583,17 @@ class RoutingHelperBackend:
         self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
     ) -> None:
         discard = getattr(self._backend(target), "discard_validated_plan", None)
+        if discard is not None:
+            discard(target, plan, peer_uid)
+
+    def discard_validated_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: ValidateHomeManagerPlanPayload,
+        peer_uid: int,
+    ) -> None:
+        discard = getattr(
+            self._backend(target), "discard_validated_home_manager_plan", None
+        )
         if discard is not None:
             discard(target, plan, peer_uid)

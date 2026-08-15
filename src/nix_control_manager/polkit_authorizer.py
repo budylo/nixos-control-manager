@@ -8,6 +8,8 @@ from typing import Mapping, Sequence
 
 from .helper_service import (
     APPLY_ACTION_ID,
+    HOME_MANAGER_APPLY_ACTION_ID,
+    HOME_MANAGER_RECOVER_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
     RECOVER_TEST_ACTIVATION_ACTION_ID,
     RECOVER_ACTION_ID,
@@ -17,10 +19,12 @@ from .helper_service import (
 
 
 _DETAIL_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9.-]{0,63}$")
-_DETAIL_VALUE = re.compile(r"^[A-Za-z0-9._:/-]{1,256}$")
+_DETAIL_VALUE = re.compile(r"^[A-Za-z0-9._@:/-]{1,256}$")
 _ACTIONS = frozenset(
     {
         APPLY_ACTION_ID,
+        HOME_MANAGER_APPLY_ACTION_ID,
+        HOME_MANAGER_RECOVER_ACTION_ID,
         PREVIEW_ACTIVATION_ACTION_ID,
         RECOVER_ACTION_ID,
         TEST_ACTIVATION_ACTION_ID,

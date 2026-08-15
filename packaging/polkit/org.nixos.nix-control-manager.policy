@@ -25,6 +25,26 @@
     </defaults>
   </action>
 
+  <action id="org.nixos.nix-control-manager.apply-validated-home-manager-plan">
+    <description>Apply a validated Home Manager fixture plan</description>
+    <message>Authentication is required to write the validated Home Manager fixture files</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.recover-home-manager-transaction">
+    <description>Recover an incomplete Home Manager fixture transaction</description>
+    <message>Authentication is required to recover the Home Manager fixture transaction</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.nixos.nix-control-manager.preview-activation">
     <description>Preview activation of an exact NixOS candidate</description>
     <message>Authentication is required to inspect system-level activation impact</message>

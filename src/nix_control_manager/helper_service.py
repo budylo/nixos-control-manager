@@ -8,13 +8,16 @@ import time
 from typing import Any, Mapping, Protocol
 
 from .helper_protocol import (
+    ApplyValidatedHomeManagerPlanPayload,
     ApplyValidatedPlanPayload,
     HelperProtocolError,
     HelperRequest,
     PreviewActivationPayload,
+    RecoverHomeManagerTransactionPayload,
     RecoverTestActivationPayload,
     RecoverTransactionPayload,
     SUPPORTED_OPERATIONS,
+    ValidateHomeManagerPlanPayload,
     ValidatePlanPayload,
     TestActivationPayload,
     response_mapping,
@@ -24,6 +27,12 @@ from .helper_protocol import (
 
 APPLY_ACTION_ID = "org.nixos.nix-control-manager.apply-validated-plan"
 RECOVER_ACTION_ID = "org.nixos.nix-control-manager.recover-transaction"
+HOME_MANAGER_APPLY_ACTION_ID = (
+    "org.nixos.nix-control-manager.apply-validated-home-manager-plan"
+)
+HOME_MANAGER_RECOVER_ACTION_ID = (
+    "org.nixos.nix-control-manager.recover-home-manager-transaction"
+)
 PREVIEW_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.preview-activation"
 TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.test-activation"
 RECOVER_TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.recover-test-activation"
@@ -90,6 +99,15 @@ class PendingValidatedPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class PendingValidatedHomeManagerPlan:
+    receipt: str
+    peer_uid: int
+    payload: ValidateHomeManagerPlanPayload
+    expires_at: float
+    validation_result: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class PendingTestActivation:
     receipt: str
     peer_uid: int
@@ -138,6 +156,24 @@ class HelperBackend(Protocol):
         self, target: HelperTarget, transaction_id: str, peer_uid: int
     ) -> Mapping[str, Any]: ...
 
+    def validate_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: ValidateHomeManagerPlanPayload,
+        peer_uid: int,
+    ) -> Mapping[str, Any]: ...
+
+    def apply_validated_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedHomeManagerPlan,
+        peer_uid: int,
+    ) -> Mapping[str, Any]: ...
+
+    def recover_home_manager_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]: ...
@@ -169,6 +205,9 @@ class RecordingMockBackend:
     validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
     apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
     recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    home_manager_validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    home_manager_apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    home_manager_recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
     preview_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     test_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     recover_test_activation_calls: list[tuple[str, str, int]] = field(default_factory=list)
@@ -210,6 +249,56 @@ class RecordingMockBackend:
             "activationEnabled": False,
         }
 
+    def validate_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: ValidateHomeManagerPlanPayload,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        self.home_manager_validate_calls.append(
+            (target.target_id, plan.plan_fingerprint, peer_uid)
+        )
+        return {
+            "status": self.validation_status,
+            "fixtureOnly": True,
+            "workingCopyRemoved": True,
+            "liveWriteEnabled": False,
+            "activationEnabled": False,
+        }
+
+    def apply_validated_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedHomeManagerPlan,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        self.home_manager_apply_calls.append(
+            (target.target_id, plan.payload.plan_fingerprint, peer_uid)
+        )
+        return {
+            "state": "mock-home-manager-applied",
+            "transactionId": secrets.token_hex(12),
+            "fixtureOnly": True,
+            "filesWritten": 0,
+            "liveWriteEnabled": False,
+            "activationEnabled": False,
+        }
+
+    def recover_home_manager_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.home_manager_recover_calls.append(
+            (target.target_id, transaction_id, peer_uid)
+        )
+        return {
+            "state": "mock-home-manager-recovered",
+            "transactionId": transaction_id,
+            "fixtureOnly": True,
+            "filesWritten": 0,
+            "liveWriteEnabled": False,
+            "activationEnabled": False,
+        }
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]:
@@ -232,6 +321,14 @@ class RecordingMockBackend:
 
     def discard_validated_plan(
         self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
+    ) -> None:
+        return None
+
+    def discard_validated_home_manager_plan(
+        self,
+        target: HelperTarget,
+        plan: ValidateHomeManagerPlanPayload,
+        peer_uid: int,
     ) -> None:
         return None
 
@@ -285,6 +382,7 @@ class HelperDispatcher:
         self.backend = backend
         self.receipt_ttl_seconds = receipt_ttl_seconds
         self._pending: dict[str, PendingValidatedPlan] = {}
+        self._pending_home_manager: dict[str, PendingValidatedHomeManagerPlan] = {}
         self._pending_tests: dict[str, PendingTestActivation] = {}
 
     @staticmethod
@@ -308,6 +406,15 @@ class HelperDispatcher:
                 del self._pending[receipt]
                 target = self.targets.get(pending.payload.target_id)
                 discard = getattr(self.backend, "discard_validated_plan", None)
+                if target is not None and discard is not None:
+                    discard(target, pending.payload, pending.peer_uid)
+        for receipt, pending in tuple(self._pending_home_manager.items()):
+            if pending.expires_at <= now:
+                del self._pending_home_manager[receipt]
+                target = self.targets.get(pending.payload.target_id)
+                discard = getattr(
+                    self.backend, "discard_validated_home_manager_plan", None
+                )
                 if target is not None and discard is not None:
                     discard(target, pending.payload, pending.peer_uid)
         for receipt, pending in tuple(self._pending_tests.items()):
@@ -356,6 +463,9 @@ class HelperDispatcher:
                                 "readOnly": not target.apply_enabled,
                                 "applyEnabled": target.apply_enabled,
                                 "recoveryEnabled": target.apply_enabled,
+                                "homeManagerFixtureEnabled": (
+                                    target.fixture_only and target.apply_enabled
+                                ),
                                 "dryActivatePreviewEnabled": not target.fixture_only,
                                 "testActivationEnabled": target.test_activation_enabled,
                             }
@@ -364,6 +474,12 @@ class HelperDispatcher:
                         "authorizationActions": {
                             "apply-validated-plan": APPLY_ACTION_ID,
                             "recover-transaction": RECOVER_ACTION_ID,
+                            "apply-validated-home-manager-plan": (
+                                HOME_MANAGER_APPLY_ACTION_ID
+                            ),
+                            "recover-home-manager-transaction": (
+                                HOME_MANAGER_RECOVER_ACTION_ID
+                            ),
                             "preview-activation": PREVIEW_ACTIVATION_ACTION_ID,
                             "test-activation": TEST_ACTIVATION_ACTION_ID,
                             "recover-test-activation": RECOVER_TEST_ACTIVATION_ACTION_ID,
@@ -374,6 +490,10 @@ class HelperDispatcher:
                 )
             if request.operation == "validate-plan":
                 return self._validate(request_id, request.payload, peer.uid)
+            if request.operation == "validate-home-manager-plan":
+                return self._validate_home_manager(
+                    request_id, request.payload, peer.uid
+                )
             if request.operation == "preview-activation":
                 return self._preview_activation(request_id, request.payload, peer)
             if request.operation == "test-activation":
@@ -382,8 +502,16 @@ class HelperDispatcher:
                 return self._recover_test_activation(request_id, request.payload, peer)
             if request.operation == "apply-validated-plan":
                 return self._apply(request_id, request.payload, peer)
+            if request.operation == "apply-validated-home-manager-plan":
+                return self._apply_home_manager(
+                    request_id, request.payload, peer
+                )
             if request.operation == "recover-transaction":
                 return self._recover(request_id, request.payload, peer)
+            if request.operation == "recover-home-manager-transaction":
+                return self._recover_home_manager(
+                    request_id, request.payload, peer
+                )
             raise AssertionError(f"Unhandled helper operation: {request.operation}")
         except HelperProtocolError as error:
             return response_mapping(
@@ -494,6 +622,100 @@ class HelperDispatcher:
             )
         del self._pending[payload.validation_receipt]
         result = self.backend.apply_validated_plan(target, pending, peer.uid)
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _validate_home_manager(
+        self, request_id: str, raw: Any, peer_uid: int
+    ) -> dict[str, Any]:
+        payload = ValidateHomeManagerPlanPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.fixture_only or not target.apply_enabled:
+            raise HelperProtocolError(
+                "operation-disabled",
+                "Home Manager helper writes are restricted to fixture targets",
+            )
+        for change in payload.changes:
+            if change.relative_path not in target.allowed_relative_paths:
+                raise HelperProtocolError(
+                    "path-not-allowed",
+                    f"The helper target does not allow {change.relative_path}",
+                )
+        validation = dict(
+            self.backend.validate_home_manager_plan(target, payload, peer_uid)
+        )
+        if validation.get("status") != "passed":
+            return response_mapping(
+                request_id,
+                status="error",
+                error_code="validation-failed",
+                error_message="The helper backend did not validate the Home Manager plan",
+                result=validation,
+            )
+        receipt = secrets.token_urlsafe(32)
+        self._pending_home_manager[receipt] = PendingValidatedHomeManagerPlan(
+            receipt=receipt,
+            peer_uid=peer_uid,
+            payload=payload,
+            expires_at=time.monotonic() + self.receipt_ttl_seconds,
+            validation_result=validation,
+        )
+        return response_mapping(
+            request_id,
+            status="ok",
+            result={
+                "validationReceipt": receipt,
+                "expiresInSeconds": self.receipt_ttl_seconds,
+                "targetId": payload.target_id,
+                "planFingerprint": payload.plan_fingerprint,
+                "username": payload.username,
+                "integration": payload.integration,
+                "validation": validation,
+                "fixtureOnly": True,
+                "liveWriteEnabled": False,
+                "activationEnabled": False,
+            },
+        )
+
+    def _apply_home_manager(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = ApplyValidatedHomeManagerPlanPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.fixture_only or not target.apply_enabled:
+            raise HelperProtocolError(
+                "operation-disabled",
+                "Home Manager helper writes are restricted to fixture targets",
+            )
+        pending = self._pending_home_manager.get(payload.validation_receipt)
+        if (
+            pending is None
+            or pending.peer_uid != peer.uid
+            or pending.payload.target_id != payload.target_id
+            or pending.payload.plan_fingerprint != payload.plan_fingerprint
+        ):
+            raise HelperProtocolError(
+                "invalid-receipt",
+                "The Home Manager validation receipt is unknown or does not match",
+            )
+        details = {
+            "targetId": payload.target_id,
+            "planFingerprint": payload.plan_fingerprint,
+            "username": pending.payload.username,
+            "integration": pending.payload.integration,
+        }
+        if not self.authorizer.authorize(
+            HOME_MANAGER_APPLY_ACTION_ID, peer, details
+        ):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        del self._pending_home_manager[payload.validation_receipt]
+        result = self.backend.apply_validated_home_manager_plan(
+            target, pending, peer.uid
+        )
         return response_mapping(request_id, status="ok", result=result)
 
     def _preview_activation(
@@ -623,6 +845,34 @@ class HelperDispatcher:
                 error_message="Polkit authorization was not granted",
             )
         result = self.backend.recover_transaction(
+            target, payload.transaction_id, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _recover_home_manager(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = RecoverHomeManagerTransactionPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.fixture_only or not target.apply_enabled:
+            raise HelperProtocolError(
+                "operation-disabled",
+                "Home Manager recovery is restricted to fixture targets",
+            )
+        details = {
+            "targetId": payload.target_id,
+            "transactionId": payload.transaction_id,
+        }
+        if not self.authorizer.authorize(
+            HOME_MANAGER_RECOVER_ACTION_ID, peer, details
+        ):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        result = self.backend.recover_home_manager_transaction(
             target, payload.transaction_id, peer.uid
         )
         return response_mapping(request_id, status="ok", result=result)

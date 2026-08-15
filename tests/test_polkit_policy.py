@@ -4,6 +4,8 @@ from xml.etree import ElementTree
 
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
+    HOME_MANAGER_APPLY_ACTION_ID,
+    HOME_MANAGER_RECOVER_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
     RECOVER_TEST_ACTIVATION_ACTION_ID,
     RECOVER_ACTION_ID,
@@ -27,6 +29,8 @@ class PolkitPolicyTests(unittest.TestCase):
             set(actions),
             {
                 APPLY_ACTION_ID,
+                HOME_MANAGER_APPLY_ACTION_ID,
+                HOME_MANAGER_RECOVER_ACTION_ID,
                 PREVIEW_ACTIVATION_ACTION_ID,
                 RECOVER_ACTION_ID,
                 TEST_ACTIVATION_ACTION_ID,

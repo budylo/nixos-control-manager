@@ -71,8 +71,8 @@ The generated module remains usable without Nix Control Manager.
     validation fingerprint and digest set, and a successful evaluation check.
     The exact file set includes canonical `ncm/user-state.json`. After
     provisional commit it reconstructs a no-changes plan and evaluates the
-    installed fixture before finalization. No application endpoint exposes this
-    workflow.
+    installed fixture before finalization. A typed diagnostic helper exposes
+    this only for marked fixtures; no HTTP, GUI, or live-write endpoint does.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -205,9 +205,10 @@ The internal fixture workflow does not weaken that public contract. Fixture
 writes require the exact transaction marker and reject `/etc/nixos`,
 `/etc/home-manager`, and the resolved default `~/.config/home-manager`. The
 journal is outside the configuration root and records
-`transactionKind = "home-manager-adoption"`; generic recovery can therefore
-restore an interrupted Home Manager provisional commit without a separate file
-mutation implementation. The legacy external state is never deleted or edited;
+`transactionKind = "home-manager-adoption"`; the dedicated helper recovery
+operation verifies that kind before restoring an interrupted provisional
+commit. Its validation/apply receipt store and Polkit actions are separate from
+system adoption. The legacy external state is never deleted or edited;
 its compatible profiles are migration input only when canonical state is
 missing them.
 
@@ -218,7 +219,7 @@ future adoption decision separate from read-only discovery.
 
 ## Privilege boundary
 
-The GUI remains unprivileged. The planned helper will:
+The GUI remains unprivileged. The helper boundary:
 
 - use Polkit for interactive authorization;
 - write only configured Nix Control Manager paths;

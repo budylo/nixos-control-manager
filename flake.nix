@@ -248,8 +248,20 @@
               and .activationEnabled == false
               and .transaction.state == "committed"
             ' transaction.json
+            PYTHONPATH=${./src} python3 ${./tests/integration_home_manager_fixture_helper_real_nix.py} \
+              --root fixture/home-manager-helper \
+              --journal fixture/home-manager-helper-journals \
+              --socket fixture/home-manager-helper.sock > helper-transaction.json
+            jq -e '
+              .state == "committed"
+              and .fixtureOnly == true
+              and .liveWriteEnabled == false
+              and .activationEnabled == false
+              and .filesWritten == 3
+            ' helper-transaction.json
             mkdir "$out"
-            cp inspection.json preview.json adoption.json validation.json transaction.json "$out"/
+            cp inspection.json preview.json adoption.json validation.json \
+              transaction.json helper-transaction.json "$out"/
           '';
           nixos-module =
             assert liveTargetEvaluation.success == false;

@@ -714,6 +714,7 @@ def recover_pending_fixture_transactions(
     *,
     journal_root: Path,
     transaction_id: str | None = None,
+    transaction_kind: str | None = None,
 ) -> tuple[TransactionResult, ...]:
     fixture_root = _require_fixture_root(root)
     if transaction_id is not None and not _TRANSACTION_ID.fullmatch(transaction_id):
@@ -739,6 +740,13 @@ def recover_pending_fixture_transactions(
                 continue
             manifest = _load_manifest(manifest_path)
             if manifest.get("configurationRoot") != str(fixture_root):
+                continue
+            manifest_kind = manifest.get("transactionKind", "nixos-adoption")
+            if transaction_kind is not None and manifest_kind != transaction_kind:
+                if transaction_id is not None:
+                    raise TransactionError(
+                        "Transaction journal belongs to a different workflow"
+                    )
                 continue
             if manifest.get("state") in {"committed", "rolled-back", "recovered"}:
                 continue

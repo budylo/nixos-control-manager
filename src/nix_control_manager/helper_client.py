@@ -4,11 +4,17 @@ import argparse
 import json
 from pathlib import Path
 import secrets
+import socket
 import sys
 from typing import Any
 
 from .adoption import plan_adoption
 from .candidate import effective_flake_target, plan_identity
+from .home_manager_adoption import (
+    home_manager_plan_identity,
+    plan_home_manager_adoption,
+)
+from .home_manager_inspector import inspect_home_manager
 from .helper_transport import send_unix_request
 
 
@@ -68,6 +74,60 @@ def build_activation_preview_request(
     return request
 
 
+def build_home_manager_validate_request(
+    config_root: Path,
+    *,
+    target_id: str,
+    username: str,
+    integration: str,
+    packages: tuple[str, ...],
+    flake_target: str | None,
+) -> dict[str, Any]:
+    root = config_root.expanduser().resolve()
+    legacy_state = root / "user-state.local.json"
+    inspection = inspect_home_manager(
+        root,
+        standalone_root=root,
+        user_state_path=legacy_state,
+        current_user=username,
+    )
+    plan = plan_home_manager_adoption(
+        root,
+        standalone_root=root,
+        user_state_path=legacy_state,
+        username=username,
+        integration=integration,
+        packages=packages,
+        inspection=inspection,
+    )
+    if plan.status != "ready" or not plan.changes:
+        raise ValueError(f"No safe Home Manager adoption changes are available: {plan.status}")
+    effective_target = flake_target
+    if integration == "nixos-module" and (root / "flake.nix").is_file():
+        effective_target = effective_target or socket.gethostname()
+    fingerprint, _ = home_manager_plan_identity(plan, effective_target)
+    return _request(
+        "validate-home-manager-plan",
+        {
+            "targetId": target_id,
+            "planFingerprint": fingerprint,
+            "username": username,
+            "integration": integration,
+            "packages": list(packages),
+            "changes": [
+                {
+                    "relativePath": change.relative_path,
+                    "action": change.action,
+                    "previousSha256": change.previous_sha256,
+                    "candidateSha256": change.candidate_sha256,
+                    "candidate": change.candidate,
+                }
+                for change in plan.changes
+            ],
+        },
+    )
+
+
 def build_test_activation_request(
     *, target_id: str, system_path: str, plan_fingerprint: str, test_receipt: str
 ) -> dict[str, Any]:
@@ -118,6 +178,25 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--target", required=True)
     recover.add_argument("--transaction-id", required=True)
 
+    validate_home = subparsers.add_parser("validate-home-manager-plan")
+    validate_home.add_argument("--target", required=True)
+    validate_home.add_argument("--config-root", required=True, type=Path)
+    validate_home.add_argument("--user", required=True)
+    validate_home.add_argument(
+        "--integration", required=True, choices=("nixos-module", "standalone")
+    )
+    validate_home.add_argument("--package", action="append", default=[])
+    validate_home.add_argument("--flake-target")
+
+    apply_home = subparsers.add_parser("apply-home-manager-plan")
+    apply_home.add_argument("--target", required=True)
+    apply_home.add_argument("--plan-fingerprint", required=True)
+    apply_home.add_argument("--receipt", required=True)
+
+    recover_home = subparsers.add_parser("recover-home-manager-transaction")
+    recover_home.add_argument("--target", required=True)
+    recover_home.add_argument("--transaction-id", required=True)
+
     activation = subparsers.add_parser("preview-activation")
     activation.add_argument("--target", required=True)
     activation.add_argument("--config-root", required=True, type=Path)
@@ -160,6 +239,32 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
     elif arguments.operation == "recover-transaction":
         request = _request(
             "recover-transaction",
+            {
+                "targetId": arguments.target,
+                "transactionId": arguments.transaction_id,
+            },
+        )
+    elif arguments.operation == "validate-home-manager-plan":
+        request = build_home_manager_validate_request(
+            arguments.config_root,
+            target_id=arguments.target,
+            username=arguments.user,
+            integration=arguments.integration,
+            packages=tuple(arguments.package),
+            flake_target=arguments.flake_target,
+        )
+    elif arguments.operation == "apply-home-manager-plan":
+        request = _request(
+            "apply-validated-home-manager-plan",
+            {
+                "targetId": arguments.target,
+                "planFingerprint": arguments.plan_fingerprint,
+                "validationReceipt": arguments.receipt,
+            },
+        )
+    elif arguments.operation == "recover-home-manager-transaction":
+        request = _request(
+            "recover-home-manager-transaction",
             {
                 "targetId": arguments.target,
                 "transactionId": arguments.transaction_id,

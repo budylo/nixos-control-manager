@@ -101,7 +101,10 @@
   disposable parse/evaluation (implemented; live apply remains disabled);
 - atomic Home Manager module/import persistence with fingerprint, journal,
   post-commit evaluation, rollback, and crash recovery (implemented only for
-  explicitly marked disposable fixtures; no CLI/HTTP/helper/live endpoint);
+  explicitly marked disposable fixtures; typed diagnostic helper path
+  implemented, with no HTTP/GUI/live endpoint);
+- separate Home Manager fixture validation/apply/recovery operations, UID-bound
+  single-use receipts, exact allow-lists, and Polkit actions (implemented);
 - atomic canonical user-state persistence in the same marked-fixture
   transaction as modules/imports (implemented; legacy source remains read-only);
 - Home Manager live managed-module and user-state persistence (not implemented);

@@ -45,8 +45,9 @@ This repository currently contains the first vertical slice:
   exists and every validation result confirms that build and activation are off.
 - a fault-tested Home Manager transaction workflow that can write the validated
   module/import set and canonical `ncm/user-state.json` only inside an explicitly
-  marked disposable fixture. It has no CLI, HTTP, GUI, helper, live-write,
-  build, or activation endpoint.
+  marked disposable fixture. A typed diagnostic helper client can exercise this
+  fixture-only path with separate receipts and Polkit actions; HTTP, GUI,
+  live-write, build, and activation endpoints remain absent.
 
 ## Try it
 
@@ -98,6 +99,7 @@ ncm plan-adoption --config-root /etc/nixos
 ncm validate-adoption --config-root /etc/nixos
 ncm serve --state state.json --output managed.nix --open
 ncm-helper-client capabilities
+ncm-helper-client validate-home-manager-plan --target home-fixture --config-root ./fixture --user alice --integration standalone --package firefox
 ```
 
 `detect-home-manager` performs a bounded static inspection of Nix files. It
@@ -175,8 +177,9 @@ restricted to disposable fixtures. The dedicated live target can validate the
 exact locally reconstructed plan and produce a bound dry-activation report,
 but still has no configuration-write or permanent activation authority.
 
-The repository already contains the underlying transaction and recovery engine,
-but it deliberately has no CLI or HTTP apply endpoint and refuses live
+The repository already contains the underlying transaction and recovery engine.
+Its diagnostic CLI can apply only through a configured, marked fixture helper;
+there is no HTTP, GUI, or live apply endpoint, and the engine refuses live
 `/etc/nixos`, `/etc/home-manager`, and the default
 `~/.config/home-manager` path. Its success, rollback, crash-recovery,
 concurrent-edit, and manual-recovery cases run only against temporary test
@@ -194,6 +197,13 @@ canonical `ncm/user-state.json`, reconstructs a no-changes plan from the
 installed fixture, and evaluates it again before finalization. The state file
 participates in the same fingerprint, commit, and rollback as the Nix files;
 every live Home Manager write remains unimplemented.
+
+The helper exposes Home Manager fixtures through distinct
+`validate-home-manager-plan`, `apply-validated-home-manager-plan`, and
+`recover-home-manager-transaction` operations. Their receipts and Polkit
+actions cannot be reused by the NixOS adoption workflow. The helper reconstructs
+the plan locally, enforces its exact path allow-list, and rejects all three
+operations for live targets before backend or Polkit execution.
 
 The helper protocol is documented in
 [`docs/helper-protocol.md`](docs/helper-protocol.md). Its Unix transport and

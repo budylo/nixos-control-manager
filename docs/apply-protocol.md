@@ -2,8 +2,9 @@
 
 This document specifies the future privileged write boundary. The journaled
 transaction core and helper adapter are implemented only for explicitly marked
-disposable fixtures. They have no CLI or HTTP endpoint and reject the standard
-live NixOS and Home Manager roots; the current application still cannot apply
+disposable fixtures. A typed diagnostic CLI can invoke the configured fixture
+helper, but there is no HTTP, GUI, or live-write endpoint. The engine rejects
+the standard live NixOS and Home Manager roots; the current application cannot apply
 an adoption plan to the live system or activate a generation. The separate
 local build-preview API can build the
 same candidate as an unprivileged user into `/nix/store`, with no output link;
@@ -41,8 +42,8 @@ The same core now supports a distinct `home-manager-adoption` journal kind for
 both NixOS-module and standalone plans. It requires a successful full evaluation
 in addition to parse checks, binds the exact root, user, integration, candidate
 state, target and file digests into the fingerprint, and performs a second
-evaluation after provisional commit. This path remains internal and
-fixture-only. Canonical `ncm/user-state.json` is validated and committed in the
+evaluation after provisional commit. This path remains fixture-only. Canonical
+`ncm/user-state.json` is validated and committed in the
 same transaction as the module and import changes; external legacy state is
 never modified.
 
@@ -52,6 +53,13 @@ configured root, compares the entire submitted candidate set, and then invokes
 this transaction core only after mock-Polkit authorization. The integration
 suite also runs this path with real Nix evaluation on a temporary copy of
 `/etc/nixos`.
+
+Home Manager uses its own validate/apply/recovery operations, pending-plan
+store, receipt namespace, and Polkit actions. The typed validation payload binds
+the detected user, integration, normalized package list, fingerprint, and exact
+candidate files. System and Home Manager receipts are intentionally not
+interchangeable, and recovery checks the journal's transaction kind before any
+restore.
 
 ## Safety invariants
 
@@ -71,7 +79,8 @@ suite also runs this path with real Nix evaluation on a temporary copy of
 1. **Plan** — record target root, relative paths, original digests, candidate
    digests, and the exact source diff.
 2. **Validate** — materialize a private temporary copy, parse each changed Nix
-   file, and evaluate the NixOS system derivation without building it.
+   file, and evaluate the selected NixOS system or Home Manager activation
+   derivation without building it.
 3. **Authorize** — show the validated digest set and request one Polkit action
    scoped to writing those exact files.
 4. **Prepare** — lock the NCM transaction directory, recheck original digests,
@@ -81,8 +90,8 @@ suite also runs this path with real Nix evaluation on a temporary copy of
    directories. Update a journal after every replacement. Implemented for
    fixtures.
 6. **Verify** — while the journal is `awaiting-verification`, copy the installed
-   fixture and rerun evaluation without proposing any additional changes. No
-   activation is performed. Implemented for fixtures.
+   fixture and rerun the workflow-specific evaluation without proposing any
+   additional changes. No activation is performed. Implemented for fixtures.
 7. **Finish** — recheck installed candidate digests, mark the journal committed,
    and retain the manifest and backups according to the recovery policy.
    Implemented for fixtures.

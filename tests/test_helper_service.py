@@ -5,6 +5,7 @@ import unittest
 
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
+    HOME_MANAGER_APPLY_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
     RECOVER_TEST_ACTIVATION_ACTION_ID,
     RECOVER_ACTION_ID,
@@ -193,6 +194,27 @@ class HelperServiceTests(unittest.TestCase):
         )
         self.assertEqual(response["error"]["code"], "invalid-receipt")
 
+    def test_system_receipt_cannot_authorize_home_manager_apply(self) -> None:
+        validated = self.validate()
+        self.authorizer.allowed.add((1000, HOME_MANAGER_APPLY_ACTION_ID))
+
+        response = self.dispatcher.handle(
+            self.request(
+                "apply-validated-home-manager-plan",
+                {
+                    "targetId": "system",
+                    "planFingerprint": "2" * 64,
+                    "validationReceipt": validated["result"]["validationReceipt"],
+                },
+                "cross-home-apply",
+            ),
+            peer_uid=1000,
+        )
+
+        self.assertEqual(response["error"]["code"], "invalid-receipt")
+        self.assertEqual(self.backend.home_manager_apply_calls, [])
+        self.assertEqual(self.authorizer.calls, [])
+
     def test_failed_helper_validation_never_issues_a_receipt(self) -> None:
         self.backend.validation_status = "failed"
         response = self.dispatcher.handle(
@@ -225,6 +247,96 @@ class HelperServiceTests(unittest.TestCase):
         self.assertEqual(accepted["result"]["state"], "mock-recovered")
         self.assertEqual(self.authorizer.calls[-1][0], RECOVER_ACTION_ID)
         self.assertFalse(self.mock_root.exists())
+
+    def test_live_target_rejects_all_home_manager_write_operations_before_backend(self) -> None:
+        backend = RecordingMockBackend()
+        authorizer = MockPolkitAuthorizer()
+        dispatcher = HelperDispatcher(
+            targets=(
+                HelperTarget(
+                    target_id="live",
+                    configuration_root=self.mock_root,
+                    allowed_relative_paths=frozenset({"ncm/user-state.json"}),
+                    fixture_only=False,
+                    apply_enabled=False,
+                ),
+            ),
+            authorizer=authorizer,
+            backend=backend,
+        )
+        candidate = self.change("ncm/user-state.json")
+        validate = dispatcher.handle(
+            self.request(
+                "validate-home-manager-plan",
+                {
+                    "targetId": "live",
+                    "planFingerprint": "2" * 64,
+                    "username": "alice",
+                    "integration": "standalone",
+                    "packages": ["firefox"],
+                    "changes": [candidate],
+                },
+                "live-home-valid",
+            ),
+            peer_uid=1000,
+        )
+        apply = dispatcher.handle(
+            self.request(
+                "apply-validated-home-manager-plan",
+                {
+                    "targetId": "live",
+                    "planFingerprint": "2" * 64,
+                    "validationReceipt": "R" * 32,
+                },
+                "live-home-apply",
+            ),
+            peer_uid=1000,
+        )
+        recover = dispatcher.handle(
+            self.request(
+                "recover-home-manager-transaction",
+                {"targetId": "live", "transactionId": "a" * 24},
+                "live-home-recov",
+            ),
+            peer_uid=1000,
+        )
+
+        self.assertEqual(validate["error"]["code"], "operation-disabled")
+        self.assertEqual(apply["error"]["code"], "operation-disabled")
+        self.assertEqual(recover["error"]["code"], "operation-disabled")
+        self.assertEqual(backend.home_manager_validate_calls, [])
+        self.assertEqual(backend.home_manager_apply_calls, [])
+        self.assertEqual(backend.home_manager_recover_calls, [])
+        self.assertEqual(authorizer.calls, [])
+        self.assertFalse(self.mock_root.exists())
+
+    def test_home_manager_payload_rejects_untyped_packages_and_extra_fields(self) -> None:
+        payload = {
+            "targetId": "system",
+            "planFingerprint": "2" * 64,
+            "username": "alice",
+            "integration": "standalone",
+            "packages": ["../arbitrary"],
+            "changes": [self.change()],
+        }
+        invalid_package = self.dispatcher.handle(
+            self.request(
+                "validate-home-manager-plan", payload, "typed-home-pack1"
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(invalid_package["error"]["code"], "invalid-package")
+
+        payload["packages"] = ["firefox"]
+        payload["command"] = ["sh", "-c", "anything"]
+        extra = self.dispatcher.handle(
+            self.request(
+                "validate-home-manager-plan", payload, "typed-home-extra"
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(extra["error"]["code"], "invalid-request")
+        self.assertEqual(self.backend.home_manager_validate_calls, [])
 
     def test_dry_activation_preview_is_live_only_polkit_scoped_and_typed(self) -> None:
         live_backend = RecordingMockBackend()
