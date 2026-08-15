@@ -102,6 +102,10 @@
 - fingerprint-bound, unprivileged build-preview for the exact Home Manager
   `activationPackage`, with streamed logs, cancellation, timeout, disposable
   cleanup, and no activation (implemented; legacy standalone remains unavailable);
+- booted offline VM proof of the full Home Manager HTTP flow from detection and
+  adoption planning through validation and a real Nix store build, including
+  unchanged source, canonical state, result link, and user profile guarantees
+  (implemented as part of the live read-only UI flake check);
 - atomic Home Manager module/import persistence with fingerprint, journal,
   post-commit evaluation, rollback, and crash recovery (implemented only for
   explicitly marked disposable fixtures; typed diagnostic helper path

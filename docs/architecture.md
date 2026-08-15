@@ -188,9 +188,11 @@ system schema drives `managed.nix`; user-state schema version 1 contains a map
 of user profiles, each with an explicit `nixos-module` or `standalone`
 integration, package attribute paths, and typed option values. The latter is
 stored canonically as `ncm/user-state.json` in the selected configuration root.
-A token-protected HTTP request may carry one package candidate, but the response
-explicitly remains read-only and no live storage call, source adoption,
-flake-input edit, build, or activation path is connected to it.
+A token-protected HTTP request may carry one package candidate, but its preview
+response remains read-only. A separate fingerprint-bound workflow may validate
+the resulting adoption plan in a disposable copy and build its fixed
+`activationPackage` into `/nix/store`; no live storage call, source adoption,
+flake-input edit, or Home Manager activation path is connected to it.
 
 The generated user source has the portable Home Manager module shape
 `{ pkgs, ... }: { home.packages = [ ... ]; }`. It deliberately does not encode

@@ -228,10 +228,13 @@ A second booted VM runs the unprivileged graphical server against an actual
 systemd `live-read-only` helper and disposable VM-only `/etc/nixos`. It performs
 the full HTTP-to-Unix validation, verifies the helper mount namespace cannot
 write `/etc/nixos`, performs a real offline candidate build into the VM's Nix
-store, checks streamed output and cleanup, and proves that apply and recovery
-stop before Polkit. It then authorizes the distinct dry-preview action, checks
-the exact store-path binding, captures systemd impact, and proves the source
-and active generation remain unchanged. It is exposed as
+store, checks streamed output and cleanup, and exercises Home Manager detection,
+adoption planning, validation, and a real fingerprint-bound `activationPackage`
+build through the HTTP API. It proves both configuration trees, canonical state,
+the Home Manager profile, and the active system generation remain unchanged;
+apply and recovery also stop before Polkit. It then authorizes the distinct
+system dry-preview action, checks the exact store-path binding, and captures
+systemd impact. The test is exposed as
 `checks.x86_64-linux.live-read-only-ui-vm` and
 `packages.x86_64-linux.live-read-only-ui-vm-test`.
 

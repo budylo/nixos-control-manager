@@ -31,6 +31,51 @@ let
     configuration = liveConfigurationModule;
     system = pkgs.stdenv.hostPlatform.system;
   }).system;
+  homeManagerHome = pkgs.writeText "ncm-ui-home.nix" ''
+    { ... }:
+
+    {
+      home.username = "ncm-ui";
+      home.stateVersion = "26.05";
+    }
+  '';
+  # Reattach only direct store-path context inside the copied fixture. Using
+  # derivation context here would pull complete Bash/Coreutils build closures
+  # into the offline guest merely to create a tiny activationPackage directory.
+  homeManagerRuntime = builtins.unsafeDiscardStringContext pkgs.bash.outPath;
+  homeManagerCoreutils = builtins.unsafeDiscardStringContext pkgs.coreutils.outPath;
+  homeManagerFlake = pkgs.writeText "ncm-ui-home-flake.nix" ''
+    {
+      outputs = { self }:
+        let
+          pkgs = {
+            git = "fixture-git";
+          };
+          home = import ./home.nix { inherit pkgs; config = { }; };
+          managed = import (builtins.head home.imports) { inherit pkgs; };
+          runtime = builtins.appendContext "${homeManagerRuntime}" {
+            "${homeManagerRuntime}" = { path = true; };
+          };
+          coreutils = builtins.appendContext "${homeManagerCoreutils}" {
+            "${homeManagerCoreutils}" = { path = true; };
+          };
+          activationPackage =
+            assert managed.home.packages == [ pkgs.git ];
+            builtins.derivation {
+              name = "ncm-home-ui-preview";
+              system = "${pkgs.stdenv.hostPlatform.system}";
+              builder = "''${runtime}/bin/sh";
+              args = [ "-c" "''${coreutils}/bin/mkdir -p \"$out\"; echo 'Home Manager build-preview only' > \"$out/marker\"" ];
+              preferLocalBuild = true;
+              allowSubstitutes = false;
+            };
+        in
+        {
+          homeConfigurations.ncm-ui = { inherit activationPackage; };
+        };
+    }
+  '';
+  homeManagerRoot = "/var/lib/ncm-ui/.config/home-manager";
   socketPath = "/run/nix-control-manager/helper.sock";
   uiPort = 8765;
   client = "${ncmPackage}/bin/ncm-helper-client --socket ${socketPath} --timeout 300";
@@ -92,6 +137,9 @@ pkgs.testers.runNixOSTest {
       script = ''
         install -d -m 0755 /etc/nixos
         install -m 0644 ${liveConfiguration} /etc/nixos/configuration.nix
+        install -d -m 0755 -o ncm-ui -g ncm-ui ${homeManagerRoot}
+        install -m 0644 ${homeManagerHome} ${homeManagerRoot}/home.nix
+        install -m 0644 ${homeManagerFlake} ${homeManagerRoot}/flake.nix
       '';
     };
 
@@ -124,7 +172,7 @@ pkgs.testers.runNixOSTest {
         StateDirectory = "ncm-ui";
         StateDirectoryMode = "0700";
         WorkingDirectory = "/var/lib/ncm-ui";
-        ExecStart = "${ncmPackage}/bin/ncm serve --state /var/lib/ncm-ui/state.json --output /var/lib/ncm-ui/managed.nix --config-root /etc/nixos --port ${toString uiPort} --helper-socket ${socketPath} --helper-target live --validation-timeout 300 --build-timeout 300";
+        ExecStart = "${ncmPackage}/bin/ncm serve --state /var/lib/ncm-ui/state.json --user-state /var/lib/ncm-ui/user-state.json --output /var/lib/ncm-ui/managed.nix --config-root /etc/nixos --home-manager-root ${homeManagerRoot} --port ${toString uiPort} --helper-socket ${socketPath} --helper-target live --validation-timeout 300 --build-timeout 300";
         Restart = "on-failure";
         RestartSec = "1s";
         NoNewPrivileges = true;
@@ -162,6 +210,10 @@ pkgs.testers.runNixOSTest {
         "systemctl show ncm-ui.service -p ExecStart --value | "
         "grep -F -- '--build-timeout 300'"
     )
+    machine.succeed(
+        "systemctl show ncm-ui.service -p ExecStart --value | "
+        "grep -F -- '--home-manager-root ${homeManagerRoot}'"
+    )
 
     machine.succeed("test -S ${socketPath}")
     machine.succeed("test -f /etc/nixos/configuration.nix")
@@ -169,6 +221,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"validateHelperButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"startBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"cancelBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"startHomeBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"cancelHomeBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"runActivationPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
@@ -231,6 +285,144 @@ pkgs.testers.runNixOSTest {
         "-X POST " + base_url + "/api/helper/validate-adoption"
     ).strip()
     t.assertEqual(unauthorized_code, "403")
+
+    home_inspection = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/home-manager"
+    ))
+    t.assertEqual(home_inspection["status"], "detected")
+    t.assertIn("standalone", home_inspection["integrations"])
+    t.assertTrue(any(
+        user["name"] == "ncm-ui" and user["integration"] == "standalone"
+        for user in home_inspection["users"]
+    ))
+    t.assertFalse(home_inspection["writeEnabled"])
+    t.assertFalse(home_inspection["activationEnabled"])
+
+    home_payload = json.dumps({
+        "username": "ncm-ui",
+        "integration": "standalone",
+        "packages": ["git"],
+    })
+    home_source_hashes = machine.succeed(
+        "find ${homeManagerRoot} -type f -print0 | sort -z | xargs -0 sha256sum"
+    )
+    machine.fail("test -e ${homeManagerRoot}/ncm")
+    machine.fail("test -e /var/lib/ncm-ui/user-state.json")
+    machine.fail("test -e /nix/var/nix/profiles/per-user/ncm-ui/home-manager")
+
+    home_plan = json.loads(machine.succeed(
+        "${curl} -fsS -X POST "
+        f"-H 'X-NCM-Token: {token}' -H 'Content-Type: application/json' "
+        f"--data '{home_payload}' "
+        + base_url + "/api/home-manager/adoption-plan"
+    ))
+    t.assertEqual(home_plan["status"], "ready")
+    t.assertTrue(home_plan["safeToValidate"])
+    t.assertFalse(home_plan["safeToApply"])
+    t.assertFalse(home_plan["writeEnabled"])
+    t.assertFalse(home_plan["activationEnabled"])
+    t.assertEqual(len(home_plan["changes"]), 3)
+
+    home_validation = json.loads(machine.succeed(
+        "${curl} -fsS --max-time 300 -X POST "
+        f"-H 'X-NCM-Token: {token}' -H 'Content-Type: application/json' "
+        f"--data '{home_payload}' "
+        + base_url + "/api/home-manager/validate-adoption",
+        timeout=long_timeout,
+    ))
+    if home_validation["status"] != "passed":
+        print("Home Manager validation response:", json.dumps(home_validation, indent=2))
+    t.assertEqual(home_validation["status"], "passed")
+    t.assertTrue(home_validation["workingCopyRemoved"])
+    t.assertEqual(len(home_validation["planFingerprint"]), 64)
+    t.assertFalse(home_validation["writeEnabled"])
+    t.assertFalse(home_validation["buildEnabled"])
+    t.assertFalse(home_validation["activationEnabled"])
+
+    home_build_payload = json.dumps({
+        "username": "ncm-ui",
+        "integration": "standalone",
+        "packages": ["git"],
+        "planFingerprint": home_validation["planFingerprint"],
+    })
+    unauthorized_home_build = machine.succeed(
+        "${curl} -sS -o /tmp/unauthorized-home-build.json -w '%{http_code}' "
+        "-X POST -H 'Content-Type: application/json' "
+        f"--data '{home_build_payload}' "
+        + base_url + "/api/home-manager/build-preview"
+    ).strip()
+    t.assertEqual(unauthorized_home_build, "403")
+
+    home_build = json.loads(machine.succeed(
+        "${curl} -fsS -X POST "
+        f"-H 'X-NCM-Token: {token}' -H 'Content-Type: application/json' "
+        f"--data '{home_build_payload}' "
+        + base_url + "/api/home-manager/build-preview"
+    ))
+    home_build_events = list(home_build["events"])
+    home_build_cursor = home_build["nextCursor"]
+    while home_build["cancellable"]:
+        time.sleep(0.5)
+        home_build = json.loads(machine.succeed(
+            "${curl} -fsS " + base_url
+            + f"/api/home-manager/build-preview/{home_build['jobId']}?after={home_build_cursor}",
+            timeout=long_timeout,
+        ))
+        home_build_events.extend(home_build["events"])
+        home_build_cursor = home_build["nextCursor"]
+    if home_build["status"] != "passed":
+        print("Home Manager build response:", json.dumps(home_build, indent=2))
+        print("Home Manager build events:", json.dumps(home_build_events, indent=2))
+    t.assertEqual(home_build["status"], "passed")
+    t.assertEqual(home_build["workflow"], "home-manager")
+    t.assertEqual(home_build["username"], "ncm-ui")
+    t.assertEqual(home_build["integration"], "standalone")
+    t.assertEqual(
+        home_build["expectedPlanFingerprint"],
+        home_validation["planFingerprint"],
+    )
+    t.assertEqual(home_build["planFingerprint"], home_validation["planFingerprint"])
+    t.assertFalse(home_build["privileged"])
+    t.assertFalse(home_build["configurationWriteEnabled"])
+    t.assertTrue(home_build["nixStoreWriteExpected"])
+    t.assertFalse(home_build["activationEnabled"])
+    t.assertFalse(home_build["homeManagerActivationEnabled"])
+    t.assertFalse(home_build["testEnabled"])
+    t.assertFalse(home_build["switchEnabled"])
+    t.assertFalse(home_build["flakeInputMutationEnabled"])
+    t.assertFalse(home_build["lockFileWriteEnabled"])
+    t.assertFalse(home_build["activationPreviewReady"])
+    t.assertTrue(home_build["workingCopyRemoved"])
+    t.assertEqual(len(home_build["outputPaths"]), 1)
+    t.assertEqual(home_build["activationPackagePath"], home_build["outputPaths"][0])
+    t.assertIn("--no-link", home_build["command"])
+    t.assertIn("--no-write-lock-file", home_build["command"])
+    t.assertIn(
+        '.#homeConfigurations."ncm-ui".activationPackage',
+        home_build["command"],
+    )
+    t.assertNotIn("home-manager", home_build["command"][0])
+    t.assertNotIn("switch", home_build["command"])
+    t.assertTrue(any(event["stream"] == "command" for event in home_build_events))
+    t.assertEqual(
+        machine.succeed("cat " + home_build["activationPackagePath"] + "/marker").strip(),
+        "Home Manager build-preview only",
+    )
+    latest_home_build = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/home-manager/build-preview"
+    ))
+    t.assertEqual(latest_home_build["jobId"], home_build["jobId"])
+    t.assertEqual(latest_home_build["status"], "passed")
+    t.assertEqual(
+        machine.succeed(
+            "find ${homeManagerRoot} -type f -print0 | sort -z | xargs -0 sha256sum"
+        ),
+        home_source_hashes,
+    )
+    machine.fail("test -e ${homeManagerRoot}/ncm")
+    machine.fail("test -e /var/lib/ncm-ui/user-state.json")
+    machine.fail("test -e /var/lib/ncm-ui/result")
+    machine.fail("test -e /nix/var/nix/profiles/per-user/ncm-ui/home-manager")
 
     validation = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 -X POST "
