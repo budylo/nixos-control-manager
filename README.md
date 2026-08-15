@@ -12,6 +12,8 @@ This repository currently contains the first vertical slice:
 - atomic writes with a backup of the previous generated module;
 - a local, dependency-free web interface for selecting applications;
 - a CLI and a Nix flake;
+- a channel-compatible NixOS module entrypoint that builds the package from the
+  same pinned source snapshot;
 - a fault-tested journaled transaction engine restricted to marked disposable
   fixtures;
 - a versioned helper protocol with exact path allow-lists, UID-bound one-time

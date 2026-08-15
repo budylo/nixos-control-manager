@@ -54,6 +54,38 @@ default. A future disposable test host could opt in with:
 }
 ```
 
+Channel-style NixOS configurations can import the self-contained
+`packaging/channel-module.nix` entrypoint. Pin the complete repository source
+to an immutable revision and content hash; do not import a mutable checkout or
+an unversioned branch into a live system:
+
+```nix
+{ ... }:
+
+let
+  ncmSource = builtins.fetchTarball {
+    url = "https://example.invalid/nix-control-manager/archive/<commit>.tar.gz";
+    sha256 = "sha256-<verified-source-hash>";
+  };
+in
+{
+  imports = [ "${ncmSource}/packaging/channel-module.nix" ];
+
+  services.nix-control-manager-helper = {
+    enable = true;
+    mode = "live-read-only";
+    targetId = "live";
+    allowedUsers = [ "alice" ];
+  };
+}
+```
+
+The URL and hash above are intentional placeholders. The channel entrypoint
+uses the host's `pkgs`, builds NCM from that same pinned source tree, and then
+imports the regular hardened helper module. It performs no network lookup of
+its own. `nixos-rebuild build` can evaluate this candidate without installing
+its units; only a later explicit activation can make the socket available.
+
 The configured root must already contain the exact transaction fixture marker.
 The module does not create that marker. Fixture mode cannot target `/etc/nixos`.
 Both Nix assertions and the Python runtime reject a journal nested below the

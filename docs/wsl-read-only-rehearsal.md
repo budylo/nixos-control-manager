@@ -77,12 +77,12 @@ HTTP 200 for both endpoints while continuing to report
 
 ## Next deployment boundary
 
-The helper must not yet be imported from the Windows checkout or from an
-unpinned network reference. This host uses a channel-style configuration, while
-the repository currently exports its supported module through a flake. The
-next implementation stage should therefore add a channel-compatible, pinned
-module entrypoint and evaluate it in a disposable test before touching this
-host.
+The helper must not be imported into the live system from the Windows checkout
+or from an unpinned network reference. This host uses a channel-style
+configuration. The repository now provides
+`packaging/channel-module.nix`, which builds the package from the same source
+snapshot and imports the regular hardened module. A flake check evaluates this
+entrypoint in `live-read-only` mode and builds both `ncm` executables.
 
 After that entrypoint is tested, deployment should remain split into distinct
 checkpoints:
@@ -99,3 +99,30 @@ checkpoints:
 `live-test` and `live-home-manager` are separate opt-ins and are outside this
 deployment step. A permanent NixOS switch capability does not exist in the
 helper.
+
+## Channel candidate build
+
+The channel entrypoint was subsequently tested on this WSL host with a
+temporary wrapper that imported the current `configuration.nix` and enabled
+only `mode = "live-read-only"` for user `nixos`. The command was run from a
+fresh `/tmp` directory:
+
+```console
+nixos-rebuild build -I nixos-config=<temporary-candidate.nix>
+```
+
+It completed without activation and produced:
+
+```text
+/nix/store/jqrdqg1qiq7rk8kkjffzh6ddnx1vdwra-nixos-system-nixos-26.05pre-git
+```
+
+The generated service clears all Linux capabilities, sets
+`ProtectSystem=strict`, `PrivateNetwork=true`, and `ReadOnlyPaths=/etc/nixos`,
+and contains no `ReadWritePaths`. Its schema-4 runtime document names one
+`live-read-only` target with no system, test, or Home Manager journal.
+
+After the build, all four source hashes and `/run/current-system` still matched
+the immutable baseline above. The live system had no NCM unit or helper socket.
+The temporary candidate file and result link were removed after inspection;
+the build outputs remain ordinary garbage-collectable Nix store objects.

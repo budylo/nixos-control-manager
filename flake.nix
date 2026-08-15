@@ -12,17 +12,9 @@
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
-          default = pkgs.python3Packages.buildPythonApplication {
-            pname = "nix-control-manager";
-            version = "0.1.0";
-            pyproject = true;
-            src = self;
-            build-system = [ pkgs.python3Packages.setuptools ];
-            meta = {
-              description = "A user-friendly control center for declarative NixOS configuration";
-              mainProgram = "ncm";
-              platforms = supportedSystems;
-            };
+          default = import ./packaging/package.nix {
+            inherit pkgs;
+            source = self;
           };
         } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           helper-vm-test = import ./tests/nixos/helper-vm-test.nix {
@@ -55,8 +47,11 @@
         };
       });
 
-      nixosModules.default = import ./packaging/nixos-module.nix {
-        defaultPackage = pkgs: self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      nixosModules = {
+        default = import ./packaging/nixos-module.nix {
+          defaultPackage = pkgs: self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
+        channel = import ./packaging/channel-module.nix;
       };
 
       checks = forAllSystems (system:
@@ -125,6 +120,22 @@
               })
             ];
           };
+          evaluatedChannel = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.channel
+              ({ ... }: {
+                system.stateVersion = "26.05";
+                users.users.channel-user.isNormalUser = true;
+                services.nix-control-manager-helper = {
+                  enable = true;
+                  mode = "live-read-only";
+                  targetId = "live";
+                  allowedUsers = [ "channel-user" ];
+                };
+              })
+            ];
+          };
           service = evaluated.config.systemd.services.nix-control-manager-helper;
           socket = evaluated.config.systemd.sockets.nix-control-manager-helper;
           serviceUnit = evaluated.config.systemd.units."nix-control-manager-helper.service".unit;
@@ -135,6 +146,9 @@
           liveTestServiceUnit = evaluatedLiveTest.config.systemd.units."nix-control-manager-helper.service".unit;
           liveHomeService = evaluatedLiveHomeManager.config.systemd.services.nix-control-manager-helper;
           liveHomeServiceUnit = evaluatedLiveHomeManager.config.systemd.units."nix-control-manager-helper.service".unit;
+          channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
+          channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
+          channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
           liveTargetEvaluation = builtins.tryEval (
             (nixpkgs.lib.nixosSystem {
               inherit system;
@@ -344,6 +358,18 @@
               cp ${liveTestServiceUnit}/nix-control-manager-helper.service "$out/live-test.service"
               cp ${liveHomeServiceUnit}/nix-control-manager-helper.service "$out/live-home-manager.service"
               touch "$out/passed"
+            '';
+          channel-module =
+            assert channelPackage.pname == "nix-control-manager";
+            assert channelService.serviceConfig.ReadOnlyPaths == [ "/etc/nixos" ];
+            assert channelService.serviceConfig.CapabilityBoundingSet == "";
+            assert !(builtins.hasAttr "ReadWritePaths" channelService.serviceConfig);
+            assert channelSocket.socketConfig.SocketMode == "0660";
+            assert evaluatedChannel.config.users.groups.nix-control-manager.members == [ "channel-user" ];
+            pkgs.runCommand "nix-control-manager-channel-module-check" { } ''
+              test -x ${channelPackage}/bin/ncm
+              test -x ${channelPackage}/bin/ncm-helper
+              touch "$out"
             '';
         } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           helper-vm = self.packages.${system}.helper-vm-test;
