@@ -1,5 +1,9 @@
 # WSL live-read-only helper deployment
 
+This deployment has since been superseded by the bounded write deployment in
+[`wsl-live-managed-deployment.md`](wsl-live-managed-deployment.md). The record
+below remains the audit trail for the earlier read-only milestone.
+
 This record covers the activation of the sandboxed Nix Control Manager helper
 and declarative read-only GUI client on the owner's NixOS-WSL host on
 2026-08-15. The physical NixOS NVMe was not mounted, inspected, or changed.

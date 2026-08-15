@@ -274,6 +274,10 @@ The subsequent pinned `live-read-only` WSL deployment, verified capability
 denials, backup, and rollback procedure are recorded in
 [`docs/wsl-live-read-only-deployment.md`](docs/wsl-live-read-only-deployment.md).
 
+The successor pinned `live-managed` WSL deployment, exact two-file capability,
+source-integrity proof, backup, and rollback procedure are recorded in
+[`docs/wsl-live-managed-deployment.md`](docs/wsl-live-managed-deployment.md).
+
 An x86_64 NixOS VM integration test boots a disposable guest, starts the real
 socket-activated root helper, verifies both denied and explicitly authorized
 Polkit paths, and completes the real-Nix fixture transaction. It is included in
