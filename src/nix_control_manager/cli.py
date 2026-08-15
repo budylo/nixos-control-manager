@@ -437,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     except (NcmError, KeyboardInterrupt) as error:
         if isinstance(error, KeyboardInterrupt):
             print("\nStopped.", file=sys.stderr)
+            return 0
         else:
             print(f"Error: {error}", file=sys.stderr)
-        return 1
+            return 1
