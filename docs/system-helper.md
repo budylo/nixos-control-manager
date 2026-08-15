@@ -64,8 +64,8 @@ an unversioned branch into a live system:
 
 let
   ncmSource = builtins.fetchTarball {
-    url = "https://example.invalid/nix-control-manager/archive/<commit>.tar.gz";
-    sha256 = "sha256-<verified-source-hash>";
+    url = "https://github.com/abudulatiy/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz";
+    sha256 = "sha256-sAXQ3YlgxYn4UkiZdBNhR9htEpyiByBA+6M5szWPXXM=";
   };
 in
 {
@@ -80,11 +80,19 @@ in
 }
 ```
 
-The URL and hash above are intentional placeholders. The channel entrypoint
-uses the host's `pkgs`, builds NCM from that same pinned source tree, and then
-imports the regular hardened helper module. It performs no network lookup of
-its own. `nixos-rebuild build` can evaluate this candidate without installing
-its units; only a later explicit activation can make the socket available.
+The URL pins the complete commit instead of the mutable `master` branch. The
+hash was independently obtained and verified on NixOS with:
+
+```console
+nix store prefetch-file --unpack --json \
+  https://github.com/abudulatiy/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz
+```
+
+The channel entrypoint uses the host's `pkgs`, builds NCM from that same pinned
+source tree, and then imports the regular hardened helper module. It performs
+no network lookup of its own. `nixos-rebuild build` can evaluate this candidate
+without installing its units; only a later explicit activation can make the
+socket available.
 
 The configured root must already contain the exact transaction fixture marker.
 The module does not create that marker. Fixture mode cannot target `/etc/nixos`.

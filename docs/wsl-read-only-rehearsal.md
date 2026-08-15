@@ -126,3 +126,25 @@ After the build, all four source hashes and `/run/current-system` still matched
 the immutable baseline above. The live system had no NCM unit or helper socket.
 The temporary candidate file and result link were removed after inspection;
 the build outputs remain ordinary garbage-collectable Nix store objects.
+
+## Published immutable source
+
+The tested channel entrypoint is publicly available at commit
+`3a8c6c9650f5394c891571d37548baad9cd5e57a`:
+
+```text
+https://github.com/abudulatiy/nixos-control-manager
+```
+
+Nix independently prefetched the commit archive with recursive unpacking and
+reported this SRI source hash:
+
+```text
+sha256-sAXQ3YlgxYn4UkiZdBNhR9htEpyiByBA+6M5szWPXXM=
+```
+
+A second channel-style evaluation used the exact URL and hash, not the local
+checkout. It reproduced the NCM package and confirmed the empty capability
+set, no `ReadWritePaths`, `/etc/nixos` as read-only, socket mode `0660`, and the
+configured socket-group membership. The live WSL configuration was not part of
+that evaluation and remained unchanged.

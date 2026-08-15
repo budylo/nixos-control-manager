@@ -4,6 +4,8 @@ Nix Control Manager is an approachable graphical control center for NixOS. It
 keeps the operating system declarative by generating a small, transparent NixOS
 module instead of rewriting a user's configuration.
 
+Source repository: https://github.com/abudulatiy/nixos-control-manager
+
 This repository currently contains the first vertical slice:
 
 - a validated JSON state model;
