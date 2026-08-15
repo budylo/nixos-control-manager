@@ -88,6 +88,7 @@ class NcmServer(ThreadingHTTPServer):
         home_manager_inspector: Callable[..., HomeManagerInspection] = inspect_home_manager,
         home_manager_planner: Callable[..., Any] = plan_home_manager_adoption,
         home_manager_validator: Callable[..., Any] = validate_home_manager_adoption,
+        local_write_enabled: bool = True,
     ) -> None:
         super().__init__(server_address, handler)
         self.state_path = state_path
@@ -101,6 +102,7 @@ class NcmServer(ThreadingHTTPServer):
         self.home_manager_inspector = home_manager_inspector
         self.home_manager_planner = home_manager_planner
         self.home_manager_validator = home_manager_validator
+        self.local_write_enabled = local_write_enabled
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
             config_root=config_root,
@@ -296,7 +298,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             build_match = _BUILD_JOB_PATH.fullmatch(path)
             home_build_match = _HOME_BUILD_JOB_PATH.fullmatch(path)
             if path == "/api/config":
-                self._json({"token": self.server.token})
+                self._json(
+                    {
+                        "token": self.server.token,
+                        "localWriteEnabled": self.server.local_write_enabled,
+                    }
+                )
             elif path == "/api/state":
                 self._json(_load_ui_state(self.server.state_path).to_mapping())
             elif path == "/api/catalog":
@@ -387,6 +394,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             home_cancel_match = _HOME_BUILD_CANCEL_PATH.fullmatch(path)
             if target.query:
                 raise ValidationError("POST API endpoints do not accept query parameters")
+            if path == "/api/save" and not self.server.local_write_enabled:
+                raise ValidationError(
+                    "Local state persistence is disabled in read-only mode"
+                )
             if path == "/api/build-preview":
                 self._json(self.server.build_manager.start(), HTTPStatus.ACCEPTED)
                 return
@@ -679,6 +690,7 @@ def serve(
     build_timeout: int = 3_600,
     helper_socket: Path | None = None,
     helper_target_id: str = "live",
+    local_write_enabled: bool = True,
 ) -> None:
     helper_adapter = (
         HelperUiAdapter(
@@ -703,6 +715,7 @@ def serve(
         validation_timeout=validation_timeout,
         helper_adapter=helper_adapter,
         build_timeout=build_timeout,
+        local_write_enabled=local_write_enabled,
     )
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"Nix Control Manager is available at {url}")
@@ -716,6 +729,10 @@ def serve(
     )
     print("Validation: disposable candidate only")
     print("Build preview: unprivileged Nix store build; permanent switch disabled")
+    print(
+        "Local persistence: "
+        + ("enabled" if local_write_enabled else "disabled (read-only mode)")
+    )
     print(
         f"System helper: {helper_socket} "
         f"(target {helper_target_id}, capability-gated)"

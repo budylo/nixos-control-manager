@@ -110,6 +110,26 @@ services.nix-control-manager-helper = {
 };
 ```
 
+The graphical client can be installed declaratively alongside the helper:
+
+```nix
+programs.nix-control-manager = {
+  enable = true;
+  port = 8765;
+  openBrowser = true;
+};
+```
+
+This adds `ncm`, the `ncm-gui` launcher, and
+`nix-control-manager.desktop` to the system environment. `ncm-gui` binds the
+local server to loopback, points it at `/etc/nixos`, and always passes
+`--read-only`; consequently `/api/save` cannot persist the local state or
+generated module. `openBrowser = false` keeps the same boundary but prints the
+loopback URL instead of asking the desktop to open it. Helper operations remain
+separately capability-gated, so pairing the launcher with `live-read-only`
+keeps apply, recovery, test activation, Home Manager persistence, and permanent
+switch unavailable.
+
 It has no option for a different system root and cannot be upgraded to a
 writable NixOS adoption target. Schema version 4 accepts `fixture`,
 `live-read-only`, `live-test`, and `live-home-manager`; each live mutation mode

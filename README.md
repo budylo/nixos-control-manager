@@ -16,6 +16,9 @@ This repository currently contains the first vertical slice:
 - a CLI and a Nix flake;
 - a channel-compatible NixOS module entrypoint that builds the package from the
   same pinned source snapshot;
+- an opt-in `programs.nix-control-manager` module that installs `ncm`, a
+  read-only `ncm-gui` launcher, and a desktop entry without granting the GUI
+  privileged write authority;
 - a fault-tested journaled transaction engine restricted to marked disposable
   fixtures;
 - a versioned helper protocol with exact path allow-lists, UID-bound one-time
@@ -110,6 +113,7 @@ ncm migrate-state --state /etc/nixos/ncm/state.json
 ncm plan-adoption --config-root /etc/nixos
 ncm validate-adoption --config-root /etc/nixos
 ncm serve --state state.json --output managed.nix --open
+ncm serve --state state.json --output managed.nix --read-only --open
 ncm-helper-client capabilities
 ncm-helper-client validate-home-manager-plan --target home-fixture --config-root ./fixture --user alice --integration standalone --package firefox
 ```
@@ -128,6 +132,13 @@ On NixOS, `ncm serve` looks for the helper at
 `--helper-socket`, `--helper-target`, `NCM_HELPER_SOCKET`, or
 `NCM_HELPER_TARGET`. An absent or unsafe helper leaves the system-validation
 button disabled; local disposable-copy validation remains available.
+
+`ncm serve --read-only` disables `/api/save`, so the browser cannot persist the
+local state or generated Nix module. Inspection, diff preview, disposable-copy
+validation, unprivileged builds, and capability-gated helper reports remain
+available. The NixOS `programs.nix-control-manager` launcher always selects
+this mode; the installed helper independently determines which privileged
+operations exist.
 
 `detect` is read-only. `migrate-state` also defaults to a JSON preview and does
 not change its input. Pass `--output <path>` explicitly to write normalized

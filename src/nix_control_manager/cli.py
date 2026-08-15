@@ -208,6 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("NCM_HELPER_TARGET", "live"),
         help="configured live-read-only helper target identifier",
     )
+    serve.add_argument(
+        "--read-only",
+        action="store_true",
+        help="disable local state and generated-module persistence",
+    )
     serve.add_argument("--open", action="store_true", dest="open_browser")
     return parser
 
@@ -417,6 +422,7 @@ def run(args: argparse.Namespace) -> int:
             build_timeout=args.build_timeout,
             helper_socket=args.helper_socket,
             helper_target_id=args.helper_target,
+            local_write_enabled=not args.read_only,
         )
         return 0
 

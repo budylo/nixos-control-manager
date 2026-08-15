@@ -12,10 +12,12 @@ let
     mkOption
     optionalAttrs
     optionals
+    optionalString
     splitString
     types
     ;
   cfg = config.services.nix-control-manager-helper;
+  clientCfg = config.programs.nix-control-manager;
   serviceName = "nix-control-manager-helper";
   socketPath = "/run/nix-control-manager/helper.sock";
   socketGroup = "nix-control-manager";
@@ -51,6 +53,32 @@ let
         flakeTarget = cfg.flakeTarget;
       }
     ];
+  };
+  clientLauncher = pkgs.writeShellApplication {
+    name = "ncm-gui";
+    runtimeInputs = [ clientCfg.package ];
+    text = ''
+      exec ncm serve \
+        --state /etc/nixos/ncm/state.json \
+        --user-state /etc/nixos/ncm/user-state.json \
+        --output /etc/nixos/ncm/packages.nix \
+        --config-root /etc/nixos \
+        --port ${toString clientCfg.port} \
+        --read-only${optionalString clientCfg.openBrowser " --open"}
+    '';
+  };
+  desktopItem = pkgs.makeDesktopItem {
+    name = "nix-control-manager";
+    desktopName = "Nix Control Manager";
+    comment = "Inspect and preview the declarative NixOS configuration";
+    exec = "${clientLauncher}/bin/ncm-gui";
+    icon = "preferences-system";
+    categories = [ "Settings" ];
+    terminal = false;
+  };
+  clientBundle = pkgs.symlinkJoin {
+    name = "nix-control-manager-client";
+    paths = [ clientCfg.package clientLauncher desktopItem ];
   };
 in
 {
@@ -166,7 +194,31 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
+  options.programs.nix-control-manager = {
+    enable = mkEnableOption "the read-only Nix Control Manager graphical client";
+
+    package = mkOption {
+      type = types.package;
+      default = defaultPackage pkgs;
+      defaultText = lib.literalExpression "self.packages.${pkgs.system}.default";
+      description = "Nix Control Manager package containing the local GUI server.";
+    };
+
+    port = mkOption {
+      type = types.port;
+      default = 8765;
+      description = "Loopback TCP port used by the local graphical interface.";
+    };
+
+    openBrowser = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Open the loopback graphical interface after launching it.";
+    };
+  };
+
+  config = lib.mkMerge [
+    (mkIf cfg.enable {
     assertions = [
       {
         assertion = !isFixture || (
@@ -322,5 +374,9 @@ in
         ReadWritePaths = [ cfg.homeManagerRoot cfg.homeManagerJournalRoot ];
       };
     };
-  };
+    })
+    (mkIf clientCfg.enable {
+      environment.systemPackages = [ clientBundle ];
+    })
+  ];
 }

@@ -610,6 +610,26 @@ class ServerTests(unittest.TestCase):
             ["firefox"],
         )
 
+    def test_read_only_mode_reports_and_blocks_local_save(self) -> None:
+        self.server.local_write_enabled = False
+
+        config = self.request_json("/api/config")
+        self.assertFalse(config["localWriteEnabled"])
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/save",
+                method="POST",
+                token=self.server.token,
+                body={"schemaVersion": 1, "packages": ["firefox"], "options": {}},
+            )
+
+        self.assertEqual(context.exception.code, 400)
+        payload = json.loads(context.exception.read())
+        context.exception.close()
+        self.assertIn("disabled in read-only mode", payload["error"])
+        self.assertFalse(self.server.state_path.exists())
+        self.assertFalse(self.server.output_path.exists())
+
     def test_save_rejects_invalid_typed_setting(self) -> None:
         with self.assertRaises(HTTPError) as context:
             self.request_json(

@@ -128,6 +128,7 @@ const ui = {
 
 const model = {
   token: "",
+  localWriteEnabled: true,
   catalog: [],
   settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
@@ -226,8 +227,8 @@ function updateChangeState() {
       ? `${dependencyErrors} невирішена залежність`
     : (count ? `${count} ${label}` : "Немає змін");
   ui.changeCount.classList.toggle("invalid", invalid);
-  ui.saveButton.disabled = count === 0 || invalid;
-  ui.drawerSaveButton.disabled = count === 0 || invalid;
+  ui.saveButton.disabled = !model.localWriteEnabled || count === 0 || invalid;
+  ui.drawerSaveButton.disabled = !model.localWriteEnabled || count === 0 || invalid;
   ui.previewButton.disabled = invalid;
 }
 
@@ -1981,6 +1982,11 @@ async function initialize() {
   try {
     const config = await api("/api/config");
     model.token = config.token;
+    model.localWriteEnabled = config.localWriteEnabled !== false;
+    if (!model.localWriteEnabled) {
+      ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";
+      ui.drawerSaveButton.title = "Локальне збереження вимкнено в режимі лише читання";
+    }
     const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview] = await Promise.all([
       api("/api/catalog"),
       api("/api/settings-catalog"),

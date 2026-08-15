@@ -133,6 +133,7 @@
                   targetId = "live";
                   allowedUsers = [ "channel-user" ];
                 };
+                programs.nix-control-manager.enable = true;
               })
             ];
           };
@@ -149,6 +150,10 @@
           channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
           channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
           channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
+          channelClient = nixpkgs.lib.findFirst
+            (package: nixpkgs.lib.getName package == "nix-control-manager-client")
+            null
+            evaluatedChannel.config.environment.systemPackages;
           liveTargetEvaluation = builtins.tryEval (
             (nixpkgs.lib.nixosSystem {
               inherit system;
@@ -366,9 +371,15 @@
             assert !(builtins.hasAttr "ReadWritePaths" channelService.serviceConfig);
             assert channelSocket.socketConfig.SocketMode == "0660";
             assert evaluatedChannel.config.users.groups.nix-control-manager.members == [ "channel-user" ];
+            assert channelClient != null;
             pkgs.runCommand "nix-control-manager-channel-module-check" { } ''
               test -x ${channelPackage}/bin/ncm
               test -x ${channelPackage}/bin/ncm-helper
+              test -x ${channelClient}/bin/ncm-gui
+              grep -F -- '--read-only' ${channelClient}/bin/ncm-gui
+              desktop_exec="$(sed -n 's/^Exec=//p' \
+                ${channelClient}/share/applications/nix-control-manager.desktop)"
+              test -x "$desktop_exec"
               touch "$out"
             '';
         } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
