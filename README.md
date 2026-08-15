@@ -4,7 +4,7 @@ Nix Control Manager is an approachable graphical control center for NixOS. It
 keeps the operating system declarative by generating a small, transparent NixOS
 module instead of rewriting a user's configuration.
 
-Source repository: https://github.com/abudulatiy/nixos-control-manager
+Source repository: https://github.com/budylo/nixos-control-manager
 
 This repository currently contains the first vertical slice:
 
@@ -233,6 +233,10 @@ The first non-mutating run against the real NixOS-WSL host, including its
 before/after hashes and the next channel-compatible deployment boundary, is
 recorded in
 [`docs/wsl-read-only-rehearsal.md`](docs/wsl-read-only-rehearsal.md).
+
+The subsequent pinned `live-read-only` WSL deployment, verified capability
+denials, backup, and rollback procedure are recorded in
+[`docs/wsl-live-read-only-deployment.md`](docs/wsl-live-read-only-deployment.md).
 
 An x86_64 NixOS VM integration test boots a disposable guest, starts the real
 socket-activated root helper, verifies both denied and explicitly authorized

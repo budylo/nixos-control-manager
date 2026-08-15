@@ -133,7 +133,7 @@ The tested channel entrypoint is publicly available at commit
 `3a8c6c9650f5394c891571d37548baad9cd5e57a`:
 
 ```text
-https://github.com/abudulatiy/nixos-control-manager
+https://github.com/budylo/nixos-control-manager
 ```
 
 Nix independently prefetched the commit archive with recursive unpacking and

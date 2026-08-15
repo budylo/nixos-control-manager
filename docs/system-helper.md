@@ -64,7 +64,7 @@ an unversioned branch into a live system:
 
 let
   ncmSource = builtins.fetchTarball {
-    url = "https://github.com/abudulatiy/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz";
+    url = "https://github.com/budylo/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz";
     sha256 = "sha256-sAXQ3YlgxYn4UkiZdBNhR9htEpyiByBA+6M5szWPXXM=";
   };
 in
@@ -85,7 +85,7 @@ hash was independently obtained and verified on NixOS with:
 
 ```console
 nix store prefetch-file --unpack --json \
-  https://github.com/abudulatiy/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz
+  https://github.com/budylo/nixos-control-manager/archive/3a8c6c9650f5394c891571d37548baad9cd5e57a.tar.gz
 ```
 
 The channel entrypoint uses the host's `pkgs`, builds NCM from that same pinned
