@@ -107,6 +107,45 @@ class HelperDaemonConfigurationTests(unittest.TestCase):
         self.assertFalse(target.apply_enabled)
         self.assertIsNone(target.journal_root)
 
+    def test_schema_v5_loads_only_exact_live_managed_scope(self) -> None:
+        live = Path(self.temporary.name) / "etc" / "nixos"
+        live.mkdir(parents=True)
+        raw = {
+            **{key: value for key, value in self.raw.items() if key != "targets"},
+            "schemaVersion": 5,
+            "targets": [
+                {
+                    "targetId": "managed",
+                    "mode": "live-managed",
+                    "configurationRoot": str(live),
+                    "journalRoot": None,
+                    "testJournalRoot": None,
+                    "testTimeoutSeconds": 300,
+                    "homeManagerRoot": None,
+                    "homeManagerJournalRoot": None,
+                    "managedJournalRoot": str(Path(self.temporary.name) / "managed-journal"),
+                    "allowedRelativePaths": [
+                        "ncm/state.json",
+                        "ncm/packages.nix",
+                    ],
+                    "flakeTarget": None,
+                }
+            ],
+        }
+        self.write(raw)
+        target = HelperDaemonConfig.load(self.config_path).targets[0]
+        self.assertTrue(target.managed_write_enabled)
+        self.assertFalse(target.apply_enabled)
+        self.assertEqual(
+            target.allowed_relative_paths,
+            frozenset({"ncm/state.json", "ncm/packages.nix"}),
+        )
+
+        raw["targets"][0]["allowedRelativePaths"].append("configuration.nix")
+        self.write(raw)
+        with self.assertRaisesRegex(HelperConfigurationError, "two-file"):
+            HelperDaemonConfig.load(self.config_path)
+
     def test_schema_v2_rejects_writable_live_target_shapes(self) -> None:
         raw = json.loads(json.dumps(self.raw))
         raw["schemaVersion"] = 2

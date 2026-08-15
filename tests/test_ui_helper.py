@@ -4,8 +4,10 @@ import unittest
 
 from nix_control_manager.helper_client import (
     build_home_manager_validate_request,
+    build_managed_validate_request,
     build_validate_request,
 )
+from nix_control_manager.model import ManagedState
 from nix_control_manager.ui_helper import HelperUiAdapter, HelperUiError
 
 
@@ -30,6 +32,13 @@ class SequenceSender:
             ]
         if (
             request["operation"] == "validate-home-manager-plan"
+            and isinstance(response.get("result"), dict)
+        ):
+            response["result"]["planFingerprint"] = request["payload"][
+                "planFingerprint"
+            ]
+        if (
+            request["operation"] == "validate-managed-plan"
             and isinstance(response.get("result"), dict)
         ):
             response["result"]["planFingerprint"] = request["payload"][
@@ -143,6 +152,78 @@ def home_manager_apply_result() -> dict:
                 "changedFiles": ["configuration.nix"],
                 "fixtureOnly": False,
                 "activationEnabled": False,
+            },
+        },
+        "error": None,
+    }
+
+
+def managed_capabilities() -> dict:
+    result = capabilities()
+    target = result["result"]["targets"][0]
+    target.update(
+        {
+            "allowedRelativePaths": ["ncm/state.json", "ncm/packages.nix"],
+            "dryActivatePreviewEnabled": False,
+            "managedWriteEnabled": True,
+            "managedRecoveryEnabled": True,
+        }
+    )
+    result["result"]["operations"].extend(
+        [
+            "validate-managed-plan",
+            "apply-validated-managed-plan",
+            "recover-managed-transaction",
+        ]
+    )
+    return result
+
+
+def managed_validation() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "managed-validation",
+        "status": "ok",
+        "result": {
+            "validationReceipt": "M" * 43,
+            "expiresInSeconds": 300,
+            "targetId": "live",
+            "planFingerprint": "a" * 64,
+            "fixtureOnly": False,
+            "managedWriteEnabled": True,
+            "activationEnabled": False,
+            "validation": {
+                "status": "passed",
+                "checks": [{"name": "Evaluate", "status": "passed"}],
+                "warnings": [],
+                "workingCopyRemoved": True,
+                "writeScope": ["ncm/state.json", "ncm/packages.nix"],
+            },
+        },
+        "error": None,
+    }
+
+
+def managed_apply_result() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "managed-apply",
+        "status": "ok",
+        "result": {
+            "state": "committed",
+            "fixtureOnly": False,
+            "writeEnabled": True,
+            "managedWriteEnabled": True,
+            "activationEnabled": False,
+            "buildEnabled": False,
+            "switchEnabled": False,
+            "filesWritten": 2,
+            "transaction": {
+                "transactionId": "d" * 24,
+                "state": "committed",
+                "fixtureOnly": False,
+                "activationEnabled": False,
+                "changedFiles": ["ncm/state.json", "ncm/packages.nix"],
             },
         },
         "error": None,
@@ -297,6 +378,31 @@ class HelperUiAdapterTests(unittest.TestCase):
         self.assertFalse(unsafe["available"])
         self.assertIn("read-only", unsafe["reason"])
         self.assertTrue(safe["dryActivatePreviewEnabled"])
+
+    def test_managed_validation_and_apply_keep_exact_two_file_scope(self) -> None:
+        state = ManagedState.from_mapping(
+            {"schemaVersion": 1, "packages": ["git"], "options": {}}
+        )
+        sender = SequenceSender(
+            managed_capabilities(),
+            managed_validation(),
+            managed_capabilities(),
+            managed_apply_result(),
+        )
+        adapter = self.adapter(sender)
+        validated = adapter.validate_managed(state)
+        expected = build_managed_validate_request(
+            self.root, state, target_id="live", flake_target=None
+        )
+        self.assertEqual(sender.requests[1][1]["payload"], expected["payload"])
+        self.assertTrue(validated["managedWriteEnabled"])
+        applied = adapter.apply_managed(
+            plan_fingerprint=validated["planFingerprint"],
+            validation_receipt=validated["validationReceipt"],
+        )
+        self.assertEqual(applied["state"], "committed")
+        self.assertTrue(applied["authorizedByPolkit"])
+        self.assertFalse(applied["switchEnabled"])
 
     def test_unavailable_socket_is_reported_without_raising(self) -> None:
         status = self.adapter(SequenceSender(FileNotFoundError("missing socket"))).status()

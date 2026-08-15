@@ -8,6 +8,7 @@ from nix_control_manager.helper_service import (
     HOME_MANAGER_APPLY_ACTION_ID,
     HOME_MANAGER_RECOVER_ACTION_ID,
     PeerIdentity,
+    MANAGED_APPLY_ACTION_ID,
 )
 from nix_control_manager.polkit_authorizer import PolkitAuthorizer
 
@@ -80,7 +81,7 @@ class PolkitAuthorizerTests(unittest.TestCase):
         )
         self.assertEqual(self.commands, [])
 
-    def test_accepts_separate_home_manager_actions_and_user_detail(self) -> None:
+    def test_accepts_separate_write_actions_and_safe_details(self) -> None:
         authorizer = PolkitAuthorizer(
             self.executable, proc_root=self.proc, runner=self.passing_runner
         )
@@ -88,15 +89,16 @@ class PolkitAuthorizerTests(unittest.TestCase):
         for action in (
             HOME_MANAGER_APPLY_ACTION_ID,
             HOME_MANAGER_RECOVER_ACTION_ID,
+            MANAGED_APPLY_ACTION_ID,
         ):
             self.assertTrue(
                 authorizer.authorize(
                     action,
                     PeerIdentity(pid=4321, uid=1000),
-                    {"targetId": "fixture", "username": "alice@laptop"},
+                    {"targetId": "fixture", "writeScope": "ncm/state.json:ncm/packages.nix"},
                 )
             )
-        self.assertEqual(len(self.commands), 2)
+        self.assertEqual(len(self.commands), 3)
 
     def test_denies_invalid_details_and_pkcheck_failure(self) -> None:
         authorizer = PolkitAuthorizer(

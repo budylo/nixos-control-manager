@@ -34,6 +34,7 @@ from .helper_service import (
     HelperBackendError,
     HelperTarget,
     PendingValidatedHomeManagerPlan,
+    PendingValidatedManagedPlan,
     PendingValidatedPlan,
 )
 
@@ -519,9 +520,12 @@ class LiveReadOnlyHelperBackend:
 
 
 class RoutingHelperBackend:
-    def __init__(self, *, fixture_backend: Any, live_backend: Any) -> None:
+    def __init__(
+        self, *, fixture_backend: Any, live_backend: Any, managed_backend: Any | None = None
+    ) -> None:
         self.fixture_backend = fixture_backend
         self.live_backend = live_backend
+        self.managed_backend = managed_backend or live_backend
 
     def _backend(self, target: HelperTarget) -> Any:
         return self.fixture_backend if target.fixture_only else self.live_backend
@@ -573,6 +577,28 @@ class RoutingHelperBackend:
             target, transaction_id, peer_uid
         )
 
+    def validate_managed_plan(
+        self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
+    ):
+        return self.managed_backend.validate_managed_plan(target, plan, peer_uid)
+
+    def apply_validated_managed_plan(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedManagedPlan,
+        peer_uid: int,
+    ):
+        return self.managed_backend.apply_validated_managed_plan(
+            target, plan, peer_uid
+        )
+
+    def recover_managed_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ):
+        return self.managed_backend.recover_managed_transaction(
+            target, transaction_id, peer_uid
+        )
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ):
@@ -605,6 +631,15 @@ class RoutingHelperBackend:
             self._home_manager_backend(target),
             "discard_validated_home_manager_plan",
             None,
+        )
+        if discard is not None:
+            discard(target, plan, peer_uid)
+
+    def discard_validated_managed_plan(
+        self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
+    ) -> None:
+        discard = getattr(
+            self.managed_backend, "discard_validated_managed_plan", None
         )
         if discard is not None:
             discard(target, plan, peer_uid)

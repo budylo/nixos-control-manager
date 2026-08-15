@@ -19,6 +19,8 @@ from nix_control_manager.home_manager_inspector import (
     HomeManagerInspection,
     UserStateInspection,
 )
+from nix_control_manager.managed_plan import managed_plan_identity, plan_managed_state
+from nix_control_manager.model import ManagedState
 from nix_control_manager.settings_inspector import (
     EffectiveDefinition,
     EffectiveSetting,
@@ -40,6 +42,8 @@ class FakeHelperAdapter:
             "testActivationEnabled": True,
             "homeManagerApplyEnabled": True,
             "homeManagerLiveWriteEnabled": True,
+            "managedWriteEnabled": True,
+            "managedRecoveryEnabled": True,
         }
 
     def validate_adoption(self):
@@ -145,6 +149,46 @@ class FakeHelperAdapter:
                 "state": "committed",
                 "fixtureOnly": False,
                 "activationEnabled": False,
+            },
+        }
+
+    def validate_managed(self, state):
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": "live",
+            "planFingerprint": self.managed_fingerprint,
+            "validationReceipt": "M" * 43,
+            "expiresInSeconds": 300,
+            "checks": [],
+            "warnings": [],
+            "workingCopyRemoved": True,
+            "fixtureOnly": False,
+            "managedWriteEnabled": True,
+            "writeScope": ["ncm/state.json", "ncm/packages.nix"],
+            "activationEnabled": False,
+        }
+
+    def apply_managed(self, *, plan_fingerprint, validation_receipt):
+        if validation_receipt != "M" * 43:
+            raise ValueError("bad managed receipt")
+        return {
+            "source": "system-helper",
+            "state": "committed",
+            "fixtureOnly": False,
+            "writeEnabled": True,
+            "managedWriteEnabled": True,
+            "activationEnabled": False,
+            "buildEnabled": False,
+            "switchEnabled": False,
+            "authorizedByPolkit": True,
+            "filesWritten": 2,
+            "transaction": {
+                "transactionId": "d" * 24,
+                "state": "committed",
+                "fixtureOnly": False,
+                "activationEnabled": False,
+                "changedFiles": ["ncm/state.json", "ncm/packages.nix"],
             },
         }
 
@@ -288,6 +332,63 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="homeApplyConfirmation"', html)
             self.assertIn('id="commitHomeApplyButton"', html)
             self.assertIn("Content-Security-Policy", response.headers)
+
+    def test_managed_save_hides_receipt_and_requires_exact_confirmation(self) -> None:
+        root = self.server.config_root
+        (root / "ncm").mkdir(parents=True)
+        (root / "configuration.nix").write_text(
+            "{ ... }: { imports = [ ./ncm ]; }\n", encoding="utf-8"
+        )
+        state = ManagedState.from_mapping(
+            {"schemaVersion": 1, "packages": ["git"], "options": {}}
+        )
+        plan = plan_managed_state(root, state)
+        self.server.helper_adapter.managed_fingerprint = managed_plan_identity(plan)[0]
+        payload = state.to_mapping()
+        prepared = self.request_json(
+            "/api/helper/managed/validate",
+            method="POST",
+            body=payload,
+            token=self.server.token,
+        )
+        self.assertTrue(prepared["confirmationRequired"])
+        self.assertTrue(prepared["managedWriteEnabled"])
+        self.assertNotIn("validationReceipt", prepared)
+        self.assertIn("ncm/state.json", prepared["combinedDiff"])
+        self.assertIn("ncm/packages.nix", prepared["combinedDiff"])
+
+        with self.assertRaises(HTTPError) as rejected:
+            self.request_json(
+                "/api/helper/managed/apply",
+                method="POST",
+                body={
+                    "intentId": prepared["intentId"],
+                    "planFingerprint": prepared["planFingerprint"],
+                    "confirmed": False,
+                },
+                token=self.server.token,
+            )
+        self.assertEqual(rejected.exception.code, 400)
+
+        prepared = self.request_json(
+            "/api/helper/managed/validate",
+            method="POST",
+            body=payload,
+            token=self.server.token,
+        )
+        applied = self.request_json(
+            "/api/helper/managed/apply",
+            method="POST",
+            body={
+                "intentId": prepared["intentId"],
+                "planFingerprint": prepared["planFingerprint"],
+                "confirmed": True,
+            },
+            token=self.server.token,
+        )
+        self.assertEqual(applied["state"], "committed")
+        self.assertTrue(applied["authorizedByPolkit"])
+        self.assertFalse(applied["switchEnabled"])
 
     def test_legacy_state_is_normalized_in_memory_without_writing(self) -> None:
         legacy = (

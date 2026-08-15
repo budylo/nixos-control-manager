@@ -16,6 +16,8 @@ from .home_manager_adoption import (
 )
 from .home_manager_inspector import inspect_home_manager
 from .helper_transport import send_unix_request
+from .managed_plan import managed_plan_identity, plan_managed_state
+from .model import ManagedState
 
 
 DEFAULT_SOCKET = Path("/run/nix-control-manager/helper.sock")
@@ -128,6 +130,38 @@ def build_home_manager_validate_request(
     )
 
 
+def build_managed_validate_request(
+    config_root: Path,
+    state: ManagedState,
+    *,
+    target_id: str,
+    flake_target: str | None,
+) -> dict[str, Any]:
+    plan = plan_managed_state(
+        config_root.expanduser().resolve(), state, flake_target=flake_target
+    )
+    if not plan.changes:
+        raise ValueError("The managed state already matches the generated module")
+    fingerprint, _ = managed_plan_identity(plan)
+    return _request(
+        "validate-managed-plan",
+        {
+            "targetId": target_id,
+            "planFingerprint": fingerprint,
+            "changes": [
+                {
+                    "relativePath": change.relative_path,
+                    "action": change.action,
+                    "previousSha256": change.previous_sha256,
+                    "candidateSha256": change.candidate_sha256,
+                    "candidate": change.candidate,
+                }
+                for change in plan.changes
+            ],
+        },
+    )
+
+
 def build_test_activation_request(
     *, target_id: str, system_path: str, plan_fingerprint: str, test_receipt: str
 ) -> dict[str, Any]:
@@ -197,6 +231,21 @@ def build_parser() -> argparse.ArgumentParser:
     recover_home.add_argument("--target", required=True)
     recover_home.add_argument("--transaction-id", required=True)
 
+    validate_managed = subparsers.add_parser("validate-managed-plan")
+    validate_managed.add_argument("--target", required=True)
+    validate_managed.add_argument("--config-root", required=True, type=Path)
+    validate_managed.add_argument("--state", required=True, type=Path)
+    validate_managed.add_argument("--flake-target")
+
+    apply_managed = subparsers.add_parser("apply-managed-plan")
+    apply_managed.add_argument("--target", required=True)
+    apply_managed.add_argument("--plan-fingerprint", required=True)
+    apply_managed.add_argument("--receipt", required=True)
+
+    recover_managed = subparsers.add_parser("recover-managed-transaction")
+    recover_managed.add_argument("--target", required=True)
+    recover_managed.add_argument("--transaction-id", required=True)
+
     activation = subparsers.add_parser("preview-activation")
     activation.add_argument("--target", required=True)
     activation.add_argument("--config-root", required=True, type=Path)
@@ -265,6 +314,31 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
     elif arguments.operation == "recover-home-manager-transaction":
         request = _request(
             "recover-home-manager-transaction",
+            {
+                "targetId": arguments.target,
+                "transactionId": arguments.transaction_id,
+            },
+        )
+    elif arguments.operation == "validate-managed-plan":
+        raw_state = json.loads(arguments.state.read_text(encoding="utf-8"))
+        request = build_managed_validate_request(
+            arguments.config_root,
+            ManagedState.from_mapping(raw_state),
+            target_id=arguments.target,
+            flake_target=arguments.flake_target,
+        )
+    elif arguments.operation == "apply-managed-plan":
+        request = _request(
+            "apply-validated-managed-plan",
+            {
+                "targetId": arguments.target,
+                "planFingerprint": arguments.plan_fingerprint,
+                "validationReceipt": arguments.receipt,
+            },
+        )
+    elif arguments.operation == "recover-managed-transaction":
+        request = _request(
+            "recover-managed-transaction",
             {
                 "targetId": arguments.target,
                 "transactionId": arguments.transaction_id,

@@ -36,6 +36,7 @@ from .home_manager_inspector import (
     managed_user_state_path,
 )
 from .migration import load_migration_preview
+from .managed_plan import managed_plan_identity, plan_managed_state
 from .model import ManagedState
 from .nix_generator import generate_module
 from .preview import build_preview
@@ -126,6 +127,8 @@ class NcmServer(ThreadingHTTPServer):
         self.token = secrets.token_urlsafe(32)
         self.home_manager_apply_intents: dict[str, dict[str, Any]] = {}
         self.home_manager_apply_intents_lock = threading.Lock()
+        self.managed_apply_intents: dict[str, dict[str, Any]] = {}
+        self.managed_apply_intents_lock = threading.Lock()
 
     def create_home_manager_apply_intent(
         self, result: dict[str, Any]
@@ -165,6 +168,42 @@ class NcmServer(ThreadingHTTPServer):
             )
         if not secrets.compare_digest(intent["planFingerprint"], plan_fingerprint):
             raise ValidationError("Home Manager confirmation does not match the plan")
+        return intent
+
+    def create_managed_apply_intent(self, result: dict[str, Any]) -> tuple[str, int]:
+        raw_ttl = result.get("expiresInSeconds")
+        ttl = raw_ttl if isinstance(raw_ttl, int) and 1 <= raw_ttl <= 3600 else 300
+        now = time.monotonic()
+        intent_id = secrets.token_urlsafe(24)
+        with self.managed_apply_intents_lock:
+            self.managed_apply_intents = {
+                key: value
+                for key, value in self.managed_apply_intents.items()
+                if value["expiresAt"] > now
+            }
+            if len(self.managed_apply_intents) >= 64:
+                oldest = min(
+                    self.managed_apply_intents,
+                    key=lambda key: self.managed_apply_intents[key]["expiresAt"],
+                )
+                del self.managed_apply_intents[oldest]
+            self.managed_apply_intents[intent_id] = {
+                "expiresAt": now + ttl,
+                "planFingerprint": result["planFingerprint"],
+                "validationReceipt": result["validationReceipt"],
+            }
+        return intent_id, ttl
+
+    def consume_managed_apply_intent(
+        self, intent_id: str, plan_fingerprint: str
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self.managed_apply_intents_lock:
+            intent = self.managed_apply_intents.pop(intent_id, None)
+        if intent is None or intent["expiresAt"] <= now:
+            raise ValidationError("Managed confirmation expired; validate the state again")
+        if not secrets.compare_digest(intent["planFingerprint"], plan_fingerprint):
+            raise ValidationError("Managed confirmation does not match the plan")
         return intent
 
     def server_close(self) -> None:
@@ -483,6 +522,66 @@ class RequestHandler(BaseHTTPRequestHandler):
                         "expiresInSeconds": ttl,
                         "confirmationRequired": True,
                     }
+                )
+                return
+            if path == "/api/helper/managed/validate":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                state = self._read_state()
+                plan = plan_managed_state(
+                    self.server.config_root,
+                    state,
+                    flake_target=self.server.flake_target,
+                )
+                if not plan.changes:
+                    raise ValidationError("The managed state has no changes to persist")
+                expected_fingerprint, _ = managed_plan_identity(plan)
+                result = self.server.helper_adapter.validate_managed(state)
+                if result.get("planFingerprint") != expected_fingerprint:
+                    raise HelperUiError("Managed helper validated a different plan")
+                intent_id, ttl = self.server.create_managed_apply_intent(result)
+                public = {
+                    key: value
+                    for key, value in result.items()
+                    if key != "validationReceipt"
+                }
+                self._json(
+                    {
+                        **public,
+                        "intentId": intent_id,
+                        "expiresInSeconds": ttl,
+                        "confirmationRequired": True,
+                        "combinedDiff": plan.combined_diff,
+                        "changes": [change.to_mapping() for change in plan.changes],
+                    }
+                )
+                return
+            if path == "/api/helper/managed/apply":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if set(payload) != {"intentId", "planFingerprint", "confirmed"}:
+                    raise ValidationError(
+                        "Managed apply requires intentId, planFingerprint, and confirmed"
+                    )
+                intent_id = payload.get("intentId")
+                fingerprint = payload.get("planFingerprint")
+                if (
+                    not isinstance(intent_id, str)
+                    or not 16 <= len(intent_id) <= 128
+                    or not isinstance(fingerprint, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+                    or payload.get("confirmed") is not True
+                ):
+                    raise ValidationError(
+                        "An exact, explicitly confirmed managed plan is required"
+                    )
+                intent = self.server.consume_managed_apply_intent(intent_id, fingerprint)
+                self._json(
+                    self.server.helper_adapter.apply_managed(
+                        plan_fingerprint=fingerprint,
+                        validation_receipt=intent["validationReceipt"],
+                    )
                 )
                 return
             if path == "/api/helper/home-manager/apply":

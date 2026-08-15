@@ -24,6 +24,9 @@ SUPPORTED_OPERATIONS = frozenset(
         "validate-home-manager-plan",
         "apply-validated-home-manager-plan",
         "recover-home-manager-transaction",
+        "validate-managed-plan",
+        "apply-validated-managed-plan",
+        "recover-managed-transaction",
     }
 )
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -412,6 +415,22 @@ class ApplyValidatedHomeManagerPlanPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyValidatedManagedPlanPayload:
+    target_id: str
+    plan_fingerprint: str
+    validation_receipt: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ApplyValidatedManagedPlanPayload":
+        validated = ApplyValidatedPlanPayload.from_mapping(raw)
+        return cls(
+            target_id=validated.target_id,
+            plan_fingerprint=validated.plan_fingerprint,
+            validation_receipt=validated.validation_receipt,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RecoverTransactionPayload:
     target_id: str
     transaction_id: str
@@ -445,6 +464,20 @@ class RecoverHomeManagerTransactionPayload:
         if not _TRANSACTION_ID.fullmatch(transaction_id):
             raise HelperProtocolError("invalid-request", "transactionId has an invalid format")
         return cls(target_id=_target_id(mapping["targetId"]), transaction_id=transaction_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverManagedTransactionPayload:
+    target_id: str
+    transaction_id: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "RecoverManagedTransactionPayload":
+        validated = RecoverTransactionPayload.from_mapping(raw)
+        return cls(
+            target_id=validated.target_id,
+            transaction_id=validated.transaction_id,
+        )
 
 
 def validate_empty_payload(raw: Any) -> None:

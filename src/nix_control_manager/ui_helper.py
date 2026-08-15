@@ -10,11 +10,13 @@ from .errors import NcmError
 from .helper_client import (
     build_activation_preview_request,
     build_home_manager_validate_request,
+    build_managed_validate_request,
     build_test_activation_request,
     build_test_recovery_request,
     build_validate_request,
 )
 from .helper_transport import send_unix_request
+from .model import ManagedState
 
 
 Sender = Callable[..., dict[str, Any]]
@@ -79,6 +81,8 @@ class HelperUiAdapter:
             "testActivationEnabled": False,
             "homeManagerApplyEnabled": False,
             "homeManagerLiveWriteEnabled": False,
+            "managedWriteEnabled": False,
+            "managedRecoveryEnabled": False,
         }
         try:
             response = self._send(self._request("capabilities", {}))
@@ -139,6 +143,22 @@ class HelperUiAdapter:
                     and target.get("homeManagerLiveWriteEnabled") is True
                     and "validate-home-manager-plan" in (result.get("operations") or [])
                     and "apply-validated-home-manager-plan"
+                    in (result.get("operations") or [])
+                ),
+                "managedWriteEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("managedWriteEnabled") is True
+                    and target.get("managedRecoveryEnabled") is True
+                    and set(target.get("allowedRelativePaths") or [])
+                    == {"ncm/state.json", "ncm/packages.nix"}
+                    and "validate-managed-plan" in (result.get("operations") or [])
+                    and "apply-validated-managed-plan"
+                    in (result.get("operations") or [])
+                ),
+                "managedRecoveryEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("managedRecoveryEnabled") is True
+                    and "recover-managed-transaction"
                     in (result.get("operations") or [])
                 ),
                 "reason": None,
@@ -277,6 +297,107 @@ class HelperUiAdapter:
             "liveWriteEnabled": True,
             "activationEnabled": False,
             "homeManagerActivationEnabled": False,
+        }
+
+    def validate_managed(self, state: ManagedState) -> dict[str, Any]:
+        status = self.status()
+        if status.get("managedWriteEnabled") is not True:
+            raise HelperUiError(
+                "System helper does not permit bounded managed source writes"
+            )
+        try:
+            request = build_managed_validate_request(
+                self.config_root,
+                state,
+                target_id=self.target_id,
+                flake_target=self.flake_target,
+            )
+            response = self._send(request)
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(
+                str(error.get("message") or "Managed helper validation failed")
+            )
+        result = _mapping(response.get("result"), "managed validation result")
+        validation = _mapping(result.get("validation"), "managed validation details")
+        receipt = result.get("validationReceipt")
+        if (
+            result.get("targetId") != self.target_id
+            or result.get("fixtureOnly") is not False
+            or result.get("managedWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or validation.get("status") != "passed"
+            or validation.get("workingCopyRemoved") is not True
+            or set(validation.get("writeScope") or [])
+            != {"ncm/state.json", "ncm/packages.nix"}
+            or not isinstance(receipt, str)
+            or len(receipt) < 32
+        ):
+            raise HelperUiError("Managed validation crossed the bounded write boundary")
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": self.target_id,
+            "planFingerprint": result.get("planFingerprint"),
+            "validationReceipt": receipt,
+            "expiresInSeconds": result.get("expiresInSeconds"),
+            "checks": list(validation.get("checks") or []),
+            "warnings": list(validation.get("warnings") or []),
+            "workingCopyRemoved": True,
+            "fixtureOnly": False,
+            "managedWriteEnabled": True,
+            "writeScope": list(validation.get("writeScope") or []),
+            "activationEnabled": False,
+        }
+
+    def apply_managed(
+        self, *, plan_fingerprint: str, validation_receipt: str
+    ) -> dict[str, Any]:
+        status = self.status()
+        if status.get("managedWriteEnabled") is not True:
+            raise HelperUiError(
+                "System helper does not permit bounded managed source writes"
+            )
+        try:
+            response = self._send(
+                self._request(
+                    "apply-validated-managed-plan",
+                    {
+                        "targetId": self.target_id,
+                        "planFingerprint": plan_fingerprint,
+                        "validationReceipt": validation_receipt,
+                    },
+                )
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Managed persistence failed"))
+        result = _mapping(response.get("result"), "managed apply result")
+        transaction = _mapping(result.get("transaction"), "managed transaction")
+        if (
+            result.get("state") != "committed"
+            or result.get("fixtureOnly") is not False
+            or result.get("managedWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or result.get("switchEnabled") is not False
+            or transaction.get("state") != "committed"
+            or transaction.get("fixtureOnly") is not False
+            or not isinstance(result.get("filesWritten"), int)
+            or not 1 <= result.get("filesWritten") <= 2
+            or set(transaction.get("changedFiles") or [])
+            - {"ncm/state.json", "ncm/packages.nix"}
+        ):
+            raise HelperUiError("Managed apply crossed the bounded write boundary")
+        return {
+            **dict(result),
+            "transaction": dict(transaction),
+            "source": "system-helper",
+            "authorizedByPolkit": True,
+            "switchEnabled": False,
         }
 
     def apply_home_manager(

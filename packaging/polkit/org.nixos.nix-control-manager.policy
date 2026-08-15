@@ -45,6 +45,26 @@
     </defaults>
   </action>
 
+  <action id="org.nixos.nix-control-manager.apply-validated-managed-plan">
+    <description>Persist an exact validated Nix Control Manager state and module</description>
+    <message>Authentication is required to write only ncm/state.json and ncm/packages.nix</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.recover-managed-transaction">
+    <description>Recover an incomplete bounded Nix Control Manager transaction</description>
+    <message>Authentication is required to restore the NCM-owned managed files</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.nixos.nix-control-manager.preview-activation">
     <description>Preview activation of an exact NixOS candidate</description>
     <message>Authentication is required to inspect system-level activation impact</message>

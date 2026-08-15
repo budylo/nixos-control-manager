@@ -24,10 +24,14 @@ This repository currently contains the first vertical slice:
 - a versioned helper protocol with exact path allow-lists, UID-bound one-time
   receipts, mock Polkit authorization, and a fixture-workflow backend;
 - a real fail-closed `pkcheck` authorizer and an opt-in, sandboxed NixOS
-  socket/service module with fixture, live-read-only, live-test, and
-  live-home-manager targets;
+  socket/service module with fixture, live-read-only, live-managed, live-test,
+  and live-home-manager targets;
 - direct `/etc/nixos` validation in a disposable copy, with no receipt, write,
   recovery, build, or activation authority for the live target.
+- a separate opt-in `live-managed` path that can atomically persist only
+  `ncm/state.json` and `ncm/packages.nix` after disposable validation, an exact
+  diff, explicit confirmation, and Polkit authorization. It cannot change the
+  main configuration, flake inputs, system profile, or active generation;
 - a local UI adapter that detects the configured Unix helper, exposes its
   read-only capabilities, and can run the exact live validation plan from the
   adoption drawer;
@@ -207,7 +211,7 @@ copied to `managed.nix.bak`, then the new file is atomically moved into place.
 ## Safety boundary
 
 The current milestone intentionally does **not** run `sudo`, `pkexec`,
-`nixos-rebuild`, apply a NixOS system-adoption plan, or perform `switch`.
+`nixos-rebuild`, apply a general NixOS system-adoption plan, or perform `switch`.
 Default live-read-only mode stops at dry preview. Separate
 experimental live-test mode can select only `test` after a bound receipt and a
 pre-armed recovery timer; it never creates a boot generation or `result` link.
@@ -216,9 +220,13 @@ The transaction and recovery boundary is specified in
 restricted to disposable fixtures for NixOS system adoption. The dedicated
 `live-home-manager` mode can persist only the exact validated Home Manager
 source plan; system apply and all permanent activation authority remain false.
+The separate `live-managed` mode can persist only the canonical NCM-owned
+`ncm/state.json` and `ncm/packages.nix` pair. Its receipt, Polkit actions,
+journal kind, and recovery operation are separate, and it never edits an import
+or activates the result. See [`docs/live-managed.md`](docs/live-managed.md).
 
 The diagnostic CLI can also exercise explicitly configured live Home Manager
-persistence. This is not a generic live transaction engine: daemon schema 4
+persistence. This is not a generic live transaction engine: daemon schema 5
 must name the Home Manager root and external journal, the NixOS module exposes
 only those paths to the service, and the submitted files must match both the
 locally reconstructed plan and the exact allow-list. The service sandbox keeps
@@ -302,6 +310,14 @@ that `/run/current-system` never changes. It is exposed as
 `checks.x86_64-linux.live-home-manager-vm` and
 `packages.x86_64-linux.live-home-manager-vm-test`. Deployment details are in
 [`docs/live-home-manager.md`](docs/live-home-manager.md).
+
+A fifth disposable VM exercises `live-managed`: it denies the unprivileged
+write path by default, authorizes one exact two-file transaction, performs real
+NixOS evaluation before and after commit, and proves the main configuration and
+active generation are unchanged. It is exposed as
+`checks.x86_64-linux.live-managed-vm` and
+`packages.x86_64-linux.live-managed-vm-test`. Deployment and recovery details
+are in [`docs/live-managed.md`](docs/live-managed.md).
 
 ## Typed system settings
 

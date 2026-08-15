@@ -2,8 +2,9 @@
 
 The repository exports an opt-in NixOS module and a socket-activated
 `ncm-helper` executable. It has a transaction-capable fixture mode, a
-capability-reduced live-read-only mode, an explicit experimental live-test
-mode, and a separate opt-in live Home Manager persistence mode. Installing the
+capability-reduced live-read-only mode, a bounded live-managed source mode, an
+explicit experimental live-test mode, and a separate opt-in live Home Manager
+persistence mode. Installing the
 package alone neither imports nor enables the module; changing an active NixOS
 configuration requires an explicit module import, option selection, rebuild,
 and activation.
@@ -29,6 +30,9 @@ and activation.
   fixed dry entrypoint, and retains no receipt;
 - live-home-manager mode keeps NixOS apply disabled and exposes only one fixed
   Home Manager root plus its external root-only transaction journal for writes;
+- live-managed mode exposes only `/etc/nixos/ncm` and its external root-only
+  transaction journal, while the protocol accepts exactly `ncm/state.json` and
+  `ncm/packages.nix`;
 - the runtime configuration is a strict versioned JSON file generated into the
   Nix store.
 
@@ -138,9 +142,25 @@ keeps apply, recovery, test activation, Home Manager persistence, and permanent
 switch unavailable.
 
 It has no option for a different system root and cannot be upgraded to a
-writable NixOS adoption target. Schema version 4 accepts `fixture`,
-`live-read-only`, `live-test`, and `live-home-manager`; each live mutation mode
-adds only its narrowly scoped journal/capability.
+general writable NixOS adoption target. Schema version 5 accepts `fixture`,
+`live-read-only`, `live-managed`, `live-test`, and `live-home-manager`; each
+live mutation mode adds only its narrowly scoped journal/capability.
+
+Bounded NCM-owned system persistence must be opted into separately:
+
+```nix
+services.nix-control-manager-helper = {
+  enable = true;
+  mode = "live-managed";
+  targetId = "managed";
+  allowedUsers = [ "alice" ];
+};
+```
+
+This mode writes only canonical `ncm/state.json` and `ncm/packages.nix` after
+pre-validation, explicit UI confirmation, and its dedicated Polkit action. It
+does not create the main import, rebuild, or activate NixOS. Full operational
+and recovery details are in [`live-managed.md`](live-managed.md).
 
 Experimental test activation must be opted into explicitly:
 
@@ -190,6 +210,8 @@ paths. Experimental `live-test` adds only its root-owned activation journal to
 and their capability bounding set is empty. `live-home-manager` exposes only
 its configured source root and journal through `ReadWritePaths`, while retaining
 the empty capability bounding set.
+`live-managed` exposes only `/etc/nixos/ncm` and its managed transaction journal
+through `ReadWritePaths`; its capability bounding set is also empty.
 `/proc` remains visible because safe Polkit process subjects require
 the client start time and real UID.
 
@@ -264,6 +286,12 @@ pre/post real Nix evaluation, committed live-mode journal, and unchanged
 `/run/current-system`. It is available as
 `checks.x86_64-linux.live-home-manager-vm`.
 
+A fifth x86_64 VM check covers bounded NCM system-state persistence. It checks
+the exact two-file capability and sandbox, default Polkit denial, one authorized
+commit, real pre/post Nix evaluation, a committed `managed-state` journal, and
+unchanged main configuration plus `/run/current-system`. It is available as
+`checks.x86_64-linux.live-managed-vm`.
+
 `ncm-helper-client` is an unprivileged typed diagnostic client for capabilities,
 validation, exact dry-activation preview, receipt-based apply, and exact
 transaction recovery. The helper
@@ -289,8 +317,8 @@ same backend and never installs a system unit.
 
 ## Deliberately not implemented
 
-- live NixOS system-adoption writes (the only `/etc/nixos` exception is an
-  explicit Home Manager source plan in `live-home-manager` mode);
+- general live NixOS system-adoption writes (the only system-state exception is
+  the exact NCM-owned pair in `live-managed`; Home Manager has its own mode);
 - installation on the current WSL or physical NixOS system;
 - privileged/helper-mediated build, permanent `switch`, rollback-generation,
   or boot activation (local no-link build, exact dry preview, and opt-in

@@ -15,6 +15,7 @@ from .fixture_helper_backend import FixtureWorkflowHelperBackend
 from .helper_service import HelperDispatcher, HelperTarget
 from .helper_transport import UnixJsonHelperServer
 from .live_read_only_backend import LiveReadOnlyHelperBackend, RoutingHelperBackend
+from .managed_helper_backend import LiveManagedHelperBackend
 from .polkit_authorizer import PolkitAuthorizer
 from .transaction import require_transaction_fixture
 
@@ -349,6 +350,78 @@ def _target_v4(raw: Any) -> HelperTarget:
         raise HelperConfigurationError(str(error)) from error
 
 
+def _target_v5(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "testJournalRoot",
+            "testTimeoutSeconds",
+            "homeManagerRoot",
+            "homeManagerJournalRoot",
+            "managedJournalRoot",
+            "allowedRelativePaths",
+            "flakeTarget",
+        },
+        "target",
+    )
+    if mapping["mode"] != "live-managed":
+        base = {key: value for key, value in mapping.items() if key != "managedJournalRoot"}
+        if mapping["managedJournalRoot"] is not None:
+            raise HelperConfigurationError(
+                "Only live-managed targets may configure managedJournalRoot"
+            )
+        return _target_v4(base)
+    if any(
+        mapping[key] is not None
+        for key in (
+            "journalRoot",
+            "testJournalRoot",
+            "homeManagerRoot",
+            "homeManagerJournalRoot",
+        )
+    ):
+        raise HelperConfigurationError(
+            "live-managed must disable fixture, test, and Home Manager journals"
+        )
+    root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    normalized = str(root).replace("\\", "/")
+    if root.as_posix() != "/etc/nixos" and not normalized.endswith("/etc/nixos"):
+        raise HelperConfigurationError("live-managed is restricted to /etc/nixos")
+    journal = _absolute_path(mapping["managedJournalRoot"], "managedJournalRoot")
+    if journal == root or journal.is_relative_to(root):
+        raise HelperConfigurationError(
+            "managedJournalRoot must be outside configurationRoot"
+        )
+    allowed = _allowed_paths(mapping["allowedRelativePaths"])
+    if allowed != frozenset({"ncm/state.json", "ncm/packages.nix"}):
+        raise HelperConfigurationError(
+            "live-managed requires the exact NCM-owned two-file allow-list"
+        )
+    timeout = mapping["testTimeoutSeconds"]
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 30 <= timeout <= 1800:
+        raise HelperConfigurationError("testTimeoutSeconds must be between 30 and 1800")
+    try:
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=root,
+            journal_root=None,
+            allowed_relative_paths=allowed,
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target=_flake_target(mapping["flakeTarget"]),
+            test_timeout_seconds=timeout,
+            managed_write_enabled=True,
+            managed_journal_root=journal,
+        )
+    except (TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
 @dataclass(frozen=True, slots=True)
 class HelperDaemonConfig:
     socket_path: Path
@@ -375,9 +448,9 @@ class HelperDaemonConfig:
             "helper configuration",
         )
         schema_version = mapping["schemaVersion"]
-        if schema_version not in {1, 2, 3, 4}:
+        if schema_version not in {1, 2, 3, 4, 5}:
             raise HelperConfigurationError(
-                "Only helper configuration schemaVersion 1, 2, 3, and 4 are supported"
+                "Only helper configuration schemaVersion 1 through 5 are supported"
             )
         timeout = mapping["validationTimeout"]
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 900:
@@ -390,6 +463,7 @@ class HelperDaemonConfig:
             2: _target_v2,
             3: _target_v3,
             4: _target_v4,
+            5: _target_v5,
         }[schema_version]
         targets = tuple(target_loader(item) for item in targets_raw)
         if len({target.target_id for target in targets}) != len(targets):
@@ -416,6 +490,9 @@ def run_daemon(config_path: Path) -> None:
                 timeout=config.validation_timeout
             ),
             live_backend=LiveReadOnlyHelperBackend(
+                timeout=config.validation_timeout
+            ),
+            managed_backend=LiveManagedHelperBackend(
                 timeout=config.validation_timeout
             ),
         ),

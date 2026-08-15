@@ -6,6 +6,7 @@ import unittest
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
     HOME_MANAGER_APPLY_ACTION_ID,
+    MANAGED_APPLY_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
     RECOVER_TEST_ACTIVATION_ACTION_ID,
     RECOVER_ACTION_ID,
@@ -90,6 +91,75 @@ class HelperServiceTests(unittest.TestCase):
         self.assertFalse(response["result"]["activationEnabled"])
         self.assertEqual(self.authorizer.calls, [])
         self.assertFalse(self.mock_root.exists())
+
+    def test_managed_target_uses_separate_receipt_and_polkit_boundary(self) -> None:
+        managed = HelperTarget(
+            target_id="managed",
+            configuration_root=self.mock_root,
+            allowed_relative_paths=frozenset(
+                {"ncm/state.json", "ncm/packages.nix"}
+            ),
+            fixture_only=False,
+            apply_enabled=False,
+            managed_write_enabled=True,
+            managed_journal_root=Path(self.temporary.name) / "managed-journal",
+        )
+        dispatcher = HelperDispatcher(
+            targets=(managed,),
+            authorizer=self.authorizer,
+            backend=self.backend,
+        )
+        capabilities = dispatcher.handle(
+            self.request("capabilities", {}), peer_uid=1000
+        )["result"]["targets"][0]
+        self.assertTrue(capabilities["readOnly"])
+        self.assertFalse(capabilities["applyEnabled"])
+        self.assertTrue(capabilities["managedWriteEnabled"])
+        self.assertTrue(capabilities["managedRecoveryEnabled"])
+        self.assertFalse(capabilities["dryActivatePreviewEnabled"])
+
+        validated = dispatcher.handle(
+            self.request(
+                "validate-managed-plan",
+                {
+                    "targetId": "managed",
+                    "planFingerprint": "2" * 64,
+                    "changes": [self.change()],
+                },
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(validated["status"], "ok")
+        receipt = validated["result"]["validationReceipt"]
+        request = self.request(
+            "apply-validated-managed-plan",
+            {
+                "targetId": "managed",
+                "planFingerprint": "2" * 64,
+                "validationReceipt": receipt,
+            },
+            request_id="managed-apply1",
+        )
+        self.assertEqual(dispatcher.handle(request, peer_uid=1000)["status"], "denied")
+        self.assertEqual(self.backend.managed_apply_calls, [])
+        self.authorizer.allowed.add((1000, MANAGED_APPLY_ACTION_ID))
+        applied = dispatcher.handle(request, peer_uid=1000)
+        self.assertEqual(applied["status"], "ok")
+        self.assertEqual(applied["result"]["state"], "committed")
+
+        escaped = dispatcher.handle(
+            self.request(
+                "validate-managed-plan",
+                {
+                    "targetId": "managed",
+                    "planFingerprint": "3" * 64,
+                    "changes": [self.change("configuration.nix")],
+                },
+                request_id="managed-path1",
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(escaped["error"]["code"], "path-not-allowed")
 
     def test_rejects_traversal_unknown_fields_and_wrong_digest(self) -> None:
         traversal = self.change("../configuration.nix")

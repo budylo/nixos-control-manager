@@ -1,7 +1,7 @@
 # Privileged helper protocol
 
 Protocol version 1 is implemented with recording, fixture-workflow, and
-live backends. The daemon configuration schema is version 4; this is
+live backends. The daemon configuration schema is version 5; this is
 separate from the stable wire-protocol version. The service remains opt-in.
 
 ## Transport and identity
@@ -31,6 +31,13 @@ systemd-owned socket descriptor; its socket is `0660` and group-restricted.
 - `recover-home-manager-transaction` — recovers one exact
   24-character transaction ID only when its journal kind is
   `home-manager-adoption`;
+- `validate-managed-plan` — explicit `live-managed` targets only; accepts the
+  canonical typed state plus exact candidates for `ncm/state.json` and/or
+  `ncm/packages.nix`, then independently reconstructs and evaluates them;
+- `apply-validated-managed-plan` — accepts only target, fingerprint, and the
+  short-lived managed validation receipt;
+- `recover-managed-transaction` — recovers one exact transaction ID only when
+  its journal kind is `managed-state`;
 - `preview-activation` — live modes only; accepts the same exact typed
   candidate set plus one top-level Nix store path, requires its own Polkit
   action, independently resolves the validated derivation output, and invokes
@@ -84,6 +91,8 @@ A denied Polkit prompt does not consume it, allowing an intentional retry.
 - `org.nixos.nix-control-manager.recover-transaction`;
 - `org.nixos.nix-control-manager.apply-validated-home-manager-plan`;
 - `org.nixos.nix-control-manager.recover-home-manager-transaction`;
+- `org.nixos.nix-control-manager.apply-validated-managed-plan`;
+- `org.nixos.nix-control-manager.recover-managed-transaction`;
 - `org.nixos.nix-control-manager.preview-activation`;
 - `org.nixos.nix-control-manager.test-activation`;
 - `org.nixos.nix-control-manager.recover-test-activation`.
@@ -181,6 +190,23 @@ UI and the socket-activated helper, then verifies the empty capability set,
 read-only `/etc/nixos` mount, unchanged hashes, absent journal/receipt,
 pre-Polkit rejection of apply/recovery, and a separately authorized real
 dry-activation report for the exact built closure.
+
+## Live-managed backend boundary
+
+`mode: "live-managed"` is a separate capability domain. Its fixed allow-list is
+`ncm/state.json` and `ncm/packages.nix`; it cannot reuse generic adoption or
+Home Manager receipts, actions, journals, or recovery operations. The helper
+regenerates both candidates from the typed state, validates them in a disposable
+copy, and retains a UID-bound receipt only after an exact content and
+fingerprint match.
+
+Apply consumes the receipt before the backend runs, requires the dedicated
+Polkit action, and writes through an external journal whose transaction kind is
+`managed-state`. Installed content is regenerated, compared, and evaluated
+again before finalization; failure rolls back. The service sandbox exposes only
+`/etc/nixos/ncm` and the journal as writable. Activation, system/boot profiles,
+main imports, flake inputs, arbitrary commands, and Home Manager remain outside
+this mode.
 
 ## Live-test backend boundary
 

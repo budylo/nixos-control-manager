@@ -17,8 +17,9 @@
 - detect channel and flake configurations (implemented);
 - select a `nixosConfigurations.<host>` target;
 - show the one-time import/migration diff (implemented);
-- apply the approved plan atomically (transaction engine implemented for marked
-  fixtures; privileged live apply remains disabled);
+- apply an approved plan atomically (general adoption remains fixture-only;
+  bounded persistence of the two NCM-owned system files is implemented through
+  the explicit `live-managed` mode);
 - handle Git flakes and optionally stage only files owned by the application;
 - evaluate the candidate configuration in a disposable workspace (implemented);
 - implement digest checks, journaling, rollback, and crash recovery (implemented
@@ -56,8 +57,9 @@
 - unprivileged closure diff plus Polkit-authorized `dry-activate` report bound
   to the exact validated build output, with explicit incomplete-report warning
   and VM proof of unchanged source/current generation (implemented);
-- live-target helper (read-only system validation implemented; NixOS adoption
-  writes remain unimplemented; Home Manager has a separate narrow write mode);
+- live-target helper (read-only validation, exact NCM-owned state/module writes,
+  and separate Home Manager writes implemented as distinct modes; general
+  NixOS adoption remains unavailable);
 - opt-in exact-output `test` activation with a UID-bound receipt, root-only
   journal, timer-first automatic runtime recovery, and separate manual recovery
   (implemented experimentally; permanent `switch` remains disabled);
@@ -120,7 +122,8 @@
   an opt-in typed helper/CLI/UI vertical slice; activation remains
   unimplemented by design);
 - user/system package scope (separate catalog selection and preview implemented;
-  persistence remains);
+  system persistence is available through `live-managed`; user persistence is
+  available through `live-home-manager`);
 - profiles and reusable presets.
 
 ## Later

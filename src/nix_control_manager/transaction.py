@@ -18,6 +18,11 @@ from .home_manager_adoption import (
     HomeManagerCandidateValidation,
     home_manager_plan_identity,
 )
+from .managed_plan import (
+    ManagedPlan,
+    managed_plan_identity,
+    require_live_managed_root,
+)
 
 
 FIXTURE_MARKER = ".ncm-transaction-fixture"
@@ -275,6 +280,34 @@ def _validate_home_manager_plan(
         raise TransactionError("The validated Home Manager candidate digests no longer match")
     if plan.root != root:
         raise TransactionError("The Home Manager plan targets a different fixture root")
+    return fingerprint
+
+
+def _validate_managed_plan(
+    plan: ManagedPlan,
+    validation: CandidateValidation,
+    root: Path,
+) -> str:
+    if not plan.changes:
+        raise TransactionError("A non-empty managed plan is required")
+    if (
+        validation.status != "passed"
+        or not validation.working_copy_removed
+        or not validation.plan_fingerprint
+    ):
+        raise TransactionError("A successful managed candidate validation is required")
+    if not any(
+        check.status == "passed" and check.name.startswith("Evaluate")
+        for check in validation.checks
+    ):
+        raise TransactionError("A successful managed NixOS evaluation is required")
+    fingerprint, candidate_digests = managed_plan_identity(plan)
+    if fingerprint != validation.plan_fingerprint:
+        raise TransactionError("The validated managed fingerprint no longer matches")
+    if candidate_digests != validation.candidate_digests:
+        raise TransactionError("The validated managed candidate digests no longer match")
+    if plan.root != root:
+        raise TransactionError("The managed plan targets a different configuration root")
     return fingerprint
 
 
@@ -633,6 +666,32 @@ def apply_home_manager_plan_live(
     )
 
 
+def apply_managed_plan_live(
+    plan: ManagedPlan,
+    validation: CandidateValidation,
+    *,
+    journal_root: Path,
+    fault_after_commits: int | None = None,
+    simulate_crash: bool = False,
+) -> TransactionResult:
+    """Persist only the exact validated NCM state and generated module."""
+    root = require_live_managed_root(plan.root)
+    fingerprint = _validate_managed_plan(plan, validation, root)
+    allowed = {"ncm/state.json", "ncm/packages.nix"}
+    if {change.relative_path for change in plan.changes} - allowed:
+        raise TransactionError("Managed transaction exceeds its exact two-file scope")
+    return _apply_validated_changes(
+        root=root,
+        changes=plan.changes,
+        fingerprint=fingerprint,
+        journal_root=journal_root,
+        transaction_kind="managed-state",
+        fixture_only=False,
+        fault_after_commits=fault_after_commits,
+        simulate_crash=simulate_crash,
+    )
+
+
 def _finalize_validated_transaction(
     root: Path,
     *,
@@ -737,6 +796,24 @@ def finalize_home_manager_live_transaction(
     )
 
 
+def finalize_managed_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    verification: CandidateValidation,
+) -> TransactionResult:
+    require_live_managed_root(root)
+    return _finalize_validated_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        verification=verification,
+        transaction_kind="managed-state",
+        fixture_only=False,
+    )
+
+
 def _rollback_transaction(
     root: Path,
     *,
@@ -814,6 +891,25 @@ def rollback_home_manager_live_transaction(
     reason: str,
     verification: HomeManagerCandidateValidation | None = None,
 ) -> TransactionResult:
+    return _rollback_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        reason=reason,
+        verification=verification,
+        fixture_only=False,
+    )
+
+
+def rollback_managed_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    reason: str,
+    verification: CandidateValidation | None = None,
+) -> TransactionResult:
+    require_live_managed_root(root)
     return _rollback_transaction(
         root,
         journal_root=journal_root,
@@ -926,5 +1022,21 @@ def recover_pending_home_manager_live_transactions(
         journal_root=journal_root,
         transaction_id=transaction_id,
         transaction_kind="home-manager-adoption",
+        fixture_only=False,
+    )
+
+
+def recover_pending_managed_live_transactions(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str | None = None,
+) -> tuple[TransactionResult, ...]:
+    require_live_managed_root(root)
+    return _recover_pending_transactions(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        transaction_kind="managed-state",
         fixture_only=False,
     )

@@ -9,11 +9,13 @@ from typing import Any, Mapping, Protocol
 
 from .helper_protocol import (
     ApplyValidatedHomeManagerPlanPayload,
+    ApplyValidatedManagedPlanPayload,
     ApplyValidatedPlanPayload,
     HelperProtocolError,
     HelperRequest,
     PreviewActivationPayload,
     RecoverHomeManagerTransactionPayload,
+    RecoverManagedTransactionPayload,
     RecoverTestActivationPayload,
     RecoverTransactionPayload,
     SUPPORTED_OPERATIONS,
@@ -33,6 +35,8 @@ HOME_MANAGER_APPLY_ACTION_ID = (
 HOME_MANAGER_RECOVER_ACTION_ID = (
     "org.nixos.nix-control-manager.recover-home-manager-transaction"
 )
+MANAGED_APPLY_ACTION_ID = "org.nixos.nix-control-manager.apply-validated-managed-plan"
+MANAGED_RECOVER_ACTION_ID = "org.nixos.nix-control-manager.recover-managed-transaction"
 PREVIEW_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.preview-activation"
 TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.test-activation"
 RECOVER_TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.recover-test-activation"
@@ -54,6 +58,8 @@ class HelperTarget:
     home_manager_apply_enabled: bool = False
     home_manager_root: Path | None = None
     home_manager_journal_root: Path | None = None
+    managed_write_enabled: bool = False
+    managed_journal_root: Path | None = None
 
     def __post_init__(self) -> None:
         if not _TARGET_ID.fullmatch(self.target_id):
@@ -85,6 +91,14 @@ class HelperTarget:
                 "home_manager_journal_root",
                 self.home_manager_journal_root.expanduser().resolve(),
             )
+        if self.managed_journal_root is not None:
+            if self.managed_journal_root.expanduser().is_symlink():
+                raise ValueError("The managed transaction journal cannot be a symbolic link")
+            object.__setattr__(
+                self,
+                "managed_journal_root",
+                self.managed_journal_root.expanduser().resolve(),
+            )
         if not self.allowed_relative_paths:
             raise ValueError("A helper target requires at least one allowed path")
         if not self.fixture_only and self.apply_enabled:
@@ -115,6 +129,32 @@ class HelperTarget:
             raise ValueError(
                 "Home Manager root and journal are valid only when live writes are enabled"
             )
+        if self.managed_write_enabled:
+            if (
+                self.fixture_only
+                or self.apply_enabled
+                or self.test_activation_enabled
+                or self.home_manager_apply_enabled
+                or self.managed_journal_root is None
+            ):
+                raise ValueError(
+                    "Managed writes require their own non-activating live target and journal"
+                )
+            if self.allowed_relative_paths != frozenset(
+                {"ncm/state.json", "ncm/packages.nix"}
+            ):
+                raise ValueError("Managed writes require the exact two-file allow-list")
+            if (
+                self.managed_journal_root == self.configuration_root
+                or self.managed_journal_root.is_relative_to(self.configuration_root)
+            ):
+                raise ValueError(
+                    "The managed transaction journal must be outside the configuration root"
+                )
+        elif self.managed_journal_root is not None:
+            raise ValueError(
+                "A managed journal is valid only when managed writes are enabled"
+            )
         if not 30 <= self.test_timeout_seconds <= 1800:
             raise ValueError("test_timeout_seconds must be between 30 and 1800")
         for label in self.allowed_relative_paths:
@@ -142,6 +182,15 @@ class PendingValidatedHomeManagerPlan:
     receipt: str
     peer_uid: int
     payload: ValidateHomeManagerPlanPayload
+    expires_at: float
+    validation_result: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class PendingValidatedManagedPlan:
+    receipt: str
+    peer_uid: int
+    payload: ValidatePlanPayload
     expires_at: float
     validation_result: Mapping[str, Any]
 
@@ -213,6 +262,18 @@ class HelperBackend(Protocol):
         self, target: HelperTarget, transaction_id: str, peer_uid: int
     ) -> Mapping[str, Any]: ...
 
+    def validate_managed_plan(
+        self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
+    def apply_validated_managed_plan(
+        self, target: HelperTarget, plan: PendingValidatedManagedPlan, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
+    def recover_managed_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]: ...
@@ -247,6 +308,9 @@ class RecordingMockBackend:
     home_manager_validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
     home_manager_apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
     home_manager_recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    managed_validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    managed_apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    managed_recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
     preview_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     test_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     recover_test_activation_calls: list[tuple[str, str, int]] = field(default_factory=list)
@@ -338,6 +402,53 @@ class RecordingMockBackend:
             "activationEnabled": False,
         }
 
+    def validate_managed_plan(
+        self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.managed_validate_calls.append(
+            (target.target_id, plan.plan_fingerprint, peer_uid)
+        )
+        return {
+            "status": self.validation_status,
+            "fixtureOnly": False,
+            "workingCopyRemoved": True,
+            "managedWriteEnabled": target.managed_write_enabled,
+            "activationEnabled": False,
+        }
+
+    def apply_validated_managed_plan(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedManagedPlan,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        self.managed_apply_calls.append(
+            (target.target_id, plan.payload.plan_fingerprint, peer_uid)
+        )
+        return {
+            "state": "committed",
+            "transactionId": secrets.token_hex(12),
+            "fixtureOnly": False,
+            "filesWritten": len(plan.payload.changes),
+            "managedWriteEnabled": True,
+            "activationEnabled": False,
+        }
+
+    def recover_managed_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.managed_recover_calls.append(
+            (target.target_id, transaction_id, peer_uid)
+        )
+        return {
+            "state": "mock-managed-recovered",
+            "transactionId": transaction_id,
+            "fixtureOnly": False,
+            "filesWritten": 0,
+            "managedWriteEnabled": True,
+            "activationEnabled": False,
+        }
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]:
@@ -422,6 +533,7 @@ class HelperDispatcher:
         self.receipt_ttl_seconds = receipt_ttl_seconds
         self._pending: dict[str, PendingValidatedPlan] = {}
         self._pending_home_manager: dict[str, PendingValidatedHomeManagerPlan] = {}
+        self._pending_managed: dict[str, PendingValidatedManagedPlan] = {}
         self._pending_tests: dict[str, PendingTestActivation] = {}
 
     @staticmethod
@@ -454,6 +566,13 @@ class HelperDispatcher:
                 discard = getattr(
                     self.backend, "discard_validated_home_manager_plan", None
                 )
+                if target is not None and discard is not None:
+                    discard(target, pending.payload, pending.peer_uid)
+        for receipt, pending in tuple(self._pending_managed.items()):
+            if pending.expires_at <= now:
+                del self._pending_managed[receipt]
+                target = self.targets.get(pending.payload.target_id)
+                discard = getattr(self.backend, "discard_validated_managed_plan", None)
                 if target is not None and discard is not None:
                     discard(target, pending.payload, pending.peer_uid)
         for receipt, pending in tuple(self._pending_tests.items()):
@@ -511,9 +630,12 @@ class HelperDispatcher:
                                 "homeManagerLiveWriteEnabled": (
                                     target.home_manager_apply_enabled
                                 ),
+                                "managedWriteEnabled": target.managed_write_enabled,
+                                "managedRecoveryEnabled": target.managed_write_enabled,
                                 "dryActivatePreviewEnabled": (
                                     not target.fixture_only
                                     and not target.home_manager_apply_enabled
+                                    and not target.managed_write_enabled
                                 ),
                                 "testActivationEnabled": target.test_activation_enabled,
                             }
@@ -528,6 +650,8 @@ class HelperDispatcher:
                             "recover-home-manager-transaction": (
                                 HOME_MANAGER_RECOVER_ACTION_ID
                             ),
+                            "apply-validated-managed-plan": MANAGED_APPLY_ACTION_ID,
+                            "recover-managed-transaction": MANAGED_RECOVER_ACTION_ID,
                             "preview-activation": PREVIEW_ACTIVATION_ACTION_ID,
                             "test-activation": TEST_ACTIVATION_ACTION_ID,
                             "recover-test-activation": RECOVER_TEST_ACTIVATION_ACTION_ID,
@@ -542,6 +666,8 @@ class HelperDispatcher:
                 return self._validate_home_manager(
                     request_id, request.payload, peer.uid
                 )
+            if request.operation == "validate-managed-plan":
+                return self._validate_managed(request_id, request.payload, peer.uid)
             if request.operation == "preview-activation":
                 return self._preview_activation(request_id, request.payload, peer)
             if request.operation == "test-activation":
@@ -554,12 +680,16 @@ class HelperDispatcher:
                 return self._apply_home_manager(
                     request_id, request.payload, peer
                 )
+            if request.operation == "apply-validated-managed-plan":
+                return self._apply_managed(request_id, request.payload, peer)
             if request.operation == "recover-transaction":
                 return self._recover(request_id, request.payload, peer)
             if request.operation == "recover-home-manager-transaction":
                 return self._recover_home_manager(
                     request_id, request.payload, peer
                 )
+            if request.operation == "recover-managed-transaction":
+                return self._recover_managed(request_id, request.payload, peer)
             raise AssertionError(f"Unhandled helper operation: {request.operation}")
         except HelperProtocolError as error:
             return response_mapping(
@@ -772,6 +902,97 @@ class HelperDispatcher:
         )
         return response_mapping(request_id, status="ok", result=result)
 
+    def _validate_managed(
+        self, request_id: str, raw: Any, peer_uid: int
+    ) -> dict[str, Any]:
+        payload = ValidatePlanPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.managed_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit managed source writes"
+            )
+        if {change.relative_path for change in payload.changes} - {
+            "ncm/state.json",
+            "ncm/packages.nix",
+        }:
+            raise HelperProtocolError(
+                "path-not-allowed", "Managed writes are restricted to NCM-owned files"
+            )
+        for change in payload.changes:
+            if change.relative_path not in target.allowed_relative_paths:
+                raise HelperProtocolError(
+                    "path-not-allowed",
+                    f"The helper target does not allow {change.relative_path}",
+                )
+        validation = dict(
+            self.backend.validate_managed_plan(target, payload, peer_uid)
+        )
+        if validation.get("status") != "passed":
+            return response_mapping(
+                request_id,
+                status="error",
+                error_code="validation-failed",
+                error_message="The helper did not validate the managed plan",
+                result=validation,
+            )
+        receipt = secrets.token_urlsafe(32)
+        self._pending_managed[receipt] = PendingValidatedManagedPlan(
+            receipt=receipt,
+            peer_uid=peer_uid,
+            payload=payload,
+            expires_at=time.monotonic() + self.receipt_ttl_seconds,
+            validation_result=validation,
+        )
+        return response_mapping(
+            request_id,
+            status="ok",
+            result={
+                "validationReceipt": receipt,
+                "expiresInSeconds": self.receipt_ttl_seconds,
+                "targetId": payload.target_id,
+                "planFingerprint": payload.plan_fingerprint,
+                "validation": validation,
+                "fixtureOnly": False,
+                "managedWriteEnabled": True,
+                "activationEnabled": False,
+            },
+        )
+
+    def _apply_managed(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = ApplyValidatedManagedPlanPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.managed_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit managed source writes"
+            )
+        pending = self._pending_managed.get(payload.validation_receipt)
+        if (
+            pending is None
+            or pending.peer_uid != peer.uid
+            or pending.payload.target_id != payload.target_id
+            or pending.payload.plan_fingerprint != payload.plan_fingerprint
+        ):
+            raise HelperProtocolError(
+                "invalid-receipt", "The managed validation receipt is unknown or does not match"
+            )
+        details = {
+            "targetId": payload.target_id,
+            "planFingerprint": payload.plan_fingerprint,
+            "writeScope": "ncm/state.json:ncm/packages.nix",
+        }
+        if not self.authorizer.authorize(MANAGED_APPLY_ACTION_ID, peer, details):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        del self._pending_managed[payload.validation_receipt]
+        result = self.backend.apply_validated_managed_plan(target, pending, peer.uid)
+        return response_mapping(request_id, status="ok", result=result)
+
     def _preview_activation(
         self, request_id: str, raw: Any, peer: PeerIdentity
     ) -> dict[str, Any]:
@@ -934,6 +1155,32 @@ class HelperDispatcher:
                 error_message="Polkit authorization was not granted",
             )
         result = self.backend.recover_home_manager_transaction(
+            target, payload.transaction_id, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _recover_managed(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = RecoverManagedTransactionPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.managed_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit managed recovery"
+            )
+        details = {
+            "targetId": payload.target_id,
+            "transactionId": payload.transaction_id,
+            "writeScope": "ncm/state.json:ncm/packages.nix",
+        }
+        if not self.authorizer.authorize(MANAGED_RECOVER_ACTION_ID, peer, details):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        result = self.backend.recover_managed_transaction(
             target, payload.transaction_id, peer.uid
         )
         return response_mapping(request_id, status="ok", result=result)

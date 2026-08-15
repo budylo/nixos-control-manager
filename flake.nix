@@ -37,6 +37,11 @@
             ncmPackage = self.packages.${system}.default;
             ncmModule = self.nixosModules.default;
           };
+          live-managed-vm-test = import ./tests/nixos/live-managed-vm-test.nix {
+            inherit pkgs;
+            ncmPackage = self.packages.${system}.default;
+            ncmModule = self.nixosModules.default;
+          };
         });
 
       apps = forAllSystems (system: {
@@ -120,6 +125,23 @@
               })
             ];
           };
+          evaluatedLiveManaged = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              ({ ... }: {
+                system.stateVersion = "26.05";
+                users.users.live-managed-user.isNormalUser = true;
+                services.nix-control-manager-helper = {
+                  enable = true;
+                  mode = "live-managed";
+                  targetId = "managed";
+                  allowedUsers = [ "live-managed-user" ];
+                };
+                programs.nix-control-manager.enable = true;
+              })
+            ];
+          };
           evaluatedChannel = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -147,6 +169,9 @@
           liveTestServiceUnit = evaluatedLiveTest.config.systemd.units."nix-control-manager-helper.service".unit;
           liveHomeService = evaluatedLiveHomeManager.config.systemd.services.nix-control-manager-helper;
           liveHomeServiceUnit = evaluatedLiveHomeManager.config.systemd.units."nix-control-manager-helper.service".unit;
+          liveManagedService = evaluatedLiveManaged.config.systemd.services.nix-control-manager-helper;
+          liveManagedServiceUnit = evaluatedLiveManaged.config.systemd.units."nix-control-manager-helper.service".unit;
+          liveManagedGuiUnit = evaluatedLiveManaged.config.systemd.user.units."nix-control-manager-gui.service".unit;
           channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
           channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
           channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
@@ -330,6 +355,12 @@
             ];
             assert liveHomeService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveHomeService.serviceConfig);
+            assert liveManagedService.serviceConfig.ReadWritePaths == [
+              "/etc/nixos/ncm"
+              "/var/lib/nix-control-manager/managed-transactions"
+            ];
+            assert liveManagedService.serviceConfig.CapabilityBoundingSet == "";
+            assert !(builtins.hasAttr "StateDirectory" liveManagedService.serviceConfig);
             assert socket.socketConfig.SocketMode == "0660";
             assert socket.socketConfig.SocketGroup == "nix-control-manager";
             pkgs.runCommand "nix-control-manager-module-check" { } ''
@@ -348,6 +379,11 @@
               grep -F 'ReadWritePaths=/etc/nixos' ${liveHomeServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/home-manager-transactions' ${liveHomeServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveHomeServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/etc/nixos/ncm' ${liveManagedServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/var/lib/nix-control-manager/managed-transactions' ${liveManagedServiceUnit}/nix-control-manager-helper.service
+              grep -x 'CapabilityBoundingSet=' ${liveManagedServiceUnit}/nix-control-manager-helper.service
+              grep -F -- '--helper-socket /run/nix-control-manager/helper.sock' ${liveManagedGuiUnit}/nix-control-manager-gui.service
+              grep -F -- '--helper-target managed' ${liveManagedGuiUnit}/nix-control-manager-gui.service
               if grep -F 'ReadWritePaths=' ${liveServiceUnit}/nix-control-manager-helper.service; then
                 echo 'live-read-only service unexpectedly has ReadWritePaths' >&2
                 exit 1
@@ -366,6 +402,7 @@
               cp ${liveServiceUnit}/nix-control-manager-helper.service "$out/live-read-only.service"
               cp ${liveTestServiceUnit}/nix-control-manager-helper.service "$out/live-test.service"
               cp ${liveHomeServiceUnit}/nix-control-manager-helper.service "$out/live-home-manager.service"
+              cp ${liveManagedServiceUnit}/nix-control-manager-helper.service "$out/live-managed.service"
               touch "$out/passed"
             '';
           channel-module =
@@ -407,6 +444,7 @@
           live-read-only-ui-vm = self.packages.${system}.live-read-only-ui-vm-test;
           live-test-recovery-vm = self.packages.${system}.live-test-recovery-vm-test;
           live-home-manager-vm = self.packages.${system}.live-home-manager-vm-test;
+          live-managed-vm = self.packages.${system}.live-managed-vm-test;
         });
 
       devShells = forAllSystems (system:

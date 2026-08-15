@@ -24,19 +24,25 @@ let
   isFixture = cfg.mode == "fixture";
   isLiveTest = cfg.mode == "live-test";
   isLiveHomeManager = cfg.mode == "live-home-manager";
+  isLiveManaged = cfg.mode == "live-managed";
   configurationRoot = if isFixture then cfg.fixtureRoot else "/etc/nixos";
   transactionJournal = if isFixture then cfg.journalRoot else null;
   testJournal = if isLiveTest then cfg.testJournalRoot else null;
   homeManagerRoot = if isLiveHomeManager then cfg.homeManagerRoot else null;
   homeManagerJournalRoot =
     if isLiveHomeManager then cfg.homeManagerJournalRoot else null;
+  managedJournalRoot = if isLiveManaged then cfg.managedJournalRoot else null;
+  effectiveAllowedPaths = if isLiveManaged then [
+    "ncm/state.json"
+    "ncm/packages.nix"
+  ] else cfg.allowedRelativePaths;
   pathIsSafe = path:
     path != ""
     && !(hasPrefix "/" path)
     && all (part: part != "" && part != "." && part != "..")
       (splitString "/" path);
   helperConfig = (pkgs.formats.json { }).generate "ncm-helper.json" {
-    schemaVersion = 4;
+    schemaVersion = 5;
     inherit socketPath;
     polkitExecutable = "${pkgs.polkit}/bin/pkcheck";
     validationTimeout = cfg.validationTimeout;
@@ -49,7 +55,8 @@ let
         testJournalRoot = testJournal;
         testTimeoutSeconds = cfg.testActivationTimeout;
         inherit homeManagerRoot homeManagerJournalRoot;
-        allowedRelativePaths = cfg.allowedRelativePaths;
+        inherit managedJournalRoot;
+        allowedRelativePaths = effectiveAllowedPaths;
         flakeTarget = cfg.flakeTarget;
       }
     ];
@@ -169,6 +176,7 @@ in
         "live-read-only"
         "live-test"
         "live-home-manager"
+        "live-managed"
       ];
       default = "fixture";
       description = ''
@@ -182,6 +190,10 @@ in
         live-home-manager is a separate opt-in that may persist only an exact,
         validated Home Manager plan under homeManagerRoot. It does not enable
         NixOS apply, Home Manager activation, or generation switching.
+        live-managed is a separate opt-in capability that may atomically
+        persist only ncm/state.json and ncm/packages.nix after disposable
+        evaluation, explicit confirmation, and Polkit authorization. It never
+        edits configuration.nix, mutates flake inputs, or activates a system.
       '';
     };
 
@@ -233,6 +245,12 @@ in
       type = types.str;
       default = "/var/lib/nix-control-manager/home-manager-transactions";
       description = "Root-only journal for live Home Manager source transactions.";
+    };
+
+    managedJournalRoot = mkOption {
+      type = types.str;
+      default = "/var/lib/nix-control-manager/managed-transactions";
+      description = "Root-only journal for bounded NCM-owned source transactions.";
     };
 
     targetId = mkOption {
@@ -326,6 +344,14 @@ in
         message = "live-home-manager requires an absolute non-home, non-store configuration root.";
       }
       {
+        assertion = !isLiveManaged || (
+          hasPrefix "/" cfg.managedJournalRoot
+          && cfg.managedJournalRoot != "/etc/nixos"
+          && !(hasPrefix "/etc/nixos/" cfg.managedJournalRoot)
+        );
+        message = "The live-managed journal must be absolute and outside /etc/nixos.";
+      }
+      {
         assertion = !isLiveHomeManager || (
           hasPrefix "/" cfg.homeManagerJournalRoot
           && cfg.homeManagerJournalRoot != cfg.homeManagerRoot
@@ -362,6 +388,9 @@ in
       ++ optionals isLiveTest [ "d ${cfg.testJournalRoot} 0700 root root -" ]
       ++ optionals isLiveHomeManager [
         "d ${cfg.homeManagerJournalRoot} 0700 root root -"
+      ]
+      ++ optionals isLiveManaged [
+        "d ${cfg.managedJournalRoot} 0700 root root -"
       ];
 
     systemd.sockets.${serviceName} = {
@@ -385,6 +414,8 @@ in
         "Time-limited test activation Nix Control Manager system helper"
       else if isLiveHomeManager then
         "Home Manager persistence Nix Control Manager system helper"
+      else if isLiveManaged then
+        "Bounded managed-source Nix Control Manager system helper"
       else
         "Read-only Nix Control Manager system helper";
       requires = [ "polkit.service" ];
@@ -445,11 +476,13 @@ in
         # An empty Nix list is omitted by the unit renderer. The empty string
         # deliberately emits `CapabilityBoundingSet=` and clears every cap.
         CapabilityBoundingSet = "";
-        ReadOnlyPaths = optionals (!isLiveHomeManager) [ "/etc/nixos" ];
+        ReadOnlyPaths = optionals (!isLiveHomeManager && !isLiveManaged) [ "/etc/nixos" ];
       } // optionalAttrs isLiveTest {
         ReadWritePaths = [ cfg.testJournalRoot ];
       } // optionalAttrs isLiveHomeManager {
         ReadWritePaths = [ cfg.homeManagerRoot cfg.homeManagerJournalRoot ];
+      } // optionalAttrs isLiveManaged {
+        ReadWritePaths = [ "/etc/nixos/ncm" cfg.managedJournalRoot ];
       };
     };
     })
@@ -465,7 +498,7 @@ in
         };
         serviceConfig = {
           Type = "simple";
-          ExecStart = concatStringsSep " " [
+          ExecStart = concatStringsSep " " ([
             "${clientCfg.package}/bin/ncm"
             "serve"
             "--state /etc/nixos/ncm/state.json"
@@ -475,7 +508,11 @@ in
             "--home-manager-root %h/.config/home-manager"
             "--port ${toString clientCfg.port}"
             "--read-only"
-          ];
+          ] ++ optionals cfg.enable [
+            "--helper-socket ${socketPath}"
+            "--helper-target ${cfg.targetId}"
+            "--validation-timeout ${toString cfg.validationTimeout}"
+          ]);
           UMask = "0077";
           Restart = "on-failure";
           RestartSec = "1s";

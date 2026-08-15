@@ -9,6 +9,9 @@ const ui = {
   previewButton: document.querySelector("#previewButton"),
   saveButton: document.querySelector("#saveButton"),
   drawerSaveButton: document.querySelector("#drawerSaveButton"),
+  commitManagedApplyButton: document.querySelector("#commitManagedApplyButton"),
+  managedApplyConfirmationWrap: document.querySelector("#managedApplyConfirmationWrap"),
+  managedApplyConfirmation: document.querySelector("#managedApplyConfirmation"),
   drawer: document.querySelector("#previewDrawer"),
   backdrop: document.querySelector("#drawerBackdrop"),
   closePreview: document.querySelector("#closePreview"),
@@ -168,6 +171,7 @@ const model = {
   homeBuildPreview: { jobId: null, status: "idle", nextCursor: 0, events: [] },
   homeBuildLog: [],
   homeApplyIntent: null,
+  managedApplyIntent: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -227,9 +231,11 @@ function updateChangeState() {
       ? `${dependencyErrors} невирішена залежність`
     : (count ? `${count} ${label}` : "Немає змін");
   ui.changeCount.classList.toggle("invalid", invalid);
-  ui.saveButton.disabled = !model.localWriteEnabled || count === 0 || invalid;
-  ui.drawerSaveButton.disabled = !model.localWriteEnabled || count === 0 || invalid;
+  const managedWrite = model.helper?.managedWriteEnabled === true;
+  ui.saveButton.disabled = (!model.localWriteEnabled && !managedWrite) || count === 0 || invalid;
+  ui.drawerSaveButton.disabled = (!model.localWriteEnabled && !managedWrite) || count === 0 || invalid;
   ui.previewButton.disabled = invalid;
+  if (model.managedApplyIntent) clearManagedApplyIntent();
 }
 
 function buildFilters() {
@@ -1530,12 +1536,16 @@ function renderHelperStatus(helper) {
   ui.helperTarget.classList.toggle("connected", available);
   ui.helperTarget.classList.toggle("warning", !available);
   title.textContent = available
-    ? (helper.homeManagerLiveWriteEnabled
+    ? (helper.managedWriteEnabled
+      ? "Керований запис NCM підключено"
+      : helper.homeManagerLiveWriteEnabled
       ? "Home Manager helper підключено"
       : helper.testActivationEnabled ? "Test helper підключено" : "Read-only helper підключено")
     : "Системний helper недоступний";
   detail.textContent = available
-    ? (helper.homeManagerLiveWriteEnabled
+    ? (helper.managedWriteEnabled
+      ? `${helper.targetId} · лише два NCM-файли · без activation/switch`
+      : helper.homeManagerLiveWriteEnabled
       ? `${helper.targetId} · точний source-write · activation/switch вимкнено`
       : `${helper.targetId} · без apply/switch${helper.testActivationEnabled ? " · test з auto-recovery" : " · test вимкнено"}${helper.dryActivatePreviewEnabled ? " · dry-preview" : ""}`)
     : (helper.reason || "Unix socket не відповідає");
@@ -1545,12 +1555,15 @@ function renderHelperStatus(helper) {
   ui.helperAvailability.classList.toggle("available", available);
   ui.helperAvailability.classList.toggle("unavailable", !available);
   ui.helperAvailability.querySelector("small").textContent = available
-    ? (helper.homeManagerLiveWriteEnabled
+    ? (helper.managedWriteEnabled
+      ? `Live target «${helper.targetId}»: запис лише state.json/packages.nix після diff, validation, підтвердження та Polkit`
+      : helper.homeManagerLiveWriteEnabled
       ? `Live target «${helper.targetId}»: Home Manager source-write лише після точного receipt, підтвердження та Polkit; activation вимкнена`
       : `Live target «${helper.targetId}»: перевірка${helper.dryActivatePreviewEnabled ? " та авторизований dry-preview" : ""}${helper.testActivationEnabled ? "; test лише з одноразовим receipt та auto-recovery" : "; test вимкнено"}`)
     : (helper.reason || "Системний helper не налаштовано");
   updateActivationPreviewControls();
   if (ui.homeApplyFlow) updateHomeApplyControls();
+  updateChangeState();
 }
 
 function openAdoptionPlan() {
@@ -1956,7 +1969,88 @@ function showToast(message, error = false) {
   toastTimer = window.setTimeout(() => ui.toast.classList.remove("visible"), 3600);
 }
 
+function clearManagedApplyIntent() {
+  model.managedApplyIntent = null;
+  if (!ui.managedApplyConfirmation) return;
+  ui.managedApplyConfirmation.checked = false;
+  ui.managedApplyConfirmationWrap.hidden = true;
+  ui.commitManagedApplyButton.hidden = true;
+  ui.commitManagedApplyButton.disabled = true;
+  ui.drawerSaveButton.hidden = false;
+}
+
+function updateManagedApplyControls() {
+  const prepared = model.managedApplyIntent !== null;
+  ui.managedApplyConfirmationWrap.hidden = !prepared;
+  ui.commitManagedApplyButton.hidden = !prepared;
+  ui.commitManagedApplyButton.disabled = !prepared || !ui.managedApplyConfirmation.checked;
+  ui.drawerSaveButton.hidden = prepared;
+}
+
+async function prepareManagedSave() {
+  ui.saveButton.disabled = true;
+  ui.drawerSaveButton.disabled = true;
+  try {
+    const result = await api("/api/helper/managed/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentState()),
+    });
+    model.managedApplyIntent = {
+      intentId: result.intentId,
+      planFingerprint: result.planFingerprint,
+    };
+    model.preview = {
+      ...model.preview,
+      diff: result.combinedDiff || model.preview.diff,
+    };
+    renderPreview();
+    if (!ui.drawer.classList.contains("open")) {
+      ui.backdrop.hidden = false;
+      ui.drawer.inert = false;
+      ui.drawer.classList.add("open");
+      ui.drawer.setAttribute("aria-hidden", "false");
+    }
+    updateManagedApplyControls();
+    showToast("Кандидат перевірено. Перегляньте diff і підтвердьте точний запис.");
+  } catch (error) {
+    clearManagedApplyIntent();
+    showToast(error.message, true);
+    updateChangeState();
+  }
+}
+
+async function commitManagedSave() {
+  const intent = model.managedApplyIntent;
+  if (!intent || !ui.managedApplyConfirmation.checked) return;
+  ui.commitManagedApplyButton.disabled = true;
+  try {
+    const result = await api("/api/helper/managed/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intentId: intent.intentId,
+        planFingerprint: intent.planFingerprint,
+        confirmed: true,
+      }),
+    });
+    model.savedPackages = new Set(model.selected);
+    model.savedOptions = JSON.parse(JSON.stringify(model.options));
+    clearManagedApplyIntent();
+    updateChangeState();
+    showToast(`Записано ${result.filesWritten} керовані файли; активацію не виконано.`);
+  } catch (error) {
+    clearManagedApplyIntent();
+    showToast(error.message, true);
+    updateChangeState();
+  }
+}
+
 async function save() {
+  if (!model.localWriteEnabled && model.helper?.managedWriteEnabled === true) {
+    await prepareManagedSave();
+    return;
+  }
   ui.saveButton.disabled = true;
   ui.drawerSaveButton.disabled = true;
   try {
@@ -2067,6 +2161,8 @@ ui.closePreview.addEventListener("click", closePreview);
 ui.backdrop.addEventListener("click", closePreview);
 ui.saveButton.addEventListener("click", save);
 ui.drawerSaveButton.addEventListener("click", save);
+ui.commitManagedApplyButton.addEventListener("click", commitManagedSave);
+ui.managedApplyConfirmation.addEventListener("change", updateManagedApplyControls);
 ui.diffTab.addEventListener("click", () => { model.previewMode = "diff"; renderPreview(); });
 ui.sourceTab.addEventListener("click", () => { model.previewMode = "source"; renderPreview(); });
 ui.adoptionPlanButton.addEventListener("click", openAdoptionPlan);

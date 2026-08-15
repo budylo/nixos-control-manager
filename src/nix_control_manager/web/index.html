@@ -246,7 +246,12 @@
       </div>
       <footer>
         <div class="validation-state"><span>✓</span><div><strong>Стан перевірено</strong><small>Синтаксис Nix буде перевірено на етапі build</small></div></div>
+        <label id="managedApplyConfirmationWrap" class="home-apply-confirmation" hidden>
+          <input id="managedApplyConfirmation" type="checkbox">
+          <span>Я перевірив показаний diff і підтверджую запис лише ncm/state.json та ncm/packages.nix. Активація системи не виконуватиметься.</span>
+        </label>
         <button id="drawerSaveButton" class="button primary" type="button">Зберегти модуль</button>
+        <button id="commitManagedApplyButton" class="button danger" type="button" hidden disabled>Авторизувати й записати</button>
       </footer>
     </aside>
 

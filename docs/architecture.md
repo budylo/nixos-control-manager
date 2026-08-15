@@ -244,6 +244,14 @@ The service mount namespace exposes only those two paths as writable, records
 the live safety mode in every manifest, re-evaluates the installed sources, and
 never invokes `home-manager switch` or another activation entrypoint.
 
+An explicit `live-managed` target owns a still smaller system domain: the
+canonical `ncm/state.json` and generated `ncm/packages.nix` pair. It reconstructs
+their contents from typed state, uses a distinct receipt and Polkit action,
+records `transactionKind = "managed-state"`, and repeats NixOS evaluation after
+the provisional commit. The service may write only `/etc/nixos/ncm` and its
+external journal; it cannot edit the operator-owned import, any flake file, the
+system profile, or an activation entrypoint.
+
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms
 and reports uncertainty instead of rewriting a configuration. This keeps the
