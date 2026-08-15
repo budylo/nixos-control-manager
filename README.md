@@ -39,15 +39,18 @@ This repository currently contains the first vertical slice:
   user-state boundary. Home Manager writes and activation remain disabled.
 - a preview-only Home Manager package selector that renders a deterministic
   per-user module and unified diff while preserving existing user options. It
-  has no save, source-adoption, flake-input, build, or activation operation.
+  has no save, source-adoption, flake-input, or activation operation.
 - a read-only Home Manager connection plan for conservative NixOS-module and
-  standalone imports, plus disposable-copy parse/evaluation. No apply endpoint
-  exists and every validation result confirms that build and activation are off.
+  standalone imports, plus disposable-copy parse/evaluation;
+- an unprivileged Home Manager build-preview bound to the exact validation
+  fingerprint. It builds only the selected user's `activationPackage`, streams
+  logs, supports cancellation and timeout, and never writes configuration or
+  runs activation / `home-manager switch`;
 - a fault-tested Home Manager transaction workflow that can write the validated
   module/import set and canonical `ncm/user-state.json` only inside an explicitly
   marked disposable fixture. A typed diagnostic helper client can exercise this
   fixture-only path with separate receipts and Polkit actions; HTTP, GUI,
-  live-write, build, and activation endpoints remain absent.
+  live-write and activation endpoints remain absent.
 
 ## Try it
 
@@ -315,16 +318,23 @@ Validation copies the selected configuration root to a temporary directory,
 materializes the exact candidates there, parses every changed Nix file, and
 evaluates the NixOS system or standalone flake derivation when the corresponding
 entrypoint is available. Legacy standalone configurations receive syntax-only
-validation. The temporary directory is removed afterwards; build, activation,
-source writes, lock-file writes, and flake-input changes remain disabled.
+validation. The temporary directory is removed afterwards; activation, source
+writes, lock-file writes, and flake-input changes remain disabled.
+
+After successful validation, the drawer can start a separate unprivileged
+build-preview for the same fingerprint. Flake integrations build the exact
+standalone or NixOS-module `activationPackage`; legacy standalone configurations
+remain unavailable because they do not expose a fixed safe build target. The
+build may populate `/nix/store`, but it never executes the result and removes
+its disposable source copy on success, failure, cancellation, or timeout.
 
 System and user ownership remain intentionally separate. System packages and
 NixOS options continue to live in `state.local.json` and `managed.local.nix`;
 per-user Home Manager packages and options belong to the selected configuration
 root's `ncm/user-state.json` and distinct generated user modules. The internal
 fixture workflow commits them atomically, but the application still has no
-user-state save endpoint, live source-writing operation, Home Manager build or
-activation, or flake-input mutation.
+user-state save endpoint, live source-writing operation, Home Manager activation,
+or flake-input mutation.
 
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).

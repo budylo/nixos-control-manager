@@ -108,6 +108,13 @@ const ui = {
   homeAdoptionValidationDetail: document.querySelector("#homeAdoptionValidationDetail"),
   homeAdoptionValidationLog: document.querySelector("#homeAdoptionValidationLog"),
   validateHomeAdoptionButton: document.querySelector("#validateHomeAdoptionButton"),
+  homeBuildPreview: document.querySelector("#homeBuildPreview"),
+  homeBuildPreviewIcon: document.querySelector("#homeBuildPreviewIcon"),
+  homeBuildPreviewTitle: document.querySelector("#homeBuildPreviewTitle"),
+  homeBuildPreviewDetail: document.querySelector("#homeBuildPreviewDetail"),
+  homeBuildPreviewLog: document.querySelector("#homeBuildPreviewLog"),
+  startHomeBuildPreviewButton: document.querySelector("#startHomeBuildPreviewButton"),
+  cancelHomeBuildPreviewButton: document.querySelector("#cancelHomeBuildPreviewButton"),
 };
 
 const model = {
@@ -148,6 +155,8 @@ const model = {
   homePreviewMode: "diff",
   homeAdoption: null,
   homeAdoptionValidation: null,
+  homeBuildPreview: { jobId: null, status: "idle", nextCursor: 0, events: [] },
+  homeBuildLog: [],
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -1054,6 +1063,7 @@ function renderHomeAdoption() {
   ui.homeAdoptionValidationDetail.textContent = "Перевірка створить тимчасову копію, виконає parse/eval і видалить її.";
   ui.homeAdoptionValidationLog.hidden = true;
   ui.homeAdoptionValidationLog.textContent = "";
+  updateHomeBuildPreviewControls();
 }
 
 async function openHomeAdoption() {
@@ -1108,6 +1118,8 @@ async function validateHomeAdoption() {
   ui.homeAdoptionValidation.className = "candidate-validation running";
   ui.homeAdoptionValidationIcon.textContent = "◌";
   ui.homeAdoptionValidationTitle.textContent = "Перевіряємо тимчасову копію…";
+  model.homeAdoptionValidation = null;
+  updateHomeBuildPreviewControls();
   try {
     const result = await api("/api/home-manager/validate-adoption", {
       method: "POST",
@@ -1142,6 +1154,7 @@ async function validateHomeAdoption() {
       ...(result.warnings || []).map((item) => `WARN    ${item}`),
     ].join("\n");
     ui.homeAdoptionValidationLog.hidden = false;
+    updateHomeBuildPreviewControls();
   } catch (error) {
     ui.homeAdoptionValidation.className = "candidate-validation failed";
     ui.homeAdoptionValidationIcon.textContent = "!";
@@ -1149,6 +1162,140 @@ async function validateHomeAdoption() {
     ui.homeAdoptionValidationDetail.textContent = error.message;
   } finally {
     ui.validateHomeAdoptionButton.disabled = !model.homeAdoption?.safeToValidate;
+    updateHomeBuildPreviewControls();
+  }
+}
+
+function updateHomeBuildPreviewControls() {
+  const active = activeBuildStatuses.has(model.homeBuildPreview?.status);
+  const validation = model.homeAdoptionValidation;
+  const exactValidation = validation?.status === "passed"
+    && typeof validation.planFingerprint === "string"
+    && validation.planFingerprint.length === 64;
+  ui.startHomeBuildPreviewButton.disabled = active || !exactValidation;
+  ui.cancelHomeBuildPreviewButton.hidden = !active;
+  ui.cancelHomeBuildPreviewButton.disabled = model.homeBuildPreview?.status === "cancelling";
+}
+
+function renderHomeBuildPreview(result) {
+  if (
+    result.workflow !== "home-manager"
+    || result.configurationWriteEnabled !== false
+    || result.activationEnabled !== false
+    || result.homeManagerActivationEnabled !== false
+    || result.switchEnabled !== false
+    || result.flakeInputMutationEnabled !== false
+    || result.lockFileWriteEnabled !== false
+    || result.activationPreviewReady !== false
+  ) {
+    throw new Error("Сервер не підтвердив безпечну межу Home Manager build-preview");
+  }
+  const previousJobId = model.homeBuildPreview?.jobId;
+  const previousCursor = result.jobId === previousJobId
+    ? (model.homeBuildPreview?.nextCursor || 0) : 0;
+  if (result.jobId !== previousJobId) model.homeBuildLog = [];
+  if (result.logsTruncated && !model.homeBuildLog.length) {
+    model.homeBuildLog.push("… попередні рядки журналу вже недоступні …");
+  }
+  for (const event of result.events || []) {
+    if ((event.sequence || 0) <= previousCursor) continue;
+    const prefix = event.stream === "stderr" ? "ERR · "
+      : event.stream === "command" ? "" : event.stream === "stdout" ? "OUT · " : "NCM · ";
+    model.homeBuildLog.push(prefix + event.message);
+  }
+  model.homeBuildPreview = { ...result, events: [] };
+  if (model.homeBuildLog.length > 2000) model.homeBuildLog = model.homeBuildLog.slice(-2000);
+
+  const status = result.status || "idle";
+  const active = activeBuildStatuses.has(status);
+  ui.homeBuildPreview.classList.remove("running", "passed", "failed", "cancelled");
+  if (active) ui.homeBuildPreview.classList.add("running");
+  else if (status === "passed") ui.homeBuildPreview.classList.add("passed");
+  else if (status === "cancelled") ui.homeBuildPreview.classList.add("cancelled");
+  else if (status !== "idle") ui.homeBuildPreview.classList.add("failed");
+
+  const titles = {
+    idle: "Home Manager build-preview ще не запущено",
+    queued: "Home Manager build-preview у черзі",
+    preparing: "План повторно звіряється і перевіряється",
+    running: "Nix збирає activationPackage",
+    cancelling: "Home Manager build зупиняється",
+    cleaning: "Тимчасова копія видаляється",
+    passed: "activationPackage успішно зібрано",
+    failed: "Home Manager build завершився помилкою",
+    cancelled: "Home Manager build скасовано",
+    blocked: "Home Manager build заблоковано",
+    unavailable: "Автоматична збірка недоступна",
+  };
+  ui.homeBuildPreviewTitle.textContent = titles[status] || `Home Manager build: ${status}`;
+  if (status === "passed") {
+    ui.homeBuildPreviewDetail.textContent = "Точний перевірений activationPackage готовий у Nix store. Конфігурацію не записано; activation і home-manager switch не запускалися.";
+  } else if (status === "cancelled") {
+    ui.homeBuildPreviewDetail.textContent = "Процес Nix зупинено й тимчасову копію видалено. Уже зібрані об’єкти Nix store можуть лишитися для повторного використання.";
+  } else if (result.error?.message) {
+    ui.homeBuildPreviewDetail.textContent = `${result.error.message}. Конфігурацію й Home Manager профіль не змінено.`;
+  } else if (active) {
+    ui.homeBuildPreviewDetail.textContent = "Журнал оновлюється. Дозволено лише непривілейований запис до Nix store; activation відсутня.";
+  } else {
+    ui.homeBuildPreviewDetail.textContent = "Після успішної перевірки можна непривілейовано зібрати точний activationPackage. Запуск activation або home-manager switch відсутній.";
+  }
+  ui.homeBuildPreviewIcon.textContent = status === "passed" ? "✓"
+    : status === "cancelled" ? "■" : active ? "◇" : status === "idle" ? "▱" : "!";
+  ui.homeBuildPreviewLog.textContent = model.homeBuildLog.join("\n");
+  ui.homeBuildPreviewLog.hidden = model.homeBuildLog.length === 0;
+  updateHomeBuildPreviewControls();
+}
+
+let homeBuildPollTimer;
+async function pollHomeBuildPreview() {
+  window.clearTimeout(homeBuildPollTimer);
+  const jobId = model.homeBuildPreview?.jobId;
+  if (!jobId) return;
+  try {
+    const cursor = model.homeBuildPreview.nextCursor || 0;
+    const result = await api(`/api/home-manager/build-preview/${jobId}?after=${cursor}`);
+    renderHomeBuildPreview(result);
+    if (activeBuildStatuses.has(result.status)) {
+      homeBuildPollTimer = window.setTimeout(pollHomeBuildPreview, 500);
+    }
+  } catch (error) {
+    showToast(`Не вдалося оновити Home Manager build-журнал: ${error.message}`, true);
+    homeBuildPollTimer = window.setTimeout(pollHomeBuildPreview, 1500);
+  }
+}
+
+async function startHomeBuildPreview() {
+  const candidate = currentHomeCandidate();
+  const fingerprint = model.homeAdoptionValidation?.planFingerprint;
+  if (!candidate || typeof fingerprint !== "string") return;
+  ui.startHomeBuildPreviewButton.disabled = true;
+  try {
+    const result = await api("/api/home-manager/build-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...candidate, planFingerprint: fingerprint }),
+    });
+    renderHomeBuildPreview(result);
+    pollHomeBuildPreview();
+  } catch (error) {
+    showToast(error.message, true);
+    updateHomeBuildPreviewControls();
+  }
+}
+
+async function cancelHomeBuildPreview() {
+  const jobId = model.homeBuildPreview?.jobId;
+  if (!jobId) return;
+  ui.cancelHomeBuildPreviewButton.disabled = true;
+  try {
+    renderHomeBuildPreview(await api(
+      `/api/home-manager/build-preview/${jobId}/cancel`,
+      { method: "POST" },
+    ));
+    pollHomeBuildPreview();
+  } catch (error) {
+    showToast(error.message, true);
+    updateHomeBuildPreviewControls();
   }
 }
 
@@ -1664,7 +1811,7 @@ async function initialize() {
   try {
     const config = await api("/api/config");
     model.token = config.token;
-    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager] = await Promise.all([
+    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview] = await Promise.all([
       api("/api/catalog"),
       api("/api/settings-catalog"),
       api("/api/state"),
@@ -1673,6 +1820,7 @@ async function initialize() {
       api("/api/helper"),
       api("/api/build-preview"),
       api("/api/home-manager"),
+      api("/api/home-manager/build-preview"),
     ]);
     model.catalog = catalog;
     model.settingsCatalog = settingsCatalog;
@@ -1701,6 +1849,8 @@ async function initialize() {
     renderHelperStatus(helper);
     renderBuildPreview(buildPreview);
     if (activeBuildStatuses.has(buildPreview.status)) pollBuildPreview();
+    renderHomeBuildPreview(homeBuildPreview);
+    if (activeBuildStatuses.has(homeBuildPreview.status)) pollHomeBuildPreview();
     buildFilters();
     buildSettingsFilters();
     renderCatalog();
@@ -1730,6 +1880,8 @@ ui.closeHomeAdoption.addEventListener("click", closeHomeAdoption);
 ui.closeHomeAdoptionFooter.addEventListener("click", closeHomeAdoption);
 ui.homeAdoptionBackdrop.addEventListener("click", closeHomeAdoption);
 ui.validateHomeAdoptionButton.addEventListener("click", validateHomeAdoption);
+ui.startHomeBuildPreviewButton.addEventListener("click", startHomeBuildPreview);
+ui.cancelHomeBuildPreviewButton.addEventListener("click", cancelHomeBuildPreview);
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);

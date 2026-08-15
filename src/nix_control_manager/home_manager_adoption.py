@@ -545,6 +545,26 @@ def _safe_relative(root: Path, path: Path) -> Path:
     return relative
 
 
+def materialize_home_manager_candidate(
+    plan: HomeManagerAdoptionPlan, candidate_root: Path
+) -> tuple[str, ...]:
+    """Copy a Home Manager root and apply only the already planned file changes."""
+    shutil.copytree(
+        plan.root,
+        candidate_root,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".git", "result", "result-*"),
+    )
+    candidate_files: list[str] = []
+    for change in plan.changes:
+        relative = _safe_relative(plan.root, change.path)
+        candidate = candidate_root / relative
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(change.candidate, encoding="utf-8")
+        candidate_files.append(relative.as_posix())
+    return tuple(candidate_files)
+
+
 def validate_home_manager_adoption(
     plan: HomeManagerAdoptionPlan,
     *,
@@ -574,17 +594,10 @@ def validate_home_manager_adoption(
     try:
         with tempfile.TemporaryDirectory(prefix="ncm-home-candidate-") as temporary:
             candidate_root = Path(temporary) / "configuration"
-            shutil.copytree(
-                plan.root,
-                candidate_root,
-                symlinks=True,
-                ignore=shutil.ignore_patterns(".git", "result", "result-*"),
-            )
+            materialize_home_manager_candidate(plan, candidate_root)
             for change in plan.changes:
                 relative = _safe_relative(plan.root, change.path)
                 candidate = candidate_root / relative
-                candidate.parent.mkdir(parents=True, exist_ok=True)
-                candidate.write_text(change.candidate, encoding="utf-8")
                 if relative.suffix == ".nix":
                     check = _run(
                         f"Parse {relative.as_posix()}",

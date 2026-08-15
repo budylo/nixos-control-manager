@@ -99,6 +99,9 @@
   (implemented);
 - read-only, integration-specific source adoption plans with exact diffs and
   disposable parse/evaluation (implemented; live apply remains disabled);
+- fingerprint-bound, unprivileged build-preview for the exact Home Manager
+  `activationPackage`, with streamed logs, cancellation, timeout, disposable
+  cleanup, and no activation (implemented; legacy standalone remains unavailable);
 - atomic Home Manager module/import persistence with fingerprint, journal,
   post-commit evaluation, rollback, and crash recovery (implemented only for
   explicitly marked disposable fixtures; typed diagnostic helper path

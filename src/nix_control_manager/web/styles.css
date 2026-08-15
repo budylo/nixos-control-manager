@@ -222,7 +222,7 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .plan-status { padding: 5px 8px; border-radius: 99px; color: #ffcf7e; background: rgba(255, 202, 115, .1); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .plan-status.passed { color: #9ee8c7; background: rgba(116,228,177,.1); }
 .plan-drawer { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
-.home-adoption-drawer { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.home-adoption-drawer { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
 .candidate-validation { padding: 14px 27px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: rgba(94, 215, 255, .025); }
 .candidate-validation-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--cyan); background: rgba(94, 215, 255, .09); font-size: 12px; }
 .candidate-validation-copy strong, .candidate-validation-copy small { display: block; }

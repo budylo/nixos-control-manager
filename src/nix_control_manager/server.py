@@ -16,7 +16,7 @@ import webbrowser
 from .catalog import load_catalog, load_settings_catalog
 from .adoption import plan_adoption
 from .candidate import validate_adoption
-from .candidate_build import CandidateBuildManager
+from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
 from .errors import NcmError, ValidationError
 from .home_manager_adoption import (
     plan_home_manager_adoption,
@@ -44,6 +44,12 @@ from .ui_helper import HelperUiAdapter, HelperUiError
 MAX_REQUEST_BYTES = 1_000_000
 _BUILD_JOB_PATH = re.compile(r"^/api/build-preview/([0-9a-f]{24})$")
 _BUILD_CANCEL_PATH = re.compile(r"^/api/build-preview/([0-9a-f]{24})/cancel$")
+_HOME_BUILD_JOB_PATH = re.compile(
+    r"^/api/home-manager/build-preview/([0-9a-f]{24})$"
+)
+_HOME_BUILD_CANCEL_PATH = re.compile(
+    r"^/api/home-manager/build-preview/([0-9a-f]{24})/cancel$"
+)
 
 
 class NcmServer(ThreadingHTTPServer):
@@ -64,6 +70,7 @@ class NcmServer(ThreadingHTTPServer):
         helper_adapter: HelperUiAdapter | None = None,
         build_timeout: int = 3_600,
         build_manager: CandidateBuildManager | None = None,
+        home_manager_build_manager: HomeManagerBuildManager | None = None,
         settings_inspector: Callable[
             ..., EffectiveSettingsInspection
         ] = inspect_effective_settings,
@@ -89,10 +96,25 @@ class NcmServer(ThreadingHTTPServer):
             flake_target=flake_target,
             timeout=build_timeout,
         )
+        self.home_manager_build_manager = (
+            home_manager_build_manager
+            or HomeManagerBuildManager(
+                config_root=config_root,
+                standalone_root=self.home_manager_root,
+                user_state_path=self.user_state_path,
+                flake_target=flake_target,
+                validation_timeout=validation_timeout,
+                timeout=build_timeout,
+                inspector=home_manager_inspector,
+                planner=home_manager_planner,
+                validator=home_manager_validator,
+            )
+        )
         self.token = secrets.token_urlsafe(32)
 
     def server_close(self) -> None:
         self.build_manager.close()
+        self.home_manager_build_manager.close()
         super().server_close()
 
 
@@ -140,11 +162,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _read_state(self) -> ManagedState:
         return ManagedState.from_mapping(self._read_json_object())
 
-    def _home_candidate(self):
+    def _home_candidate(self, *, include_fingerprint: bool = False):
         payload = self._read_json_object()
-        if set(payload) != {"username", "integration", "packages"}:
+        required = {"username", "integration", "packages"}
+        if include_fingerprint:
+            required.add("planFingerprint")
+        if set(payload) != required:
             raise ValidationError(
-                "Home Manager candidate requires username, integration, and packages"
+                "Home Manager candidate requires " + ", ".join(sorted(required))
             )
         username = payload["username"]
         integration = payload["integration"]
@@ -180,6 +205,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             integration=integration,
             packages=packages,
         )
+        if include_fingerprint:
+            fingerprint = payload["planFingerprint"]
+            if not isinstance(fingerprint, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", fingerprint
+            ):
+                raise ValidationError(
+                    "Home Manager build-preview requires a lowercase SHA-256 planFingerprint"
+                )
+            return inspection, state, username, integration, packages, fingerprint
         return inspection, state, username, integration, packages
 
     def _authorized(self) -> bool:
@@ -207,6 +241,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             target = urlsplit(self.path)
             path = target.path
             build_match = _BUILD_JOB_PATH.fullmatch(path)
+            home_build_match = _HOME_BUILD_JOB_PATH.fullmatch(path)
             if path == "/api/config":
                 self._json({"token": self.server.token})
             elif path == "/api/state":
@@ -261,6 +296,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                         after=self._build_cursor(target.query)
                     )
                 )
+            elif path == "/api/home-manager/build-preview":
+                self._json(
+                    self.server.home_manager_build_manager.latest(
+                        after=self._build_cursor(target.query)
+                    )
+                )
+            elif home_build_match:
+                self._json(
+                    self.server.home_manager_build_manager.poll(
+                        home_build_match.group(1),
+                        after=self._build_cursor(target.query),
+                    )
+                )
             elif build_match:
                 self._json(
                     self.server.build_manager.poll(
@@ -283,10 +331,30 @@ class RequestHandler(BaseHTTPRequestHandler):
             target = urlsplit(self.path)
             path = target.path
             cancel_match = _BUILD_CANCEL_PATH.fullmatch(path)
+            home_cancel_match = _HOME_BUILD_CANCEL_PATH.fullmatch(path)
             if target.query:
                 raise ValidationError("POST API endpoints do not accept query parameters")
             if path == "/api/build-preview":
                 self._json(self.server.build_manager.start(), HTTPStatus.ACCEPTED)
+                return
+            if path == "/api/home-manager/build-preview":
+                (
+                    _,
+                    _,
+                    username,
+                    integration,
+                    packages,
+                    fingerprint,
+                ) = self._home_candidate(include_fingerprint=True)
+                self._json(
+                    self.server.home_manager_build_manager.start(
+                        username=username,
+                        integration=integration,
+                        packages=packages,
+                        plan_fingerprint=fingerprint,
+                    ),
+                    HTTPStatus.ACCEPTED,
+                )
                 return
             if path == "/api/home-manager/preview":
                 inspection, state, username, integration, _ = self._home_candidate()
@@ -332,6 +400,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             if cancel_match:
                 self._json(self.server.build_manager.cancel(cancel_match.group(1)))
+                return
+            if home_cancel_match:
+                self._json(
+                    self.server.home_manager_build_manager.cancel(
+                        home_cancel_match.group(1)
+                    )
+                )
                 return
             if path == "/api/validate-adoption":
                 self._json(

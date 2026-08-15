@@ -65,7 +65,13 @@ The generated module remains usable without Nix Control Manager.
     conservative `home.nix` module body. A validator materializes the plan only
     in a disposable copy, parses every changed Nix file, and evaluates an
     available NixOS or standalone-flake derivation without building it.
-15. **Home Manager fixture transaction workflow** reuses the shared atomic
+15. **Home Manager candidate build manager** independently reconstructs the
+    selected plan, repeats disposable validation, and requires the exact
+    client-supplied SHA-256 plan fingerprint. It then builds only the fixed
+    standalone or NixOS-module `activationPackage` target without a result link
+    or lock-file update. The worker streams bounded logs, supports cancellation
+    and timeout, rejects effective UID 0, and never invokes activation.
+16. **Home Manager fixture transaction workflow** reuses the shared atomic
     replacement, journal, rollback, and crash-recovery engine under a distinct
     transaction kind. It accepts only a marked disposable root, a matching
     validation fingerprint and digest set, and a successful evaluation check.
@@ -200,6 +206,14 @@ accepts only a simple multiline imports block, plus the standard standalone
 module body when a new imports block is required. All other shapes stop for
 manual review. Candidate paths are reconstructed beneath the selected root and
 checked for symlinks before temporary materialization.
+
+The Home Manager build-preview API is a separate ownership domain from the
+NixOS system build. A request contains the detected user, integration, package
+selection, and the exact fingerprint returned by validation. The worker
+reconstructs and revalidates that plan before materializing a fresh disposable
+copy. Its result deliberately sets configuration write, activation, test,
+switch, flake-input mutation, and lock-file write capabilities to false; the
+only expected mutation is ordinary unprivileged Nix store population.
 
 The internal fixture workflow does not weaken that public contract. Fixture
 writes require the exact transaction marker and reject `/etc/nixos`,

@@ -294,11 +294,23 @@
         <button id="validateHomeAdoptionButton" class="button secondary compact" type="button">Перевірити тимчасову копію</button>
         <pre id="homeAdoptionValidationLog" class="candidate-validation-log" hidden></pre>
       </section>
+      <section id="homeBuildPreview" class="candidate-validation build-preview">
+        <span id="homeBuildPreviewIcon" class="candidate-validation-icon">▱</span>
+        <div class="candidate-validation-copy">
+          <strong id="homeBuildPreviewTitle">Home Manager build-preview ще не запущено</strong>
+          <small id="homeBuildPreviewDetail">Після успішної перевірки можна непривілейовано зібрати точний activationPackage. Запуск activation або home-manager switch відсутній.</small>
+        </div>
+        <div class="candidate-validation-actions build-preview-actions">
+          <button id="startHomeBuildPreviewButton" class="button secondary compact" type="button" disabled>Зібрати activationPackage</button>
+          <button id="cancelHomeBuildPreviewButton" class="button danger compact" type="button" hidden>Скасувати build</button>
+        </div>
+        <pre id="homeBuildPreviewLog" class="candidate-validation-log build-preview-log" hidden></pre>
+      </section>
       <div class="code-wrap">
         <pre id="homeAdoptionCode"><code>Оберіть користувача та сформуйте план…</code></pre>
       </div>
       <footer>
-        <div class="validation-state"><span>◇</span><div><strong>Запис заборонено</strong><small>Apply, build, activation і flake input mutation відсутні</small></div></div>
+        <div class="validation-state"><span>◇</span><div><strong>Конфігурація й activation захищені</strong><small>Дозволена лише непривілейована збірка у Nix store; apply, activation і flake input mutation відсутні</small></div></div>
         <button id="closeHomeAdoptionFooter" class="button secondary" type="button">Готово</button>
       </footer>
     </aside>

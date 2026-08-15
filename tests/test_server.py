@@ -3,12 +3,17 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from nix_control_manager.server import NcmServer, RequestHandler
-from nix_control_manager.candidate_build import CandidateBuildManager
+from nix_control_manager.candidate_build import CandidateBuildManager, HomeManagerBuildManager
+from nix_control_manager.home_manager_adoption import (
+    home_manager_plan_identity,
+    plan_home_manager_adoption,
+)
 from nix_control_manager.home_manager_inspector import (
     DetectedHomeUser,
     HomeManagerInspection,
@@ -318,6 +323,104 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(validation["writeEnabled"])
         self.assertFalse(validation["buildEnabled"])
         self.assertFalse((root / "ncm").exists())
+
+    def test_home_manager_build_preview_requires_exact_fingerprint_and_streams(self) -> None:
+        root = self.server.config_root
+        root.mkdir()
+        configuration = root / "configuration.nix"
+        original = (
+            "{ ... }:\n{\n  imports = [\n  ];\n"
+            "  home-manager.users.alice = ./alice.nix;\n}\n"
+        )
+        configuration.write_text(original, encoding="utf-8")
+        (root / "flake.nix").write_text(
+            '{ outputs = _: { nixosConfigurations.desktop = null; }; }\n',
+            encoding="utf-8",
+        )
+        inspection = self.server.home_manager_inspector(
+            root,
+            standalone_root=self.server.home_manager_root,
+            user_state_path=self.server.user_state_path,
+        )
+        plan = plan_home_manager_adoption(
+            root,
+            standalone_root=self.server.home_manager_root,
+            user_state_path=self.server.user_state_path,
+            username="alice",
+            integration="nixos-module",
+            packages=("firefox", "git"),
+            inspection=inspection,
+        )
+        fingerprint, _ = home_manager_plan_identity(plan, "desktop")
+
+        def executor(command, cwd, cancel_event, line_sink):
+            line_sink("stderr", "streamed Home Manager build line")
+            output = "/nix/store/" + "d" * 32 + "-home-manager-generation"
+            line_sink("stdout", output)
+            return 0, (output,)
+
+        self.server.home_manager_build_manager.close()
+        def validator(candidate, **kwargs):
+            candidate_fingerprint, _ = home_manager_plan_identity(
+                candidate, "desktop"
+            )
+            return SimpleNamespace(
+                status="passed",
+                flake_target="desktop",
+                plan_fingerprint=candidate_fingerprint,
+                working_copy_removed=True,
+            )
+
+        self.server.home_manager_build_manager = HomeManagerBuildManager(
+            config_root=root,
+            standalone_root=self.server.home_manager_root,
+            user_state_path=self.server.user_state_path,
+            flake_target="desktop",
+            executor=executor,
+            which=lambda name: f"/tools/{name}",
+            path_is_dir=lambda _: True,
+            inspector=self.server.home_manager_inspector,
+            validator=validator,
+        )
+        payload = {
+            "username": "alice",
+            "integration": "nixos-module",
+            "packages": ["firefox", "git"],
+            "planFingerprint": fingerprint,
+        }
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/home-manager/build-preview", method="POST", body=payload
+            )
+        self.assertEqual(context.exception.code, 403)
+        context.exception.close()
+
+        started = self.request_json(
+            "/api/home-manager/build-preview",
+            method="POST",
+            token=self.server.token,
+            body=payload,
+        )
+        job_id = started["jobId"]
+        deadline = time.monotonic() + 3
+        result = started
+        while result["cancellable"] and time.monotonic() < deadline:
+            result = self.request_json(
+                f"/api/home-manager/build-preview/{job_id}?after={result['nextCursor']}"
+            )
+            time.sleep(0.01)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["workflow"], "home-manager")
+        self.assertFalse(result["configurationWriteEnabled"])
+        self.assertFalse(result["homeManagerActivationEnabled"])
+        self.assertFalse(result["activationPreviewReady"])
+        self.assertEqual(configuration.read_text(encoding="utf-8"), original)
+        self.assertFalse((root / "ncm").exists())
+        latest = self.request_json("/api/home-manager/build-preview")
+        self.assertEqual(latest["jobId"], job_id)
+        self.assertEqual(latest["activationPackagePath"], result["outputPaths"][0])
 
     def test_candidate_validation_is_authorized_and_never_enables_activation(self) -> None:
         with self.assertRaises(HTTPError) as context:
