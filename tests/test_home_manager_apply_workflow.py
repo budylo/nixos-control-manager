@@ -101,6 +101,12 @@ class HomeManagerFixtureApplyWorkflowTests(unittest.TestCase):
             (self.root / "configuration.nix").read_text(encoding="utf-8"),
         )
         self.assertTrue((self.root / "ncm" / "managed-home-alice.nix").is_file())
+        persisted_state = json.loads(
+            (self.root / "ncm" / "user-state.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            persisted_state["users"]["alice"]["packages"], ["firefox", "git"]
+        )
         manifest = self.only_manifest()
         self.assertEqual(manifest["state"], "committed")
         self.assertEqual(manifest["transactionKind"], "home-manager-adoption")
@@ -156,7 +162,7 @@ class HomeManagerFixtureApplyWorkflowTests(unittest.TestCase):
                 plan,
                 validation,
                 journal_root=self.journal,
-                fault_after_commits=2,
+                fault_after_commits=3,
                 simulate_crash=True,
             )
         self.assertNotEqual(
@@ -230,6 +236,7 @@ class HomeManagerFixtureApplyWorkflowTests(unittest.TestCase):
             "./ncm/managed-home-alice.nix",
             (self.root / "home.nix").read_text(encoding="utf-8"),
         )
+        self.assertTrue((self.root / "ncm" / "user-state.json").is_file())
         self.assertEqual(self.only_manifest()["transactionKind"], "home-manager-adoption")
 
 

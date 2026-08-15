@@ -69,9 +69,10 @@ The generated module remains usable without Nix Control Manager.
     replacement, journal, rollback, and crash-recovery engine under a distinct
     transaction kind. It accepts only a marked disposable root, a matching
     validation fingerprint and digest set, and a successful evaluation check.
-    After provisional commit it reconstructs a no-changes plan and evaluates
-    the installed fixture before finalization. No application endpoint exposes
-    this workflow.
+    The exact file set includes canonical `ncm/user-state.json`. After
+    provisional commit it reconstructs a no-changes plan and evaluates the
+    installed fixture before finalization. No application endpoint exposes this
+    workflow.
 
 The read-only system inspector identifies NixOS, channel/flake entrypoints, an
 existing managed-module import, and state compatibility. Detection is
@@ -180,17 +181,17 @@ System state and Home Manager user-state are different ownership domains. The
 system schema drives `managed.nix`; user-state schema version 1 contains a map
 of user profiles, each with an explicit `nixos-module` or `standalone`
 integration, package attribute paths, and typed option values. The latter is
-currently validation-and-preview only. A token-protected HTTP request may carry
-one package candidate, but the response explicitly remains read-only and no
-storage call, source adoption, flake-input edit, build, or activation path is
-connected to it.
+stored canonically as `ncm/user-state.json` in the selected configuration root.
+A token-protected HTTP request may carry one package candidate, but the response
+explicitly remains read-only and no live storage call, source adoption,
+flake-input edit, build, or activation path is connected to it.
 
 The generated user source has the portable Home Manager module shape
 `{ pkgs, ... }: { home.packages = [ ... ]; }`. It deliberately does not encode
 the NixOS-module or standalone wiring, so a later adoption plan can show the
-appropriate import separately. The future output path is derived from the
-validated user name and server-owned user-state directory; clients cannot
-submit a path.
+appropriate import separately. The output path is derived from the validated
+user name and canonical state directory inside the selected root; clients
+cannot submit a path.
 
 Home Manager adoption plans expose `safeToValidate`, never `safeToApply`.
 Existing files under the future `ncm/` directory must carry the generated NCM
@@ -206,7 +207,9 @@ writes require the exact transaction marker and reject `/etc/nixos`,
 journal is outside the configuration root and records
 `transactionKind = "home-manager-adoption"`; generic recovery can therefore
 restore an interrupted Home Manager provisional commit without a separate file
-mutation implementation.
+mutation implementation. The legacy external state is never deleted or edited;
+its compatible profiles are migration input only when canonical state is
+missing them.
 
 Home Manager detection does not evaluate arbitrary source and does not infer
 dynamic attribute names. It recognizes a narrow set of documented static forms

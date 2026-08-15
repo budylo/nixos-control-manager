@@ -241,7 +241,7 @@ class ServerTests(unittest.TestCase):
 
     def test_home_manager_preview_is_detected_user_only_and_never_writes(self) -> None:
         user_state_path = self.server.user_state_path
-        output_path = user_state_path.parent / "managed-home-alice.nix"
+        output_path = self.server.config_root / "ncm" / "managed-home-alice.nix"
         result = self.request_json(
             "/api/home-manager/preview",
             method="POST",
@@ -298,7 +298,8 @@ class ServerTests(unittest.TestCase):
             body=payload,
         )
         self.assertEqual(plan["status"], "ready")
-        self.assertEqual(len(plan["changes"]), 3)
+        self.assertEqual(len(plan["changes"]), 4)
+        self.assertIn("ncm/user-state.json", plan["combinedDiff"])
         self.assertIn("home-manager-alice.nix", plan["combinedDiff"])
         self.assertFalse(plan["safeToApply"])
         self.assertFalse(plan["writeEnabled"])

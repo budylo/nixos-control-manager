@@ -213,8 +213,9 @@
               and .safeToValidate == true
               and .safeToApply == false
               and .writeEnabled == false
-              and (.changes | length) == 3
+              and (.changes | length) == 4
               and (.combinedDiff | contains("home-manager-fixture-user.nix"))
+              and (.combinedDiff | contains("ncm/user-state.json"))
             ' adoption.json
             test ! -e fixture/etc-nixos/ncm
             ncm validate-home-manager-adoption \
@@ -229,7 +230,7 @@
               .status == "passed"
               and .workingCopyRemoved == true
               and (.planFingerprint | length) == 64
-              and (.candidateDigests | length) == 2
+              and (.candidateDigests | length) == 3
               and .writeEnabled == false
               and .buildEnabled == false
               and .activationEnabled == false

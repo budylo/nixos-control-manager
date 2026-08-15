@@ -44,8 +44,9 @@ This repository currently contains the first vertical slice:
   standalone imports, plus disposable-copy parse/evaluation. No apply endpoint
   exists and every validation result confirms that build and activation are off.
 - a fault-tested Home Manager transaction workflow that can write the validated
-  module/import set only inside an explicitly marked disposable fixture. It has
-  no CLI, HTTP, GUI, helper, live-write, build, or activation endpoint.
+  module/import set and canonical `ncm/user-state.json` only inside an explicitly
+  marked disposable fixture. It has no CLI, HTTP, GUI, helper, live-write,
+  build, or activation endpoint.
 
 ## Try it
 
@@ -78,8 +79,8 @@ nix build
 The server listens only on `127.0.0.1`. By default it stores the system UI state
 in `state.local.json`, inspects the separate `user-state.local.json`, and
 generates `managed.local.nix` in the current directory. These local files are
-ignored by Git. The Home Manager state is currently read-only and is never
-created implicitly.
+ignored by Git. The external Home Manager state remains a read-only legacy
+migration source; no live state file is created implicitly.
 
 ## CLI
 
@@ -188,10 +189,11 @@ otherwise the transaction is rolled back.
 
 The same journal engine now has a separate Home Manager transaction kind. It
 requires a fingerprint-bound validation with a successful evaluation check,
-commits only the exact planned NixOS-module or standalone files, reconstructs a
-no-changes plan from the installed fixture, and evaluates it again before
-finalization. User-state persistence and every live Home Manager write remain
-unimplemented.
+commits only the exact planned NixOS-module or standalone files, including
+canonical `ncm/user-state.json`, reconstructs a no-changes plan from the
+installed fixture, and evaluates it again before finalization. The state file
+participates in the same fingerprint, commit, and rollback as the Nix files;
+every live Home Manager write remains unimplemented.
 
 The helper protocol is documented in
 [`docs/helper-protocol.md`](docs/helper-protocol.md). Its Unix transport and
@@ -293,6 +295,12 @@ top-level import. In standalone mode it proposes one import from a standard
 `home.nix`. Existing non-NCM files are never replaced, and unfamiliar or inline
 module layouts stop at manual review.
 
+The same exact plan includes a deterministic `ncm/user-state.json` beside the
+managed modules. If the canonical file is absent, compatible profiles from the
+legacy external `user-state.local.json` are copied into the candidate while the
+legacy source remains untouched. A valid canonical file is authoritative;
+conflicting canonical files across separate roots fail closed.
+
 Validation copies the selected configuration root to a temporary directory,
 materializes the exact candidates there, parses every changed Nix file, and
 evaluates the NixOS system or standalone flake derivation when the corresponding
@@ -302,11 +310,11 @@ source writes, lock-file writes, and flake-input changes remain disabled.
 
 System and user ownership remain intentionally separate. System packages and
 NixOS options continue to live in `state.local.json` and `managed.local.nix`;
-future per-user Home Manager packages and options belong to
-`user-state.local.json` and a distinct generated user module. This phase can
-render that state and module as candidates, but still has no user-state save
-endpoint, source-writing operation, Home Manager build or activation, or
-flake-input mutation.
+per-user Home Manager packages and options belong to the selected configuration
+root's `ncm/user-state.json` and distinct generated user modules. The internal
+fixture workflow commits them atomically, but the application still has no
+user-state save endpoint, live source-writing operation, Home Manager build or
+activation, or flake-input mutation.
 
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).

@@ -97,6 +97,79 @@ class HomeManagerInspectorTests(unittest.TestCase):
         self.assertEqual(invalid.user_state.status, "invalid")
         self.assertTrue(invalid.warnings)
 
+    def test_canonical_state_is_discovered_and_overrides_legacy_profile(self) -> None:
+        self.standalone.mkdir()
+        (self.standalone / "home.nix").write_text(
+            '{ ... }: { home.username = "dana"; }\n', encoding="utf-8"
+        )
+        self.state.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "users": {
+                        "dana": {
+                            "integration": "standalone",
+                            "packages": ["git"],
+                            "options": {},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        canonical = self.standalone / "ncm" / "user-state.json"
+        canonical.parent.mkdir()
+        canonical.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "users": {
+                        "dana": {
+                            "integration": "standalone",
+                            "packages": ["firefox"],
+                            "options": {},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        inspection = self.inspect()
+
+        self.assertEqual(inspection.user_state.path, canonical.resolve())
+        self.assertEqual(
+            inspection.user_state.state.users["dana"].packages, ("firefox",)
+        )
+        self.assertEqual(
+            inspection.user_state.sources, (canonical.resolve(), self.state.resolve())
+        )
+        self.assertIn("overrides legacy", inspection.user_state.warning)
+
+    def test_conflicting_canonical_roots_fail_closed(self) -> None:
+        config_state = self.config / "ncm" / "user-state.json"
+        standalone_state = self.standalone / "ncm" / "user-state.json"
+        config_state.parent.mkdir()
+        standalone_state.parent.mkdir(parents=True)
+        profile = {
+            "schemaVersion": 1,
+            "users": {
+                "alice": {
+                    "integration": "nixos-module",
+                    "packages": ["git"],
+                    "options": {},
+                }
+            },
+        }
+        config_state.write_text(json.dumps(profile), encoding="utf-8")
+        profile["users"]["alice"]["packages"] = ["firefox"]
+        standalone_state.write_text(json.dumps(profile), encoding="utf-8")
+
+        inspection = self.inspect()
+
+        self.assertEqual(inspection.user_state.status, "invalid")
+        self.assertIn("Conflicting canonical profiles", inspection.user_state.warning)
+
 
 if __name__ == "__main__":
     unittest.main()

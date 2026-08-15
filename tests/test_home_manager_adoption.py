@@ -61,6 +61,7 @@ class HomeManagerAdoptionTests(unittest.TestCase):
             [
                 "configuration.nix",
                 "ncm/managed-home-alice.nix",
+                "ncm/user-state.json",
                 "ncm/home-manager-alice.nix",
             ],
         )
@@ -85,11 +86,50 @@ class HomeManagerAdoptionTests(unittest.TestCase):
         self.assertEqual(plan.status, "ready")
         self.assertEqual(
             [change.relative_path for change in plan.changes],
-            ["home.nix", "ncm/managed-home-alice.nix"],
+            ["home.nix", "ncm/managed-home-alice.nix", "ncm/user-state.json"],
         )
         self.assertIn("imports = [", plan.changes[0].candidate)
         self.assertIn("./ncm/managed-home-alice.nix", plan.changes[0].candidate)
         self.assertEqual(home.read_text(encoding="utf-8"), original)
+
+    def test_legacy_state_is_migrated_to_canonical_candidate_without_source_write(self) -> None:
+        self.standalone.mkdir()
+        (self.standalone / "home.nix").write_text(
+            '{ ... }:\n{\n  home.username = "alice";\n}\n', encoding="utf-8"
+        )
+        original_state = (
+            '{"schemaVersion":1,"users":{"alice":{"integration":"standalone",'
+            '"packages":["git"],"options":{"programs.git.enable":true}}}}'
+        )
+        self.state.write_text(original_state, encoding="utf-8")
+
+        plan = self.plan(integration="standalone")
+
+        state_change = next(
+            change
+            for change in plan.changes
+            if change.relative_path == "ncm/user-state.json"
+        )
+        self.assertIn('"programs.git.enable": true', state_change.candidate)
+        self.assertIn('"firefox"', state_change.candidate)
+        self.assertTrue(any("Legacy user-state" in item for item in plan.warnings))
+        self.assertEqual(self.state.read_text(encoding="utf-8"), original_state)
+        self.assertFalse((self.standalone / "ncm").exists())
+
+    def test_invalid_canonical_state_requires_manual_review(self) -> None:
+        self.standalone.mkdir()
+        (self.standalone / "home.nix").write_text(
+            '{ ... }:\n{\n  home.username = "alice";\n}\n', encoding="utf-8"
+        )
+        canonical = self.standalone / "ncm" / "user-state.json"
+        canonical.parent.mkdir()
+        canonical.write_text("not-json", encoding="utf-8")
+
+        plan = self.plan(integration="standalone")
+
+        self.assertEqual(plan.status, "blocked")
+        self.assertEqual(plan.changes, ())
+        self.assertTrue(any("Invalid user-state" in item for item in plan.warnings))
 
     def test_nonstandard_standalone_and_unowned_collision_require_manual_review(self) -> None:
         self.standalone.mkdir()
@@ -135,10 +175,10 @@ class HomeManagerAdoptionTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "passed")
-        self.assertEqual(len(result.checks), 4)
+        self.assertEqual(len(result.checks), 5)
         self.assertIn("Evaluate NixOS", result.checks[-1].name)
         self.assertEqual(len(result.plan_fingerprint or ""), 64)
-        self.assertEqual(len(result.candidate_digests), 3)
+        self.assertEqual(len(result.candidate_digests), 4)
         self.assertTrue(all(not path.exists() for path in working))
         self.assertEqual(configuration.read_text(encoding="utf-8"), original)
         self.assertFalse(result.to_mapping()["buildEnabled"])

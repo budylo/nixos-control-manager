@@ -27,7 +27,11 @@ from .home_manager_generator import (
     candidate_user_state,
     user_module_path,
 )
-from .home_manager_inspector import HomeManagerInspection, inspect_home_manager
+from .home_manager_inspector import (
+    HomeManagerInspection,
+    inspect_home_manager,
+    managed_user_state_path,
+)
 from .model import ManagedState
 from .nix_generator import generate_module
 from .preview import build_preview
@@ -285,13 +289,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(self.server.build_manager.start(), HTTPStatus.ACCEPTED)
                 return
             if path == "/api/home-manager/preview":
-                _, state, username, _, _ = self._home_candidate()
+                inspection, state, username, integration, _ = self._home_candidate()
+                root = (
+                    inspection.config_root
+                    if integration == "nixos-module"
+                    else inspection.standalone_root
+                )
                 self._json(
                     build_home_preview(
                         state,
                         username=username,
                         output_path=user_module_path(
-                            self.server.user_state_path, username
+                            managed_user_state_path(root), username
                         ),
                     )
                 )

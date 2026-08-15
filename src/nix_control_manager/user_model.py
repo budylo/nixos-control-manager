@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+import json
 import re
 
 from .errors import ValidationError
@@ -149,3 +150,12 @@ class UserManagedState:
                 for username, profile in self.users.items()
             },
         }
+
+
+def serialize_user_state(state: UserManagedState) -> str:
+    return json.dumps(
+        state.to_mapping(),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"

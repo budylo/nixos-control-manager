@@ -928,9 +928,9 @@ function renderHomeManager() {
     ? `${state.profileCount} керованих профілів · схема ${state.state?.schemaVersion}`
     : state.status === "invalid"
       ? (state.warning || "Файл не буде використано до ручного виправлення.")
-      : "Системний state залишається окремим. Створення цього файла буде окремою явно підтвердженою дією на наступному етапі.";
+      : "Канонічний ncm/user-state.json ще відсутній; зовнішній legacy state використовується лише як джерело міграції.";
   const boundary = document.createElement("small");
-  boundary.textContent = "Запис вимкнено · активація вимкнена · flake inputs не змінюються";
+  boundary.textContent = "Запис у вебзастосунку вимкнено · активація вимкнена · flake inputs не змінюються";
   stateCard.append(title, path, detail, boundary);
   ui.homeManagerState.replaceChildren(stateCard);
   renderHomeManagerPackages();

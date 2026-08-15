@@ -1,7 +1,7 @@
 import unittest
 
 from nix_control_manager.errors import ValidationError
-from nix_control_manager.user_model import UserManagedState
+from nix_control_manager.user_model import UserManagedState, serialize_user_state
 
 
 class UserManagedStateTests(unittest.TestCase):
@@ -30,6 +30,10 @@ class UserManagedStateTests(unittest.TestCase):
         profile = state.users["alice@laptop"]
         self.assertEqual(profile.packages, ("firefox", "git"))
         self.assertTrue(profile.options["programs.git.enable"])
+        serialized = serialize_user_state(state)
+        self.assertTrue(serialized.endswith("\n"))
+        self.assertEqual(serialized, serialize_user_state(state))
+        self.assertIn('"schemaVersion": 1', serialized)
 
     def test_rejects_invalid_users_profiles_and_future_schema(self) -> None:
         cases = (

@@ -17,8 +17,13 @@ from typing import Any, Callable, Sequence
 from .adoption import PlannedFileChange
 from .errors import ValidationError
 from .home_manager_generator import candidate_user_state, generate_home_module
-from .home_manager_inspector import HomeManagerInspection, inspect_home_manager
-from .user_model import validate_user_name
+from .home_manager_inspector import (
+    HomeManagerInspection,
+    inspect_home_manager,
+    load_user_state,
+    managed_user_state_path,
+)
+from .user_model import UserManagedState, serialize_user_state, validate_user_name
 
 
 _SAFE_IMPORTS_LINE = re.compile(r"(?m)^(?P<indent>[ \t]*)imports\s*=\s*\[\s*(?:#.*)?$")
@@ -318,6 +323,11 @@ def plan_home_manager_adoption(
         return HomeManagerAdoptionPlan(
             "blocked", username, integration, root, (), tuple(warnings), empty_state
         )
+    if not root.is_dir():
+        warnings.append("The selected Home Manager configuration root is unavailable.")
+        return HomeManagerAdoptionPlan(
+            "blocked", username, integration, root, (), tuple(warnings), empty_state
+        )
     previous = inspection.user_state.state.users.get(username)
     if previous is not None and previous.integration != integration:
         warnings.append("Detected integration conflicts with the existing user-state profile.")
@@ -325,17 +335,44 @@ def plan_home_manager_adoption(
             "blocked", username, integration, root, (), tuple(warnings), empty_state
         )
 
+    canonical_state_path = managed_user_state_path(root)
+    if _crosses_symlink(root, canonical_state_path):
+        warnings.append("The canonical user-state path crosses a symbolic link.")
+        return HomeManagerAdoptionPlan(
+            "manual", username, integration, root, (), tuple(warnings), empty_state
+        )
+    canonical_state = load_user_state(canonical_state_path)
+    if canonical_state.status == "invalid":
+        warnings.append("The canonical ncm/user-state.json is invalid or unreadable.")
+        return HomeManagerAdoptionPlan(
+            "manual", username, integration, root, (), tuple(warnings), empty_state
+        )
+
+    root_users = dict(canonical_state.state.users)
+    roots_are_shared = inspection.config_root == inspection.standalone_root
+    migrated = False
+    for detected_name, profile in inspection.user_state.state.users.items():
+        if detected_name in root_users:
+            continue
+        if roots_are_shared or profile.integration == integration:
+            root_users[detected_name] = profile
+            migrated = True
+    base_state = UserManagedState(
+        schema_version=inspection.user_state.state.schema_version,
+        users=root_users,
+    )
+    if migrated:
+        warnings.append(
+            "Legacy user-state profiles will be copied into ncm/user-state.json; "
+            "the legacy source remains unchanged."
+        )
+
     state = candidate_user_state(
-        inspection.user_state.state,
+        base_state,
         username=username,
         integration=integration,
         packages=packages,
     )
-    if not root.is_dir():
-        warnings.append("The selected Home Manager configuration root is unavailable.")
-        return HomeManagerAdoptionPlan(
-            "blocked", username, integration, root, (), tuple(warnings), state.to_mapping()
-        )
 
     managed_dir = root / "ncm"
     managed_path = managed_dir / f"managed-home-{username}.nix"
@@ -354,6 +391,14 @@ def plan_home_manager_adoption(
     )
     if module_change:
         changes.append(module_change)
+    state_change = _file_change(
+        root,
+        canonical_state_path,
+        serialize_user_state(state),
+        "Persist the versioned Home Manager user-state beside managed modules",
+    )
+    if state_change:
+        changes.append(state_change)
 
     if integration == "nixos-module":
         wiring_path = managed_dir / f"home-manager-{username}.nix"
@@ -547,6 +592,28 @@ def validate_home_manager_adoption(
                         cwd=candidate_root,
                         timeout=timeout,
                         runner=runner,
+                    )
+                    checks.append(check)
+                    if check.status != "passed":
+                        break
+                elif relative.as_posix() == "ncm/user-state.json":
+                    started = time.monotonic()
+                    try:
+                        UserManagedState.from_mapping(
+                            json.loads(candidate.read_text(encoding="utf-8"))
+                        )
+                        status = "passed"
+                        error = ""
+                    except (OSError, json.JSONDecodeError, ValidationError) as exception:
+                        status = "failed"
+                        error = str(exception)
+                    check = HomeManagerValidationCheck(
+                        "Validate ncm/user-state.json schema",
+                        status,
+                        (),
+                        0 if status == "passed" else 1,
+                        round((time.monotonic() - started) * 1000),
+                        stderr=error,
                     )
                     checks.append(check)
                     if check.status != "passed":

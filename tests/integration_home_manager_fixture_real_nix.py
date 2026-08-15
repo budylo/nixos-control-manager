@@ -62,7 +62,13 @@ def main() -> int:
     if result.state != "committed":
         raise RuntimeError(f"Home Manager fixture transaction failed: {result.to_mapping()}")
     if state.exists():
-        raise RuntimeError("Fixture workflow unexpectedly persisted user-state")
+        raise RuntimeError("Fixture workflow unexpectedly changed legacy user-state")
+    canonical_state = args.root / "ncm" / "user-state.json"
+    if not canonical_state.is_file():
+        raise RuntimeError("Canonical Home Manager user-state was not committed")
+    persisted = json.loads(canonical_state.read_text(encoding="utf-8"))
+    if persisted["users"]["fixture-user"]["packages"] != ["git"]:
+        raise RuntimeError("Canonical Home Manager user-state content is incorrect")
     if not (args.root / "ncm" / "managed-home-fixture-user.nix").is_file():
         raise RuntimeError("Managed Home Manager module was not committed")
 

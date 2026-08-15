@@ -92,8 +92,8 @@
 
 - read-only discovery of Home Manager in NixOS-module and standalone modes,
   including statically identifiable users and source files (implemented);
-- separate versioned user-state model with explicit integration per user and
-  no write or activation path (implemented foundation);
+- separate versioned user-state model with explicit integration per user and a
+  canonical per-root path (implemented; live writes remain disabled);
 - deterministic per-user Home Manager module and diff preview, restricted to
   an exactly detected user/integration and with all writes disabled
   (implemented);
@@ -102,7 +102,9 @@
 - atomic Home Manager module/import persistence with fingerprint, journal,
   post-commit evaluation, rollback, and crash recovery (implemented only for
   explicitly marked disposable fixtures; no CLI/HTTP/helper/live endpoint);
-- Home Manager user-state and live managed-module persistence (not implemented);
+- atomic canonical user-state persistence in the same marked-fixture
+  transaction as modules/imports (implemented; legacy source remains read-only);
+- Home Manager live managed-module and user-state persistence (not implemented);
 - user/system package scope (separate catalog selection and preview implemented;
   persistence remains);
 - profiles and reusable presets.

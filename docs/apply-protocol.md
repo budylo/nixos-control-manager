@@ -42,8 +42,9 @@ both NixOS-module and standalone plans. It requires a successful full evaluation
 in addition to parse checks, binds the exact root, user, integration, candidate
 state, target and file digests into the fingerprint, and performs a second
 evaluation after provisional commit. This path remains internal and
-fixture-only; Home Manager user-state persistence is not part of the
-transaction yet.
+fixture-only. Canonical `ncm/user-state.json` is validated and committed in the
+same transaction as the module and import changes; external legacy state is
+never modified.
 
 The fixture helper receives a short-lived UID-bound validation receipt through
 the versioned Unix-socket protocol. It reconstructs the adoption plan from its

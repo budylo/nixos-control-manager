@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,7 +15,7 @@ from .home_manager_adoption import (
     plan_home_manager_adoption,
     validate_home_manager_adoption,
 )
-from .home_manager_inspector import UserStateInspection, inspect_home_manager
+from .home_manager_inspector import inspect_home_manager, managed_user_state_path
 from .transaction import (
     SimulatedTransactionCrash,
     TransactionResult,
@@ -57,16 +57,12 @@ def _installed_plan(plan: HomeManagerAdoptionPlan) -> HomeManagerAdoptionPlan:
     if profile is None or profile.integration != plan.integration:
         raise TransactionError("The Home Manager candidate state no longer matches the plan")
 
-    state_path = plan.root / ".ncm-installed-user-state.json"
+    state_path = managed_user_state_path(plan.root)
     inspection = inspect_home_manager(
         plan.root,
         standalone_root=plan.root,
         user_state_path=state_path,
         current_user=plan.username,
-    )
-    inspection = replace(
-        inspection,
-        user_state=UserStateInspection("current", state_path, state),
     )
     return plan_home_manager_adoption(
         plan.root,

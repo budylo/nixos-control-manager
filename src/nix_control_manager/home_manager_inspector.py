@@ -40,6 +40,7 @@ class UserStateInspection:
     path: Path
     state: UserManagedState
     warning: str | None = None
+    sources: tuple[Path, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -48,6 +49,7 @@ class UserStateInspection:
             "profileCount": len(self.state.users),
             "state": self.state.to_mapping(),
             "warning": self.warning,
+            "sources": [str(source) for source in self.sources],
         }
 
 
@@ -128,15 +130,82 @@ def _nix_files(root: Path) -> list[Path]:
     return files
 
 
-def _load_user_state(path: Path) -> UserStateInspection:
+def load_user_state(path: Path) -> UserStateInspection:
     if not path.is_file():
         return UserStateInspection("missing", path, UserManagedState.empty())
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         state = UserManagedState.from_mapping(raw)
     except (OSError, json.JSONDecodeError, ValidationError) as error:
-        return UserStateInspection("invalid", path, UserManagedState.empty(), str(error))
-    return UserStateInspection("current", path, state)
+        return UserStateInspection(
+            "invalid", path, UserManagedState.empty(), str(error), (path,)
+        )
+    return UserStateInspection("current", path, state, sources=(path,))
+
+
+def managed_user_state_path(root: Path) -> Path:
+    return root.expanduser().resolve() / "ncm" / "user-state.json"
+
+
+def _merge_user_states(
+    legacy: UserStateInspection,
+    canonical: tuple[UserStateInspection, ...],
+) -> UserStateInspection:
+    present = tuple(item for item in canonical if item.status != "missing")
+    if not present:
+        return legacy
+    invalid = next((item for item in present if item.status == "invalid"), None)
+    if invalid is not None:
+        return UserStateInspection(
+            "invalid",
+            invalid.path,
+            UserManagedState.empty(),
+            f"Canonical user-state is invalid: {invalid.warning}",
+            tuple(item.path for item in present),
+        )
+
+    users = {}
+    warnings: list[str] = []
+    sources: list[Path] = []
+    for item in present:
+        sources.append(item.path)
+        for username, profile in item.state.users.items():
+            previous = users.get(username)
+            if previous is not None and previous != profile:
+                return UserStateInspection(
+                    "invalid",
+                    item.path,
+                    UserManagedState.empty(),
+                    f"Conflicting canonical profiles for user {username!r}",
+                    tuple(sources),
+                )
+            users[username] = profile
+
+    if legacy.status == "current":
+        if legacy.path not in sources:
+            sources.append(legacy.path)
+        for username, profile in legacy.state.users.items():
+            previous = users.get(username)
+            if previous is None:
+                users[username] = profile
+            elif previous != profile:
+                warnings.append(
+                    f"Canonical profile for {username!r} overrides legacy user-state"
+                )
+    elif legacy.status == "invalid":
+        warnings.append("Invalid legacy user-state was ignored because canonical state exists")
+
+    state = UserManagedState(
+        schema_version=present[0].state.schema_version,
+        users=users,
+    )
+    return UserStateInspection(
+        "current",
+        present[0].path,
+        state,
+        "; ".join(warnings) if warnings else None,
+        tuple(sources),
+    )
 
 
 def inspect_home_manager(
@@ -201,9 +270,19 @@ def inspect_home_manager(
         warnings.append(
             "Home Manager integration was detected, but no user could be identified statically."
         )
-    user_state = _load_user_state(state_path)
+    legacy_user_state = load_user_state(state_path)
+    canonical_paths = tuple(
+        dict.fromkeys(
+            (managed_user_state_path(root), managed_user_state_path(standalone))
+        )
+    )
+    user_state = _merge_user_states(
+        legacy_user_state,
+        tuple(load_user_state(path) for path in canonical_paths),
+    )
     if user_state.warning:
-        warnings.append(f"User state cannot be read: {user_state.warning}")
+        prefix = "User state cannot be read" if user_state.status == "invalid" else "User state"
+        warnings.append(f"{prefix}: {user_state.warning}")
     status = "detected" if integrations else "not-detected"
     return HomeManagerInspection(
         status=status,
