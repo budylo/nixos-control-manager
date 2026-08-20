@@ -19,6 +19,9 @@ SUPPORTED_OPERATIONS = frozenset(
         "preview-activation",
         "test-activation",
         "recover-test-activation",
+        "commit-tested-system",
+        "rollback-committed-system",
+        "activation-session-status",
         "apply-validated-plan",
         "recover-transaction",
         "validate-home-manager-plan",
@@ -190,13 +193,20 @@ class ValidatePlanPayload:
     changes: tuple[CandidateFile, ...]
 
     @classmethod
-    def from_mapping(cls, raw: Any) -> "ValidatePlanPayload":
+    def from_mapping(
+        cls, raw: Any, *, allow_empty_changes: bool = False
+    ) -> "ValidatePlanPayload":
         mapping = _mapping(raw, "validate-plan payload")
         _exact_keys(mapping, {"targetId", "planFingerprint", "changes"}, "validate-plan payload")
         changes_raw = mapping["changes"]
-        if not isinstance(changes_raw, list) or not 1 <= len(changes_raw) <= MAX_CHANGES:
+        minimum = 0 if allow_empty_changes else 1
+        if (
+            not isinstance(changes_raw, list)
+            or not minimum <= len(changes_raw) <= MAX_CHANGES
+        ):
             raise HelperProtocolError(
-                "invalid-request", f"changes must contain between 1 and {MAX_CHANGES} items"
+                "invalid-request",
+                f"changes must contain between {minimum} and {MAX_CHANGES} items",
             )
         changes = tuple(CandidateFile.from_mapping(item) for item in changes_raw)
         paths = [change.relative_path for change in changes]
@@ -296,7 +306,8 @@ class PreviewActivationPayload:
                 "targetId": mapping["targetId"],
                 "planFingerprint": mapping["planFingerprint"],
                 "changes": mapping["changes"],
-            }
+            },
+            allow_empty_changes=True,
         )
         system_path = _string(mapping["systemPath"], "systemPath")
         if not _STORE_PATH.fullmatch(system_path):
@@ -364,6 +375,61 @@ class RecoverTestActivationPayload:
         if not _TRANSACTION_ID.fullmatch(session_id):
             raise HelperProtocolError("invalid-request", "sessionId has an invalid format")
         return cls(target_id=_target_id(mapping["targetId"]), session_id=session_id)
+
+
+@dataclass(frozen=True, slots=True)
+class CommitTestedSystemPayload:
+    target_id: str
+    session_id: str
+    plan_fingerprint: str
+    changes: tuple[CandidateFile, ...]
+    system_path: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "CommitTestedSystemPayload":
+        mapping = _mapping(raw, "commit-tested-system payload")
+        _exact_keys(
+            mapping,
+            {"targetId", "sessionId", "planFingerprint", "changes", "systemPath"},
+            "commit-tested-system payload",
+        )
+        preview = PreviewActivationPayload.from_mapping(
+            {
+                "targetId": mapping["targetId"],
+                "planFingerprint": mapping["planFingerprint"],
+                "changes": mapping["changes"],
+                "systemPath": mapping["systemPath"],
+            }
+        )
+        session_id = _string(mapping["sessionId"], "sessionId")
+        if not _TRANSACTION_ID.fullmatch(session_id):
+            raise HelperProtocolError("invalid-request", "sessionId has an invalid format")
+        return cls(
+            target_id=preview.target_id,
+            session_id=session_id,
+            plan_fingerprint=preview.plan_fingerprint,
+            changes=preview.changes,
+            system_path=preview.system_path,
+        )
+
+    def preview_payload(self) -> PreviewActivationPayload:
+        return PreviewActivationPayload(
+            target_id=self.target_id,
+            plan_fingerprint=self.plan_fingerprint,
+            changes=self.changes,
+            system_path=self.system_path,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationSessionPayload:
+    target_id: str
+    session_id: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ActivationSessionPayload":
+        parsed = RecoverTestActivationPayload.from_mapping(raw)
+        return cls(target_id=parsed.target_id, session_id=parsed.session_id)
 
 
 @dataclass(frozen=True, slots=True)

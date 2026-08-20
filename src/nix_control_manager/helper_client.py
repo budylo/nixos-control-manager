@@ -66,14 +66,32 @@ def build_activation_preview_request(
     system_path: str,
     expected_fingerprint: str,
 ) -> dict[str, Any]:
-    request = build_validate_request(
-        config_root, target_id=target_id, flake_target=flake_target
+    plan = plan_adoption(config_root.expanduser().resolve())
+    if not plan.safe_to_apply:
+        raise ValueError(f"No safe adoption candidate is available: {plan.status}")
+    fingerprint, _ = plan_identity(
+        plan, effective_flake_target(plan, flake_target)
     )
-    if request["payload"]["planFingerprint"] != expected_fingerprint:
+    if fingerprint != expected_fingerprint:
         raise ValueError("The adoption plan changed after the candidate build")
-    request["operation"] = "preview-activation"
-    request["payload"]["systemPath"] = system_path
-    return request
+    return _request(
+        "preview-activation",
+        {
+            "targetId": target_id,
+            "planFingerprint": fingerprint,
+            "systemPath": system_path,
+            "changes": [
+                {
+                    "relativePath": change.relative_path,
+                    "action": change.action,
+                    "previousSha256": change.previous_sha256,
+                    "candidateSha256": change.candidate_sha256,
+                    "candidate": change.candidate,
+                }
+                for change in plan.changes
+            ],
+        },
+    )
 
 
 def build_home_manager_validate_request(
@@ -187,6 +205,41 @@ def build_test_recovery_request(*, target_id: str, session_id: str) -> dict[str,
     }
 
 
+def build_commit_tested_system_request(
+    config_root: Path,
+    *,
+    target_id: str,
+    flake_target: str | None,
+    system_path: str,
+    expected_fingerprint: str,
+    session_id: str,
+) -> dict[str, Any]:
+    request = build_activation_preview_request(
+        config_root,
+        target_id=target_id,
+        flake_target=flake_target,
+        system_path=system_path,
+        expected_fingerprint=expected_fingerprint,
+    )
+    request["operation"] = "commit-tested-system"
+    request["payload"]["sessionId"] = session_id
+    return request
+
+
+def build_activation_session_request(
+    operation: str, *, target_id: str, session_id: str
+) -> dict[str, Any]:
+    if operation not in {
+        "rollback-committed-system",
+        "activation-session-status",
+    }:
+        raise ValueError("Unsupported activation session operation")
+    return _request(
+        operation,
+        {"targetId": target_id, "sessionId": session_id},
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ncm-helper-client",
@@ -262,6 +315,22 @@ def build_parser() -> argparse.ArgumentParser:
     recover_test = subparsers.add_parser("recover-test-activation")
     recover_test.add_argument("--target", required=True)
     recover_test.add_argument("--session-id", required=True)
+
+    commit = subparsers.add_parser("commit-tested-system")
+    commit.add_argument("--target", required=True)
+    commit.add_argument("--config-root", required=True, type=Path)
+    commit.add_argument("--flake-target")
+    commit.add_argument("--system-path", required=True)
+    commit.add_argument("--plan-fingerprint", required=True)
+    commit.add_argument("--session-id", required=True)
+
+    rollback = subparsers.add_parser("rollback-committed-system")
+    rollback.add_argument("--target", required=True)
+    rollback.add_argument("--session-id", required=True)
+
+    session_status = subparsers.add_parser("activation-session-status")
+    session_status.add_argument("--target", required=True)
+    session_status.add_argument("--session-id", required=True)
     return parser
 
 
@@ -361,6 +430,24 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         )
     elif arguments.operation == "recover-test-activation":
         request = build_test_recovery_request(
+            target_id=arguments.target,
+            session_id=arguments.session_id,
+        )
+    elif arguments.operation == "commit-tested-system":
+        request = build_commit_tested_system_request(
+            arguments.config_root,
+            target_id=arguments.target,
+            flake_target=arguments.flake_target,
+            system_path=arguments.system_path,
+            expected_fingerprint=arguments.plan_fingerprint,
+            session_id=arguments.session_id,
+        )
+    elif arguments.operation in {
+        "rollback-committed-system",
+        "activation-session-status",
+    }:
+        request = build_activation_session_request(
+            arguments.operation,
             target_id=arguments.target,
             session_id=arguments.session_id,
         )

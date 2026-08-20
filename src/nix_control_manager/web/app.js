@@ -57,7 +57,10 @@ const ui = {
   runActivationPreviewButton: document.querySelector("#runActivationPreviewButton"),
   runTestActivationButton: document.querySelector("#runTestActivationButton"),
   recoverTestActivationButton: document.querySelector("#recoverTestActivationButton"),
+  commitTestedSystemButton: document.querySelector("#commitTestedSystemButton"),
+  rollbackCommittedSystemButton: document.querySelector("#rollbackCommittedSystemButton"),
   testActivationLog: document.querySelector("#testActivationLog"),
+  safetyModeNote: document.querySelector("#safetyModeNote"),
   programsNav: document.querySelector("#programsNav"),
   settingsNav: document.querySelector("#settingsNav"),
   programsPage: document.querySelector("#programsPage"),
@@ -127,6 +130,17 @@ const ui = {
   homeApplyConfirmationWrap: document.querySelector("#homeApplyConfirmationWrap"),
   homeApplyConfirmation: document.querySelector("#homeApplyConfirmation"),
   homeApplyLog: document.querySelector("#homeApplyLog"),
+  generationsNav: document.querySelector("#generationsNav"),
+  generationsPage: document.querySelector("#generationsPage"),
+  generationStatus: document.querySelector("#generationStatus"),
+  generationStatusTitle: document.querySelector("#generationStatusTitle"),
+  generationStatusDetail: document.querySelector("#generationStatusDetail"),
+  generationCount: document.querySelector("#generationCount"),
+  generationList: document.querySelector("#generationList"),
+  refreshGenerations: document.querySelector("#refreshGenerations"),
+  generationBoundary: document.querySelector("#generationBoundary"),
+  generationBoundaryTitle: document.querySelector("#generationBoundaryTitle"),
+  generationBoundaryDetail: document.querySelector("#generationBoundaryDetail"),
 };
 
 const model = {
@@ -153,6 +167,7 @@ const model = {
   buildLog: [],
   activationPreview: null,
   testActivation: null,
+  permanentActivation: null,
   effectiveSettings: { status: "idle", settings: [], warnings: [] },
   homeManager: {
     status: "loading",
@@ -172,6 +187,7 @@ const model = {
   homeBuildLog: [],
   homeApplyIntent: null,
   managedApplyIntent: null,
+  generations: { status: "loading", generations: [], warnings: [] },
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -971,19 +987,92 @@ function showPage(page) {
   model.page = page;
   const settings = page === "settings";
   const homeManager = page === "home-manager";
-  const programs = !settings && !homeManager;
+  const generations = page === "generations";
+  const programs = !settings && !homeManager && !generations;
   ui.programsPage.hidden = !programs;
   ui.settingsPage.hidden = !settings;
   ui.homeManagerPage.hidden = !homeManager;
+  ui.generationsPage.hidden = !generations;
   ui.programsNav.classList.toggle("active", programs);
   ui.settingsNav.classList.toggle("active", settings);
   ui.homeManagerNav.classList.toggle("active", homeManager);
-  ui.topActions.hidden = homeManager;
-  ui.pageTitle.textContent = homeManager
+  ui.generationsNav.classList.toggle("active", generations);
+  ui.topActions.hidden = homeManager || generations;
+  ui.pageTitle.textContent = generations
+    ? "Покоління"
+    : homeManager
     ? "Home Manager"
     : (settings ? "Налаштування" : "Програми");
   if (settings) renderSettings();
   if (homeManager) renderHomeManager();
+  if (generations) renderGenerations();
+}
+
+function generationBadge(label, className) {
+  const badge = document.createElement("span");
+  badge.className = `generation-badge ${className}`;
+  badge.textContent = label;
+  return badge;
+}
+
+function renderGenerations() {
+  const inspection = model.generations || { status: "unavailable", generations: [] };
+  const items = inspection.generations || [];
+  ui.generationStatus.classList.toggle("detected", inspection.status === "detected");
+  ui.generationStatus.classList.toggle("warning", inspection.status !== "detected");
+  ui.generationStatusTitle.textContent = inspection.status === "detected"
+    ? "Системний профіль прочитано"
+    : "Покоління NixOS не знайдено";
+  const current = items.find((item) => item.currentProfile);
+  ui.generationStatusDetail.textContent = current
+    ? `Покоління ${current.number} є поточним у профілі · перегляд лише для читання`
+    : (inspection.warnings?.[0] || "Системний профіль недоступний у цьому середовищі.");
+  ui.generationCount.textContent = `${items.length} ${items.length === 1 ? "покоління" : "поколінь"}`;
+
+  const cards = items.map((item) => {
+    const card = document.createElement("article");
+    card.className = `generation-card${item.currentProfile ? " current" : ""}`;
+    const header = document.createElement("header");
+    const title = document.createElement("div");
+    const number = document.createElement("strong");
+    number.textContent = `Покоління ${item.number}`;
+    const version = document.createElement("small");
+    version.textContent = item.nixosVersion || "Версію NixOS не визначено";
+    title.append(number, version);
+    const badges = document.createElement("div");
+    badges.className = "generation-badges";
+    if (item.currentProfile) badges.append(generationBadge("профіль", "profile"));
+    if (item.currentRuntime) badges.append(generationBadge("активне", "runtime"));
+    if (item.booted) badges.append(generationBadge("запущене", "booted"));
+    header.append(title, badges);
+    const path = document.createElement("code");
+    path.textContent = item.systemPath;
+    const date = document.createElement("p");
+    date.textContent = item.createdAt
+      ? new Date(item.createdAt).toLocaleString("uk-UA")
+      : "Час створення невідомий";
+    card.append(header, path, date);
+    return card;
+  });
+  if (!cards.length) {
+    const empty = document.createElement("div");
+    empty.className = "home-manager-empty";
+    empty.textContent = "У цьому середовищі немає доступного системного профілю NixOS.";
+    cards.push(empty);
+  }
+  ui.generationList.replaceChildren(...cards);
+}
+
+async function refreshGenerations() {
+  ui.refreshGenerations.disabled = true;
+  try {
+    model.generations = await api("/api/generations");
+    renderGenerations();
+  } catch (error) {
+    showToast(`Не вдалося оновити покоління: ${error.message}`, true);
+  } finally {
+    ui.refreshGenerations.disabled = false;
+  }
 }
 
 function renderPreview() {
@@ -1511,10 +1600,18 @@ function fileChangeLabel(count) {
 function renderAdoptionPlan(plan) {
   model.adoption = plan;
   if (plan.status === "no-changes") {
-    ui.adoptionBanner.hidden = true;
+    const activationReady = model.helper?.permanentSwitchEnabled === true;
+    ui.adoptionBanner.hidden = !activationReady;
+    if (activationReady) {
+      ui.adoptionLabel.textContent = "Система синхронізована";
+      ui.adoptionTitle.textContent = "Можна перевірити й застосувати";
+      ui.adoptionDetail.textContent = "Файлових змін немає; Nix збере точний поточний source і проведе dry-preview → test → switch.";
+      ui.adoptionPlanButton.textContent = "Відкрити перевірку";
+    }
     return;
   }
   ui.adoptionBanner.hidden = false;
+  ui.adoptionPlanButton.textContent = "Переглянути план";
   const descriptions = {
     "migration-ready": ["Міграція legacy-стану", "План безпечної міграції готовий"],
     ready: ["Підключення конфігурації", "План підключення готовий"],
@@ -1544,11 +1641,27 @@ function renderHelperStatus(helper) {
     : "Системний helper недоступний";
   detail.textContent = available
     ? (helper.managedWriteEnabled
-      ? `${helper.targetId} · лише два NCM-файли · без activation/switch`
+      ? `${helper.targetId} · лише два NCM-файли${helper.permanentSwitchEnabled ? " · exact test → switch" : " · switch вимкнено"}`
       : helper.homeManagerLiveWriteEnabled
       ? `${helper.targetId} · точний source-write · activation/switch вимкнено`
       : `${helper.targetId} · без apply/switch${helper.testActivationEnabled ? " · test з auto-recovery" : " · test вимкнено"}${helper.dryActivatePreviewEnabled ? " · dry-preview" : ""}`)
     : (helper.reason || "Unix socket не відповідає");
+
+  const safetyTitle = ui.safetyModeNote.querySelector("strong");
+  const safetyDetail = ui.safetyModeNote.querySelector("small");
+  safetyTitle.textContent = helper.permanentSwitchEnabled
+    ? "Exact-output режим"
+    : "Безпечний режим";
+  safetyDetail.textContent = helper.permanentSwitchEnabled
+    ? "постійно лише після build → dry-preview → test; точний NCM-відкат"
+    : "build/test не змінюють boot generation; постійний switch вимкнено";
+  ui.generationBoundary.classList.toggle("available", helper.permanentSwitchEnabled === true);
+  ui.generationBoundaryTitle.textContent = helper.permanentSwitchEnabled
+    ? "Exact-output switch і NCM-відкат доступні"
+    : "Кероване перемикання очікує helper-а";
+  ui.generationBoundaryDetail.textContent = helper.permanentSwitchEnabled
+    ? "Лише активна test-сесія цього користувача може стати системним профілем. Відкат повертає її точний попередній store path."
+    : "Постійним можна зробити лише точний output активної test-сесії; відкат обмежено останньою NCM-активацією.";
 
   const planReady = model.adoption?.safeToApply === true && model.adoption.changes.length > 0;
   ui.validateHelperButton.disabled = !available || !planReady;
@@ -1689,9 +1802,20 @@ function updateActivationPreviewControls() {
     && typeof model.activationPreview?.testReceipt === "string";
   const testReady = model.helper?.testActivationEnabled === true && prepared;
   const active = model.testActivation?.status === "active";
-  ui.runTestActivationButton.disabled = !testReady || active;
-  ui.runTestActivationButton.hidden = active;
-  ui.recoverTestActivationButton.hidden = !active;
+  const permanentStatus = model.permanentActivation?.status;
+  const transitionActive = new Set([
+    "commit-prepared", "committing", "rollback-prepared", "rolling-back",
+  ]).has(permanentStatus);
+  const committed = permanentStatus === "committed";
+  const testSessionOnly = active && !permanentStatus;
+  const permanentAvailable = model.helper?.permanentSwitchEnabled === true;
+  ui.runTestActivationButton.disabled = !testReady || active || transitionActive || committed;
+  ui.runTestActivationButton.hidden = active || transitionActive || committed;
+  ui.recoverTestActivationButton.hidden = !testSessionOnly;
+  ui.commitTestedSystemButton.hidden = !testSessionOnly || !permanentAvailable;
+  ui.commitTestedSystemButton.disabled = !testSessionOnly || !permanentAvailable;
+  ui.rollbackCommittedSystemButton.hidden = !committed;
+  ui.rollbackCommittedSystemButton.disabled = !committed;
 }
 
 function renderBuildPreview(result) {
@@ -1811,6 +1935,9 @@ async function runActivationPreview() {
 
 function renderTestActivation(result) {
   model.testActivation = result;
+  if (result.status === "active" || result.status === "recovered") {
+    model.permanentActivation = null;
+  }
   const active = result.status === "active";
   const recovered = result.status === "recovered";
   ui.activationPreview.classList.remove("running", "passed", "failed");
@@ -1835,6 +1962,120 @@ function renderTestActivation(result) {
   ui.testActivationLog.textContent = lines.join("\n\n");
   ui.testActivationLog.hidden = lines.length === 0;
   updateActivationPreviewControls();
+}
+
+function renderPermanentActivation(result) {
+  model.permanentActivation = result;
+  const status = result.status;
+  const running = new Set([
+    "commit-prepared", "committing", "rollback-prepared", "rolling-back",
+  ]).has(status);
+  const passed = status === "committed" || status === "rolled-back";
+  ui.activationPreview.classList.remove("running", "passed", "failed");
+  ui.activationPreview.classList.add(running ? "running" : passed ? "passed" : "failed");
+  ui.activationPreviewIcon.textContent = running ? "◇" : passed ? "✓" : "!";
+  const titles = {
+    "commit-prepared": "Готується точне системне перемикання",
+    committing: "Перевірений кандидат стає постійним",
+    committed: "Перевірене покоління застосовано постійно",
+    "commit-failed": "Постійне перемикання не завершилося",
+    recovered: "Невдале перемикання безпечно компенсовано",
+    "recovery-required": "Потрібне системне відновлення",
+    "rollback-prepared": "Готується точний відкат",
+    "rolling-back": "Повертається попередня система",
+    "rolled-back": "Попередню систему відновлено",
+    "rollback-required": "Автоматичний відкат потребує уваги",
+  };
+  ui.activationPreviewTitle.textContent = titles[status] || `Стан активації: ${status}`;
+  if (status === "committed") {
+    ui.activationPreviewDetail.textContent = "Runtime і системний профіль вказують на перевірений store path. Доступний відкат саме цієї NCM-активації.";
+  } else if (status === "rolled-back") {
+    ui.activationPreviewDetail.textContent = "Runtime і системний профіль повернуто до точного попереднього store path.";
+  } else if (running) {
+    ui.activationPreviewDetail.textContent = "Операцію виконує окрема системна служба; сторінка читає лише підписаний журнал цієї сесії.";
+  } else {
+    ui.activationPreviewDetail.textContent = "Системний профіль не вважається успішно зміненим. Перегляньте журнал і стан поколінь.";
+  }
+  const lines = [];
+  if (result.sessionId) lines.push(`SESSION ${result.sessionId}`);
+  if (result.systemPath) lines.push(`SYSTEM ${result.systemPath}`);
+  if (result.transitionUnit) lines.push(`UNIT ${result.transitionUnit}`);
+  ui.testActivationLog.textContent = lines.join("\n");
+  ui.testActivationLog.hidden = lines.length === 0;
+  ui.commitTestedSystemButton.textContent = "Зробити постійним";
+  ui.rollbackCommittedSystemButton.textContent = "Відкотити цю активацію";
+  updateActivationPreviewControls();
+}
+
+let activationSessionPollTimer;
+async function pollActivationSession() {
+  window.clearTimeout(activationSessionPollTimer);
+  const sessionId = model.permanentActivation?.sessionId || model.testActivation?.sessionId;
+  if (!sessionId) return;
+  try {
+    const result = await api("/api/helper/activation-session-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    });
+    renderPermanentActivation(result);
+    if (new Set([
+      "commit-prepared", "committing", "rollback-prepared", "rolling-back",
+    ]).has(result.status)) {
+      activationSessionPollTimer = window.setTimeout(pollActivationSession, 750);
+    } else {
+      void refreshGenerations();
+    }
+  } catch (error) {
+    showToast(`Не вдалося прочитати стан активації: ${error.message}`, true);
+    activationSessionPollTimer = window.setTimeout(pollActivationSession, 1500);
+  }
+}
+
+async function commitTestedSystem() {
+  const sessionId = model.testActivation?.sessionId;
+  if (!sessionId) return;
+  const confirmed = window.confirm(
+    "Зробити саме цей протестований NixOS-кандидат постійним? Системний профіль і runtime буде перемкнено на точний store path. Після успіху NCM запропонує точний відкат.",
+  );
+  if (!confirmed) return;
+  ui.commitTestedSystemButton.disabled = true;
+  ui.commitTestedSystemButton.textContent = "Очікування Polkit…";
+  try {
+    renderPermanentActivation(await api("/api/helper/commit-tested-system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, confirmed: true }),
+    }));
+    pollActivationSession();
+  } catch (error) {
+    ui.commitTestedSystemButton.textContent = "Зробити постійним";
+    showToast(`Switch відхилено: ${error.message}`, true);
+    updateActivationPreviewControls();
+  }
+}
+
+async function rollbackCommittedSystem() {
+  const sessionId = model.permanentActivation?.sessionId;
+  if (!sessionId || model.permanentActivation?.status !== "committed") return;
+  const confirmed = window.confirm(
+    "Відкотити цю NCM-активацію до точного попереднього покоління? Поточні служби буде перемкнено назад.",
+  );
+  if (!confirmed) return;
+  ui.rollbackCommittedSystemButton.disabled = true;
+  ui.rollbackCommittedSystemButton.textContent = "Очікування Polkit…";
+  try {
+    renderPermanentActivation(await api("/api/helper/rollback-committed-system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, confirmed: true }),
+    }));
+    pollActivationSession();
+  } catch (error) {
+    ui.rollbackCommittedSystemButton.textContent = "Відкотити цю активацію";
+    showToast(`Відкат відхилено: ${error.message}`, true);
+    updateActivationPreviewControls();
+  }
 }
 
 async function runTestActivation() {
@@ -2081,7 +2322,7 @@ async function initialize() {
       ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";
       ui.drawerSaveButton.title = "Локальне збереження вимкнено в режимі лише читання";
     }
-    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview] = await Promise.all([
+    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
       api("/api/catalog"),
       api("/api/settings-catalog"),
       api("/api/state"),
@@ -2091,6 +2332,7 @@ async function initialize() {
       api("/api/build-preview"),
       api("/api/home-manager"),
       api("/api/home-manager/build-preview"),
+      api("/api/generations"),
     ]);
     model.catalog = catalog;
     model.settingsCatalog = settingsCatalog;
@@ -2098,6 +2340,7 @@ async function initialize() {
     model.options = NcmSettings.normalizeOptions(JSON.parse(JSON.stringify(state.options || {})));
     model.savedOptions = JSON.parse(JSON.stringify(model.options));
     model.homeManager = homeManager;
+    model.generations = generations;
     const knownPackages = new Set(catalog.map((app) => app.attribute));
     for (const attribute of state.packages) {
       if (!knownPackages.has(attribute)) {
@@ -2126,6 +2369,7 @@ async function initialize() {
     renderCatalog();
     renderSettings();
     renderHomeManager();
+    renderGenerations();
     updateChangeState();
     void refreshEffectiveSettings();
   } catch (error) {
@@ -2139,6 +2383,8 @@ ui.homeManagerPackageSearch.addEventListener("input", renderHomeManagerPackages)
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
+ui.generationsNav.addEventListener("click", () => showPage("generations"));
+ui.refreshGenerations.addEventListener("click", refreshGenerations);
 ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
 ui.homeManagerAdoptionButton.addEventListener("click", openHomeAdoption);
 ui.closeHomePreview.addEventListener("click", closeHomePreview);
@@ -2176,12 +2422,16 @@ ui.cancelBuildPreviewButton.addEventListener("click", cancelBuildPreview);
 ui.runActivationPreviewButton.addEventListener("click", runActivationPreview);
 ui.runTestActivationButton.addEventListener("click", runTestActivation);
 ui.recoverTestActivationButton.addEventListener("click", recoverTestActivation);
+ui.commitTestedSystemButton.addEventListener("click", commitTestedSystem);
+ui.rollbackCommittedSystemButton.addEventListener("click", rollbackCommittedSystem);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.drawer.classList.contains("open")) closePreview();
   if (event.key === "Escape" && ui.homePreviewDrawer.classList.contains("open")) closeHomePreview();
   if (event.key === "Escape" && ui.homeAdoptionDrawer.classList.contains("open")) closeHomeAdoption();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
-  const activeSearch = model.page === "settings"
+  const activeSearch = model.page === "generations"
+    ? null
+    : model.page === "settings"
     ? ui.settingsSearch
     : (model.page === "programs" ? ui.search : ui.homeManagerPackageSearch);
   if (!activeSearch) return;

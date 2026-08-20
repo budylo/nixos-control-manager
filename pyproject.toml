@@ -15,6 +15,7 @@ ncm = "nix_control_manager.cli:main"
 ncm-helper = "nix_control_manager.helper_daemon:main"
 ncm-helper-client = "nix_control_manager.helper_client:main"
 ncm-test-recover = "nix_control_manager.activation_session:recovery_main"
+ncm-system-transition = "nix_control_manager.activation_session:transition_main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

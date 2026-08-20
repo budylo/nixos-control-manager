@@ -8,7 +8,9 @@ from typing import Any, Callable, Mapping
 
 from .errors import NcmError
 from .helper_client import (
+    build_activation_session_request,
     build_activation_preview_request,
+    build_commit_tested_system_request,
     build_home_manager_validate_request,
     build_managed_validate_request,
     build_test_activation_request,
@@ -79,6 +81,8 @@ class HelperUiAdapter:
             "activationEnabled": False,
             "dryActivatePreviewEnabled": False,
             "testActivationEnabled": False,
+            "permanentSwitchEnabled": False,
+            "rollbackGenerationEnabled": False,
             "homeManagerApplyEnabled": False,
             "homeManagerLiveWriteEnabled": False,
             "managedWriteEnabled": False,
@@ -115,6 +119,25 @@ class HelperUiAdapter:
             )
             if not safe:
                 return {**base, "reason": "Helper target does not satisfy the read-only UI boundary"}
+            operations = set(result.get("operations") or [])
+            permanent_switch_enabled = (
+                target.get("fixtureOnly") is False
+                and target.get("testActivationEnabled") is True
+                and target.get("managedWriteEnabled") is True
+                and target.get("managedRecoveryEnabled") is True
+                and target.get("permanentSwitchEnabled") is True
+                and target.get("rollbackGenerationEnabled") is True
+                and set(target.get("allowedRelativePaths") or [])
+                == {"ncm/state.json", "ncm/packages.nix"}
+                and {
+                    "preview-activation",
+                    "test-activation",
+                    "recover-test-activation",
+                    "commit-tested-system",
+                    "rollback-committed-system",
+                    "activation-session-status",
+                }.issubset(operations)
+            )
             return {
                 **base,
                 "available": True,
@@ -129,6 +152,8 @@ class HelperUiAdapter:
                     and "test-activation" in (result.get("operations") or [])
                     and "recover-test-activation" in (result.get("operations") or [])
                 ),
+                "permanentSwitchEnabled": permanent_switch_enabled,
+                "rollbackGenerationEnabled": permanent_switch_enabled,
                 "homeManagerApplyEnabled": (
                     target.get("fixtureOnly") is False
                     and target.get("homeManagerApplyEnabled") is True
@@ -559,4 +584,108 @@ class HelperUiAdapter:
             or result.get("configurationWriteEnabled") is not False
         ):
             raise HelperUiError("Test recovery result crossed the bounded-test boundary")
+        return {**dict(result), "source": "system-helper", "authorizedByPolkit": True}
+
+    def commit_tested_system(
+        self,
+        *,
+        system_path: str,
+        plan_fingerprint: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        status = self.status()
+        if status.get("permanentSwitchEnabled") is not True:
+            raise HelperUiError("System helper does not permit permanent switching")
+        try:
+            request = build_commit_tested_system_request(
+                self.config_root,
+                target_id=self.target_id,
+                flake_target=self.flake_target,
+                system_path=system_path,
+                expected_fingerprint=plan_fingerprint,
+                session_id=session_id,
+            )
+            response = self._send(request)
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Permanent switch failed"))
+        result = _mapping(response.get("result"), "permanent switch result")
+        if (
+            result.get("status") != "committing"
+            or result.get("sessionId") != session_id
+            or result.get("systemPath") != system_path
+            or result.get("planFingerprint") != plan_fingerprint
+            or result.get("switchEnabled") is not True
+            or result.get("rollbackEnabled") is not True
+            or result.get("arbitraryCommandsAccepted") is not False
+        ):
+            raise HelperUiError("Permanent switch result crossed the exact-session boundary")
+        return {**dict(result), "source": "system-helper", "authorizedByPolkit": True}
+
+    def activation_session_status(self, *, session_id: str) -> dict[str, Any]:
+        status = self.status()
+        if status.get("permanentSwitchEnabled") is not True:
+            raise HelperUiError("System helper does not expose permanent activation state")
+        try:
+            response = self._send(
+                build_activation_session_request(
+                    "activation-session-status",
+                    target_id=self.target_id,
+                    session_id=session_id,
+                )
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Activation status failed"))
+        result = _mapping(response.get("result"), "activation session status")
+        if (
+            result.get("sessionId") != session_id
+            or result.get("status") not in {
+                "commit-prepared",
+                "committing",
+                "committed",
+                "commit-failed",
+                "recovered",
+                "recovery-required",
+                "rollback-prepared",
+                "rolling-back",
+                "rolled-back",
+                "rollback-required",
+            }
+            or result.get("switchEnabled") is not True
+            or result.get("arbitraryCommandsAccepted") is not False
+        ):
+            raise HelperUiError("Helper returned an invalid activation session state")
+        return {**dict(result), "source": "system-helper"}
+
+    def rollback_committed_system(self, *, session_id: str) -> dict[str, Any]:
+        status = self.status()
+        if status.get("rollbackGenerationEnabled") is not True:
+            raise HelperUiError("System helper does not permit generation rollback")
+        try:
+            response = self._send(
+                build_activation_session_request(
+                    "rollback-committed-system",
+                    target_id=self.target_id,
+                    session_id=session_id,
+                )
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Generation rollback failed"))
+        result = _mapping(response.get("result"), "generation rollback result")
+        if (
+            result.get("status") != "rolling-back"
+            or result.get("sessionId") != session_id
+            or result.get("switchEnabled") is not True
+            or result.get("rollbackEnabled") is not True
+            or result.get("arbitraryCommandsAccepted") is not False
+        ):
+            raise HelperUiError("Rollback result crossed the exact-session boundary")
         return {**dict(result), "source": "system-helper", "authorizedByPolkit": True}

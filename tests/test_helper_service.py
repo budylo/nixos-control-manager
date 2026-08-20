@@ -5,11 +5,13 @@ import unittest
 
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
+    COMMIT_TESTED_SYSTEM_ACTION_ID,
     HOME_MANAGER_APPLY_ACTION_ID,
     MANAGED_APPLY_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
     RECOVER_TEST_ACTIVATION_ACTION_ID,
     RECOVER_ACTION_ID,
+    ROLLBACK_COMMITTED_SYSTEM_ACTION_ID,
     TEST_ACTIVATION_ACTION_ID,
     HelperDispatcher,
     HelperTarget,
@@ -160,6 +162,122 @@ class HelperServiceTests(unittest.TestCase):
             peer_uid=1000,
         )
         self.assertEqual(escaped["error"]["code"], "path-not-allowed")
+
+    def test_permanent_transition_is_exact_session_bound_and_separately_authorized(self) -> None:
+        control = HelperTarget(
+            target_id="control",
+            configuration_root=self.mock_root,
+            allowed_relative_paths=frozenset(
+                {"ncm/state.json", "ncm/packages.nix"}
+            ),
+            fixture_only=False,
+            apply_enabled=False,
+            test_activation_enabled=True,
+            test_journal_root=Path(self.temporary.name) / "test-journal",
+            managed_write_enabled=True,
+            managed_journal_root=Path(self.temporary.name) / "managed-journal",
+            permanent_switch_enabled=True,
+        )
+        dispatcher = HelperDispatcher(
+            targets=(control,),
+            authorizer=self.authorizer,
+            backend=self.backend,
+        )
+        capabilities = dispatcher.handle(
+            self.request("capabilities", {}), peer_uid=1000
+        )["result"]
+        target = capabilities["targets"][0]
+        self.assertTrue(target["permanentSwitchEnabled"])
+        self.assertTrue(target["rollbackGenerationEnabled"])
+        self.assertFalse(capabilities["arbitraryCommandsAccepted"])
+
+        system_path = "/nix/store/" + "a" * 32 + "-nixos-system-candidate"
+        empty_validation = dispatcher.handle(
+            self.request(
+                "validate-plan",
+                {
+                    "targetId": "control",
+                    "planFingerprint": "2" * 64,
+                    "changes": [],
+                },
+                "empty-validate1",
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(empty_validation["error"]["code"], "invalid-request")
+        self.authorizer.allowed.add((1000, PREVIEW_ACTIVATION_ACTION_ID))
+        empty_preview = dispatcher.handle(
+            self.request(
+                "preview-activation",
+                {
+                    "targetId": "control",
+                    "planFingerprint": "2" * 64,
+                    "systemPath": system_path,
+                    "changes": [],
+                },
+                "empty-preview01",
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(empty_preview["status"], "ok")
+
+        payload = {
+            "targetId": "control",
+            "sessionId": "b" * 24,
+            "planFingerprint": "2" * 64,
+            "systemPath": system_path,
+            "changes": [self.change("ncm/state.json")],
+        }
+        denied = dispatcher.handle(
+            self.request("commit-tested-system", payload), peer_uid=1000
+        )
+        self.assertEqual(denied["status"], "denied")
+        self.assertEqual(self.backend.commit_tested_system_calls, [])
+
+        self.authorizer.allowed.add((1000, COMMIT_TESTED_SYSTEM_ACTION_ID))
+        committed = dispatcher.handle(
+            self.request("commit-tested-system", payload, "commit-00002"),
+            peer_uid=1000,
+        )
+        self.assertEqual(committed["result"]["status"], "committing")
+        self.assertEqual(
+            self.backend.commit_tested_system_calls,
+            [("control", "b" * 24, 1000)],
+        )
+        action, uid, details = self.authorizer.calls[-1]
+        self.assertEqual((action, uid), (COMMIT_TESTED_SYSTEM_ACTION_ID, 1000))
+        self.assertEqual(details["systemPath"], system_path)
+
+        status = dispatcher.handle(
+            self.request(
+                "activation-session-status",
+                {"targetId": "control", "sessionId": "b" * 24},
+                "status-00003",
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(status["result"]["status"], "committed")
+
+        rollback_payload = {"targetId": "control", "sessionId": "b" * 24}
+        denied = dispatcher.handle(
+            self.request("rollback-committed-system", rollback_payload, "rollback-0004"),
+            peer_uid=1000,
+        )
+        self.assertEqual(denied["status"], "denied")
+        self.authorizer.allowed.add((1000, ROLLBACK_COMMITTED_SYSTEM_ACTION_ID))
+        rolled_back = dispatcher.handle(
+            self.request("rollback-committed-system", rollback_payload, "rollback-0005"),
+            peer_uid=1000,
+        )
+        self.assertEqual(rolled_back["result"]["status"], "rolling-back")
+
+        injected = dict(payload)
+        injected["command"] = ["sh", "-c", "id"]
+        rejected = dispatcher.handle(
+            self.request("commit-tested-system", injected, "commit-00006"),
+            peer_uid=1000,
+        )
+        self.assertEqual(rejected["error"]["code"], "invalid-request")
 
     def test_rejects_traversal_unknown_fields_and_wrong_digest(self) -> None:
         traversal = self.change("../configuration.nix")

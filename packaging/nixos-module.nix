@@ -25,14 +25,17 @@ let
   isLiveTest = cfg.mode == "live-test";
   isLiveHomeManager = cfg.mode == "live-home-manager";
   isLiveManaged = cfg.mode == "live-managed";
+  isLiveControl = cfg.mode == "live-control";
+  hasTestActivation = isLiveTest || isLiveControl;
+  hasManagedWrite = isLiveManaged || isLiveControl;
   configurationRoot = if isFixture then cfg.fixtureRoot else "/etc/nixos";
   transactionJournal = if isFixture then cfg.journalRoot else null;
-  testJournal = if isLiveTest then cfg.testJournalRoot else null;
+  testJournal = if hasTestActivation then cfg.testJournalRoot else null;
   homeManagerRoot = if isLiveHomeManager then cfg.homeManagerRoot else null;
   homeManagerJournalRoot =
     if isLiveHomeManager then cfg.homeManagerJournalRoot else null;
-  managedJournalRoot = if isLiveManaged then cfg.managedJournalRoot else null;
-  effectiveAllowedPaths = if isLiveManaged then [
+  managedJournalRoot = if hasManagedWrite then cfg.managedJournalRoot else null;
+  effectiveAllowedPaths = if hasManagedWrite then [
     "ncm/state.json"
     "ncm/packages.nix"
   ] else cfg.allowedRelativePaths;
@@ -42,7 +45,7 @@ let
     && all (part: part != "" && part != "." && part != "..")
       (splitString "/" path);
   helperConfig = (pkgs.formats.json { }).generate "ncm-helper.json" {
-    schemaVersion = 5;
+    schemaVersion = 6;
     inherit socketPath;
     polkitExecutable = "${pkgs.polkit}/bin/pkcheck";
     validationTimeout = cfg.validationTimeout;
@@ -177,6 +180,7 @@ in
         "live-test"
         "live-home-manager"
         "live-managed"
+        "live-control"
       ];
       default = "fixture";
       description = ''
@@ -194,6 +198,10 @@ in
         persist only ncm/state.json and ncm/packages.nix after disposable
         evaluation, explicit confirmation, and Polkit authorization. It never
         edits configuration.nix, mutates flake inputs, or activates a system.
+        live-control is the combined, higher-trust opt-in mode: it preserves
+        the exact managed two-file boundary, requires a successful timed test
+        activation, and only then permits a Polkit-authorized switch to that
+        exact closure plus rollback to the journaled previous closure.
       '';
     };
 
@@ -324,7 +332,7 @@ in
         message = "The fixture-only Nix Control Manager helper refuses /etc/nixos.";
       }
       {
-        assertion = !isLiveTest || (
+        assertion = !hasTestActivation || (
           cfg.testJournalRoot != "/etc/nixos"
           && !(hasPrefix "/etc/nixos/" cfg.testJournalRoot)
         );
@@ -344,12 +352,16 @@ in
         message = "live-home-manager requires an absolute non-home, non-store configuration root.";
       }
       {
-        assertion = !isLiveManaged || (
+        assertion = !hasManagedWrite || (
           hasPrefix "/" cfg.managedJournalRoot
           && cfg.managedJournalRoot != "/etc/nixos"
           && !(hasPrefix "/etc/nixos/" cfg.managedJournalRoot)
         );
         message = "The live-managed journal must be absolute and outside /etc/nixos.";
+      }
+      {
+        assertion = !isLiveControl || cfg.testJournalRoot != cfg.managedJournalRoot;
+        message = "live-control requires separate test and managed journals.";
       }
       {
         assertion = !isLiveHomeManager || (
@@ -385,11 +397,11 @@ in
       ./polkit/org.nixos.nix-control-manager.policy;
     systemd.tmpfiles.rules =
       optionals isFixture [ "d ${cfg.journalRoot} 0700 root root -" ]
-      ++ optionals isLiveTest [ "d ${cfg.testJournalRoot} 0700 root root -" ]
+      ++ optionals hasTestActivation [ "d ${cfg.testJournalRoot} 0700 root root -" ]
       ++ optionals isLiveHomeManager [
         "d ${cfg.homeManagerJournalRoot} 0700 root root -"
       ]
-      ++ optionals isLiveManaged [
+      ++ optionals hasManagedWrite [
         "d ${cfg.managedJournalRoot} 0700 root root -"
       ];
 
@@ -416,6 +428,8 @@ in
         "Home Manager persistence Nix Control Manager system helper"
       else if isLiveManaged then
         "Bounded managed-source Nix Control Manager system helper"
+      else if isLiveControl then
+        "Test-gated Nix Control Manager system switch helper"
       else
         "Read-only Nix Control Manager system helper";
       requires = [ "polkit.service" ];
@@ -476,13 +490,19 @@ in
         # An empty Nix list is omitted by the unit renderer. The empty string
         # deliberately emits `CapabilityBoundingSet=` and clears every cap.
         CapabilityBoundingSet = "";
-        ReadOnlyPaths = optionals (!isLiveHomeManager && !isLiveManaged) [ "/etc/nixos" ];
+        ReadOnlyPaths = optionals (!isLiveHomeManager && !hasManagedWrite) [ "/etc/nixos" ];
       } // optionalAttrs isLiveTest {
         ReadWritePaths = [ cfg.testJournalRoot ];
       } // optionalAttrs isLiveHomeManager {
         ReadWritePaths = [ cfg.homeManagerRoot cfg.homeManagerJournalRoot ];
       } // optionalAttrs isLiveManaged {
         ReadWritePaths = [ "/etc/nixos/ncm" cfg.managedJournalRoot ];
+      } // optionalAttrs isLiveControl {
+        ReadWritePaths = [
+          "/etc/nixos/ncm"
+          cfg.managedJournalRoot
+          cfg.testJournalRoot
+        ];
       };
     };
     })

@@ -116,13 +116,15 @@ UI state
   -> finalize or roll back (fixture workflow implemented)
   -> show activation impact (closure and incomplete dry report implemented)
   -> optional receipt-bound test with timer-first runtime recovery (implemented)
-  -> permanent switch (not implemented)
-  -> record boot generation and result (not implemented)
+  -> optional exact tested-closure switch (implemented in live-control)
+  -> verify and display current/profile generations (implemented)
+  -> exact journal-bound rollback to the previous closure (implemented)
 ```
 
-`test` is the recommended first activation and is implemented as an
-experimental runtime-only operation. `switch` and boot-generation rollback will
-be separate future operations.
+`test` remains the mandatory first activation. The opt-in `live-control` mode
+then commits only that exact tested closure and records the previous closure for
+a dedicated rollback. Arbitrary generation selection and bootloader editing are
+not exposed.
 
 Candidate validation is implemented and never writes to the target root. The
 live privileged write transaction remains disabled. Its digest, journaling, rollback,

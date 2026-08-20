@@ -47,7 +47,9 @@ def match_local_adoption_plan(
             "read-only-target-required", "The target is not a read-only live target"
         )
     plan = plan_adoption(target.configuration_root)
-    if not plan.safe_to_apply or not plan.changes:
+    if not plan.safe_to_apply or (
+        not plan.changes and not target.permanent_switch_enabled
+    ):
         raise HelperBackendError(
             "plan-mismatch", "The configured target has no matching safe adoption plan"
         )

@@ -44,6 +44,8 @@ class FakeHelperAdapter:
             "homeManagerLiveWriteEnabled": True,
             "managedWriteEnabled": True,
             "managedRecoveryEnabled": True,
+            "permanentSwitchEnabled": True,
+            "rollbackGenerationEnabled": True,
         }
 
     def validate_adoption(self):
@@ -101,6 +103,38 @@ class FakeHelperAdapter:
             "testEnabled": True,
             "switchEnabled": False,
             "configurationWriteEnabled": False,
+        }
+
+    def commit_tested_system(self, *, system_path, plan_fingerprint, session_id):
+        return {
+            "source": "system-helper",
+            "status": "committing",
+            "sessionId": session_id,
+            "systemPath": system_path,
+            "planFingerprint": plan_fingerprint,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
+    def activation_session_status(self, *, session_id):
+        return {
+            "source": "system-helper",
+            "status": "committed",
+            "sessionId": session_id,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
+    def rollback_committed_system(self, *, session_id):
+        return {
+            "source": "system-helper",
+            "status": "rolling-back",
+            "sessionId": session_id,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
         }
 
     def validate_home_manager(
@@ -866,6 +900,39 @@ class ServerTests(unittest.TestCase):
         )
         self.assertEqual(recovered["status"], "recovered")
         self.assertTrue(recovered["currentSystemRestored"])
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/helper/commit-tested-system",
+                method="POST",
+                body={"sessionId": active["sessionId"], "confirmed": False},
+                token=self.server.token,
+            )
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
+
+        committing = self.request_json(
+            "/api/helper/commit-tested-system",
+            method="POST",
+            body={"sessionId": active["sessionId"], "confirmed": True},
+            token=self.server.token,
+        )
+        self.assertEqual(committing["status"], "committing")
+        self.assertEqual(committing["systemPath"], result["outputPaths"][0])
+        status = self.request_json(
+            "/api/helper/activation-session-status",
+            method="POST",
+            body={"sessionId": active["sessionId"]},
+            token=self.server.token,
+        )
+        self.assertEqual(status["status"], "committed")
+        rollback = self.request_json(
+            "/api/helper/rollback-committed-system",
+            method="POST",
+            body={"sessionId": active["sessionId"], "confirmed": True},
+            token=self.server.token,
+        )
+        self.assertEqual(rollback["status"], "rolling-back")
 
 
 if __name__ == "__main__":

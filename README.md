@@ -25,7 +25,7 @@ This repository currently contains the first vertical slice:
   receipts, mock Polkit authorization, and a fixture-workflow backend;
 - a real fail-closed `pkcheck` authorizer and an opt-in, sandboxed NixOS
   socket/service module with fixture, live-read-only, live-managed, live-test,
-  and live-home-manager targets;
+  live-control, and live-home-manager targets;
 - direct `/etc/nixos` validation in a disposable copy, with no receipt, write,
   recovery, build, or activation authority for the live target.
 - a separate opt-in `live-managed` path that can atomically persist only
@@ -46,6 +46,12 @@ This repository currently contains the first vertical slice:
   output. A root-only journal is created and automatic recovery is armed before
   the fixed `switch-to-configuration test` entrypoint runs. It never selects
   `switch` or changes the boot profile.
+- an explicit `live-control` mode that can permanently select only the exact
+  closure that successfully completed the bound dry-preview and test flow. It
+  journals the previous closure, changes the system profile without rebuilding,
+  verifies runtime/profile convergence, and exposes an exact one-step rollback;
+- a read-only generations page that distinguishes current, booted, and profile
+  generations without accepting arbitrary paths or commands;
 - a preview-first Home Manager inspector for both NixOS-module and standalone
   configurations, with conservative user discovery and a separate versioned
   user-state boundary. Writes require the separate opt-in helper mode; Home
@@ -201,6 +207,13 @@ the boot generation are untouched. Timer recovery cannot cover power loss or a
 kernel panic, so console access and a bootable previous generation remain
 necessary safeguards.
 
+The separate `mode = "live-control"` extends that same receipt-bound flow with
+an explicitly confirmed permanent switch. It never rebuilds during commit:
+the helper sets the system profile to the already tested exact closure, runs
+that closure's fixed `switch` entrypoint, and verifies both links. The previous
+closure remains journaled for the dedicated rollback operation. See
+[`docs/live-control.md`](docs/live-control.md).
+
 Operational preparation, immediate recovery, TTY diagnostics, and power-loss
 handling are documented in
 [`docs/live-test-recovery.md`](docs/live-test-recovery.md).
@@ -210,11 +223,15 @@ copied to `managed.nix.bak`, then the new file is atomically moved into place.
 
 ## Safety boundary
 
-The current milestone intentionally does **not** run `sudo`, `pkexec`,
-`nixos-rebuild`, apply a general NixOS system-adoption plan, or perform `switch`.
+The current milestone intentionally does **not** collect sudo passwords, accept
+shell commands, run a client-selected `nixos-rebuild`, or apply a general NixOS
+system-adoption plan.
 Default live-read-only mode stops at dry preview. Separate
 experimental live-test mode can select only `test` after a bound receipt and a
 pre-armed recovery timer; it never creates a boot generation or `result` link.
+Only the separate `live-control` mode can select `switch`, and only for the
+exact closure already validated and tested in the same UID-bound session. Its
+rollback target also comes solely from the root-owned journal.
 The transaction and recovery boundary is specified in
 [`docs/apply-protocol.md`](docs/apply-protocol.md). Those capabilities remain
 restricted to disposable fixtures for NixOS system adoption. The dedicated

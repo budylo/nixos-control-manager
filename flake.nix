@@ -42,6 +42,11 @@
             ncmPackage = self.packages.${system}.default;
             ncmModule = self.nixosModules.default;
           };
+          live-control-vm-test = import ./tests/nixos/live-control-vm-test.nix {
+            inherit pkgs;
+            ncmPackage = self.packages.${system}.default;
+            ncmModule = self.nixosModules.default;
+          };
         });
 
       apps = forAllSystems (system: {
@@ -142,6 +147,23 @@
               })
             ];
           };
+          evaluatedLiveControl = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              ({ ... }: {
+                system.stateVersion = "26.05";
+                users.users.live-control-user.isNormalUser = true;
+                services.nix-control-manager-helper = {
+                  enable = true;
+                  mode = "live-control";
+                  targetId = "control";
+                  allowedUsers = [ "live-control-user" ];
+                };
+                programs.nix-control-manager.enable = true;
+              })
+            ];
+          };
           evaluatedChannel = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -172,6 +194,8 @@
           liveManagedService = evaluatedLiveManaged.config.systemd.services.nix-control-manager-helper;
           liveManagedServiceUnit = evaluatedLiveManaged.config.systemd.units."nix-control-manager-helper.service".unit;
           liveManagedGuiUnit = evaluatedLiveManaged.config.systemd.user.units."nix-control-manager-gui.service".unit;
+          liveControlService = evaluatedLiveControl.config.systemd.services.nix-control-manager-helper;
+          liveControlServiceUnit = evaluatedLiveControl.config.systemd.units."nix-control-manager-helper.service".unit;
           channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
           channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
           channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
@@ -198,6 +222,16 @@
               ];
             }).config.system.build.toplevel
           );
+          transitionCandidate = pkgs.runCommand "ncm-transition-candidate" { } ''
+            mkdir -p "$out/bin"
+            printf '#!/bin/sh\nexit 0\n' > "$out/bin/switch-to-configuration"
+            chmod +x "$out/bin/switch-to-configuration"
+          '';
+          transitionPrevious = pkgs.runCommand "ncm-transition-previous" { } ''
+            mkdir -p "$out/bin"
+            printf '#!/bin/sh\nexit 0\n' > "$out/bin/switch-to-configuration"
+            chmod +x "$out/bin/switch-to-configuration"
+          '';
         in {
           settings-options = import ./tests/nixos/settings-options-check.nix {
             inherit pkgs;
@@ -209,6 +243,15 @@
               node ${./tests/test_web_settings.js}
             node --check ${./src/nix_control_manager/web/settings.js}
             node --check ${./src/nix_control_manager/web/app.js}
+            touch "$out"
+          '';
+          activation-transition = pkgs.runCommand "nix-control-manager-activation-transition-check" {
+            nativeBuildInputs = [ pkgs.python3 ];
+          } ''
+            export PYTHONPATH=${./src}
+            export NCM_TEST_CANDIDATE_SYSTEM=${transitionCandidate}
+            export NCM_TEST_PREVIOUS_SYSTEM=${transitionPrevious}
+            python3 ${./tests/test_activation_transition.py}
             touch "$out"
           '';
           home-manager-detection = pkgs.runCommand "nix-control-manager-home-manager-detection-check" {
@@ -361,10 +404,18 @@
             ];
             assert liveManagedService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveManagedService.serviceConfig);
+            assert liveControlService.serviceConfig.ReadWritePaths == [
+              "/etc/nixos/ncm"
+              "/var/lib/nix-control-manager/managed-transactions"
+              "/var/lib/nix-control-manager/test-activations"
+            ];
+            assert liveControlService.serviceConfig.CapabilityBoundingSet == "";
+            assert !(builtins.hasAttr "StateDirectory" liveControlService.serviceConfig);
             assert socket.socketConfig.SocketMode == "0660";
             assert socket.socketConfig.SocketGroup == "nix-control-manager";
             pkgs.runCommand "nix-control-manager-module-check" { } ''
               test -x ${self.packages.${system}.default}/bin/ncm-helper
+              test -x ${self.packages.${system}.default}/bin/ncm-system-transition
               grep -F 'ProtectSystem=strict' ${serviceUnit}/nix-control-manager-helper.service
               grep -F 'PrivateNetwork=true' ${serviceUnit}/nix-control-manager-helper.service
               grep -F 'NoNewPrivileges=true' ${serviceUnit}/nix-control-manager-helper.service
@@ -382,6 +433,10 @@
               grep -F 'ReadWritePaths=/etc/nixos/ncm' ${liveManagedServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/managed-transactions' ${liveManagedServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveManagedServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/etc/nixos/ncm' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/var/lib/nix-control-manager/managed-transactions' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/var/lib/nix-control-manager/test-activations' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -x 'CapabilityBoundingSet=' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -F -- '--helper-socket /run/nix-control-manager/helper.sock' ${liveManagedGuiUnit}/nix-control-manager-gui.service
               grep -F -- '--helper-target managed' ${liveManagedGuiUnit}/nix-control-manager-gui.service
               if grep -F 'ReadWritePaths=' ${liveServiceUnit}/nix-control-manager-helper.service; then
@@ -403,6 +458,7 @@
               cp ${liveTestServiceUnit}/nix-control-manager-helper.service "$out/live-test.service"
               cp ${liveHomeServiceUnit}/nix-control-manager-helper.service "$out/live-home-manager.service"
               cp ${liveManagedServiceUnit}/nix-control-manager-helper.service "$out/live-managed.service"
+              cp ${liveControlServiceUnit}/nix-control-manager-helper.service "$out/live-control.service"
               touch "$out/passed"
             '';
           channel-module =
@@ -445,6 +501,7 @@
           live-test-recovery-vm = self.packages.${system}.live-test-recovery-vm-test;
           live-home-manager-vm = self.packages.${system}.live-home-manager-vm-test;
           live-managed-vm = self.packages.${system}.live-managed-vm-test;
+          live-control-vm = self.packages.${system}.live-control-vm-test;
         });
 
       devShells = forAllSystems (system:

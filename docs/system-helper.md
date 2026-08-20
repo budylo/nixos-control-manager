@@ -4,7 +4,7 @@ The repository exports an opt-in NixOS module and a socket-activated
 `ncm-helper` executable. It has a transaction-capable fixture mode, a
 capability-reduced live-read-only mode, a bounded live-managed source mode, an
 explicit experimental live-test mode, and a separate opt-in live Home Manager
-persistence mode. Installing the
+persistence mode, plus an exact tested-system `live-control` mode. Installing the
 package alone neither imports nor enables the module; changing an active NixOS
 configuration requires an explicit module import, option selection, rebuild,
 and activation.
@@ -33,13 +33,15 @@ and activation.
 - live-managed mode exposes only `/etc/nixos/ncm` and its external root-only
   transaction journal, while the protocol accepts exactly `ncm/state.json` and
   `ncm/packages.nix`;
+- live-control combines the exact two-file NCM write scope and test journal,
+  then permits only the already tested closure to become the system profile;
 - the runtime configuration is a strict versioned JSON file generated into the
   Nix store.
 
 The policy actions remain separate for applying a validated plan, recovering
-one exact transaction, previewing activation, time-limited test activation, and
-manual test recovery. Permanent `switch`, boot, and rollback-generation
-operations do not exist.
+one exact transaction, previewing activation, time-limited test activation,
+manual test recovery, committing the exact tested closure, and rolling that
+session back.
 
 ## NixOS module
 
@@ -142,8 +144,9 @@ keeps apply, recovery, test activation, Home Manager persistence, and permanent
 switch unavailable.
 
 It has no option for a different system root and cannot be upgraded to a
-general writable NixOS adoption target. Schema version 5 accepts `fixture`,
-`live-read-only`, `live-managed`, `live-test`, and `live-home-manager`; each
+general writable NixOS adoption target. Schema version 6 accepts `fixture`,
+`live-read-only`, `live-managed`, `live-test`, `live-control`, and
+`live-home-manager`; each
 live mutation mode adds only its narrowly scoped journal/capability.
 
 Bounded NCM-owned system persistence must be opted into separately:
@@ -179,6 +182,22 @@ never writes `/etc/nixos` or the system profile. Timer recovery is runtime-only
 and cannot cover a power loss or kernel panic. The operator procedure is in
 [`live-test-recovery.md`](live-test-recovery.md).
 
+Permanent exact switching must be opted into separately:
+
+```nix
+services.nix-control-manager-helper = {
+  enable = true;
+  mode = "live-control";
+  targetId = "control";
+  allowedUsers = [ "alice" ];
+  testActivationTimeout = 300;
+};
+```
+
+This mode still requires dry-preview and `test` first. Commit and rollback use
+only closure paths stored in the root-owned activation journal. Operational
+details are in [`live-control.md`](live-control.md).
+
 Live Home Manager source persistence must also be opted into separately:
 
 ```nix
@@ -212,6 +231,8 @@ its configured source root and journal through `ReadWritePaths`, while retaining
 the empty capability bounding set.
 `live-managed` exposes only `/etc/nixos/ncm` and its managed transaction journal
 through `ReadWritePaths`; its capability bounding set is also empty.
+`live-control` exposes the same exact NCM directory plus separate managed and
+activation journals; it does not make the main configuration writable.
 `/proc` remains visible because safe Polkit process subjects require
 the client start time and real UID.
 
@@ -320,9 +341,9 @@ same backend and never installs a system unit.
 - general live NixOS system-adoption writes (the only system-state exception is
   the exact NCM-owned pair in `live-managed`; Home Manager has its own mode);
 - installation on the current WSL or physical NixOS system;
-- privileged/helper-mediated build, permanent `switch`, rollback-generation,
-  or boot activation (local no-link build, exact dry preview, and opt-in
-  time-limited `test` are implemented separately);
+- privileged/helper-mediated build, arbitrary generation selection, or
+  bootloader editing (local no-link build, exact dry preview, opt-in test, and
+  exact tested-session switch/rollback are implemented separately);
 - socket access for users not explicitly listed in `allowedUsers`, or silent
   policy overrides;
 - a fallback that weakens authorization when Polkit or its session agent is

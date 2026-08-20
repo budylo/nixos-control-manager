@@ -11,6 +11,8 @@ from .helper_protocol import (
     ApplyValidatedHomeManagerPlanPayload,
     ApplyValidatedManagedPlanPayload,
     ApplyValidatedPlanPayload,
+    ActivationSessionPayload,
+    CommitTestedSystemPayload,
     HelperProtocolError,
     HelperRequest,
     PreviewActivationPayload,
@@ -40,6 +42,8 @@ MANAGED_RECOVER_ACTION_ID = "org.nixos.nix-control-manager.recover-managed-trans
 PREVIEW_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.preview-activation"
 TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.test-activation"
 RECOVER_TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.recover-test-activation"
+COMMIT_TESTED_SYSTEM_ACTION_ID = "org.nixos.nix-control-manager.commit-tested-system"
+ROLLBACK_COMMITTED_SYSTEM_ACTION_ID = "org.nixos.nix-control-manager.rollback-committed-system"
 _TARGET_ID = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
@@ -60,6 +64,7 @@ class HelperTarget:
     home_manager_journal_root: Path | None = None
     managed_write_enabled: bool = False
     managed_journal_root: Path | None = None
+    permanent_switch_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not _TARGET_ID.fullmatch(self.target_id):
@@ -133,7 +138,6 @@ class HelperTarget:
             if (
                 self.fixture_only
                 or self.apply_enabled
-                or self.test_activation_enabled
                 or self.home_manager_apply_enabled
                 or self.managed_journal_root is None
             ):
@@ -154,6 +158,16 @@ class HelperTarget:
         elif self.managed_journal_root is not None:
             raise ValueError(
                 "A managed journal is valid only when managed writes are enabled"
+            )
+        if self.permanent_switch_enabled and (
+            self.fixture_only
+            or self.apply_enabled
+            or not self.test_activation_enabled
+            or not self.managed_write_enabled
+            or self.test_journal_root is None
+        ):
+            raise ValueError(
+                "Permanent switching requires the combined managed/test live target"
             )
         if not 30 <= self.test_timeout_seconds <= 1800:
             raise ValueError("test_timeout_seconds must be between 30 and 1800")
@@ -286,6 +300,18 @@ class HelperBackend(Protocol):
         self, target: HelperTarget, session_id: str, peer_uid: int
     ) -> Mapping[str, Any]: ...
 
+    def commit_tested_system(
+        self, target: HelperTarget, payload: CommitTestedSystemPayload, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
+    def rollback_committed_system(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
+    def activation_session_status(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
 
 @dataclass(slots=True)
 class MockPolkitAuthorizer:
@@ -314,6 +340,8 @@ class RecordingMockBackend:
     preview_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     test_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     recover_test_activation_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    commit_tested_system_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    rollback_committed_system_calls: list[tuple[str, str, int]] = field(default_factory=list)
 
     def validate_plan(
         self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int
@@ -513,6 +541,43 @@ class RecordingMockBackend:
             "currentSystemRestored": True,
         }
 
+    def commit_tested_system(
+        self, target: HelperTarget, payload: CommitTestedSystemPayload, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.commit_tested_system_calls.append((target.target_id, payload.session_id, peer_uid))
+        return {
+            "status": "committing",
+            "sessionId": payload.session_id,
+            "systemPath": payload.system_path,
+            "planFingerprint": payload.plan_fingerprint,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
+    def rollback_committed_system(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.rollback_committed_system_calls.append((target.target_id, session_id, peer_uid))
+        return {
+            "status": "rolling-back",
+            "sessionId": session_id,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
+    def activation_session_status(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        return {
+            "status": "committed",
+            "sessionId": session_id,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
 
 class HelperDispatcher:
     def __init__(
@@ -635,9 +700,14 @@ class HelperDispatcher:
                                 "dryActivatePreviewEnabled": (
                                     not target.fixture_only
                                     and not target.home_manager_apply_enabled
-                                    and not target.managed_write_enabled
+                                    and (
+                                        not target.managed_write_enabled
+                                        or target.permanent_switch_enabled
+                                    )
                                 ),
                                 "testActivationEnabled": target.test_activation_enabled,
+                                "permanentSwitchEnabled": target.permanent_switch_enabled,
+                                "rollbackGenerationEnabled": target.permanent_switch_enabled,
                             }
                             for target in self.targets.values()
                         ],
@@ -655,6 +725,8 @@ class HelperDispatcher:
                             "preview-activation": PREVIEW_ACTIVATION_ACTION_ID,
                             "test-activation": TEST_ACTIVATION_ACTION_ID,
                             "recover-test-activation": RECOVER_TEST_ACTIVATION_ACTION_ID,
+                            "commit-tested-system": COMMIT_TESTED_SYSTEM_ACTION_ID,
+                            "rollback-committed-system": ROLLBACK_COMMITTED_SYSTEM_ACTION_ID,
                         },
                         "arbitraryCommandsAccepted": False,
                         "activationEnabled": False,
@@ -674,6 +746,12 @@ class HelperDispatcher:
                 return self._test_activation(request_id, request.payload, peer)
             if request.operation == "recover-test-activation":
                 return self._recover_test_activation(request_id, request.payload, peer)
+            if request.operation == "commit-tested-system":
+                return self._commit_tested_system(request_id, request.payload, peer)
+            if request.operation == "rollback-committed-system":
+                return self._rollback_committed_system(request_id, request.payload, peer)
+            if request.operation == "activation-session-status":
+                return self._activation_session_status(request_id, request.payload, peer.uid)
             if request.operation == "apply-validated-plan":
                 return self._apply(request_id, request.payload, peer)
             if request.operation == "apply-validated-home-manager-plan":
@@ -1100,6 +1178,69 @@ class HelperDispatcher:
             )
         result = self.backend.recover_test_activation(
             target, payload.session_id, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _commit_tested_system(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = CommitTestedSystemPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.permanent_switch_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit permanent switching"
+            )
+        details = {
+            "targetId": payload.target_id,
+            "sessionId": payload.session_id,
+            "planFingerprint": payload.plan_fingerprint,
+            "systemPath": payload.system_path,
+        }
+        if not self.authorizer.authorize(COMMIT_TESTED_SYSTEM_ACTION_ID, peer, details):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        result = self.backend.commit_tested_system(target, payload, peer.uid)
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _rollback_committed_system(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = ActivationSessionPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.permanent_switch_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit generation rollback"
+            )
+        details = {"targetId": payload.target_id, "sessionId": payload.session_id}
+        if not self.authorizer.authorize(
+            ROLLBACK_COMMITTED_SYSTEM_ACTION_ID, peer, details
+        ):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        result = self.backend.rollback_committed_system(
+            target, payload.session_id, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _activation_session_status(
+        self, request_id: str, raw: Any, peer_uid: int
+    ) -> dict[str, Any]:
+        payload = ActivationSessionPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.permanent_switch_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not expose permanent activation state"
+            )
+        result = self.backend.activation_session_status(
+            target, payload.session_id, peer_uid
         )
         return response_mapping(request_id, status="ok", result=result)
 

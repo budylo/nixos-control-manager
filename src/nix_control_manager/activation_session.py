@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import stat
 import subprocess
 import time
@@ -24,6 +25,14 @@ _STATES = frozenset(
         "recovered",
         "activation-failed",
         "recovery-required",
+        "commit-prepared",
+        "committing",
+        "committed",
+            "commit-failed",
+        "rollback-prepared",
+        "rolling-back",
+        "rolled-back",
+        "rollback-required",
     }
 )
 
@@ -179,7 +188,7 @@ class ActivationSessionStore:
             if path.is_symlink() or not _SESSION_ID.fullmatch(path.stem):
                 raise ActivationSessionError("Activation journal contains an unsafe entry")
             session = self.load(path.stem)
-            if session.state != "recovered":
+            if session.state not in {"recovered", "committed", "rolled-back"}:
                 sessions.append(session)
         return tuple(sessions)
 
@@ -238,6 +247,9 @@ def recover_activation_session(
             "activation-failed",
             "recovery-required",
             "recovering",
+            "commit-prepared",
+            "committing",
+            "commit-failed",
         }:
             raise ActivationSessionError(f"Session cannot be recovered from {session.state}")
         previous = Path(session.previous_system_path)
@@ -246,9 +258,38 @@ def recover_activation_session(
             raise ActivationSessionError("Previous NixOS system closure is unavailable")
         recovering = replace(session, state="recovering")
         store.write(recovering)
+        profile_link = Path("/nix/var/nix/profiles/system")
+        profile_before = str(profile_link.resolve()) if profile_link.exists() else None
+        profile_restore: subprocess.CompletedProcess[str] | None = None
+        if profile_before is not None and profile_before != session.previous_system_path:
+            nix_env = shutil.which("nix-env")
+            if not nix_env:
+                store.write(replace(recovering, state="recovery-required"))
+                raise ActivationSessionError("Recovery cannot restore the system profile")
+            try:
+                profile_restore = runner(
+                    [
+                        nix_env,
+                        "--profile",
+                        "/nix/var/nix/profiles/system",
+                        "--set",
+                        session.previous_system_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                    env=os.environ.copy(),
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                store.write(replace(recovering, state="recovery-required"))
+                raise ActivationSessionError(f"Profile recovery failed: {error}") from error
+            if profile_restore.returncode != 0:
+                store.write(replace(recovering, state="recovery-required"))
+                raise ActivationSessionError("Recovery could not restore the system profile")
         try:
             completed = runner(
-                [str(switch), "test"],
+                [str(switch), "switch" if profile_restore is not None else "test"],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -260,7 +301,12 @@ def recover_activation_session(
             raise ActivationSessionError(f"Recovery command failed: {error}") from error
         current_link = Path("/run/current-system")
         current = str(current_link.resolve()) if current_link.exists() else None
-        restored = completed.returncode == 0 and current == session.previous_system_path
+        profile_after = str(profile_link.resolve()) if profile_link.exists() else None
+        restored = (
+            completed.returncode == 0
+            and current == session.previous_system_path
+            and (profile_after is None or profile_after == session.previous_system_path)
+        )
         final = replace(
             recovering,
             state="recovered" if restored else "recovery-required",
@@ -270,7 +316,7 @@ def recover_activation_session(
         result = {
             **final.to_mapping(),
             "status": final.state,
-            "command": [str(switch), "test"],
+            "command": [str(switch), "switch" if profile_restore is not None else "test"],
             "stdout": (completed.stdout or "")[:64_000],
             "stderr": (completed.stderr or "")[:64_000],
             "currentSystemRestored": restored,
@@ -283,6 +329,232 @@ def recover_activation_session(
                 "Automatic recovery did not restore the previous runtime system"
             )
         return result
+
+
+def transition_activation_session(
+    journal_root: Path,
+    session_id: str,
+    *,
+    mode: str,
+    runner: Runner = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
+    timeout: int = 300,
+    current_link: Path = Path("/run/current-system"),
+    profile_link: Path = Path("/nix/var/nix/profiles/system"),
+) -> dict[str, Any]:
+    """Commit or roll back one exact tested system closure.
+
+    The caller cannot supply a command or path: both closures come exclusively
+    from the root-owned activation journal created by the verified test flow.
+    """
+
+    if mode not in {"commit", "rollback"}:
+        raise ActivationSessionError("Unsupported system transition mode")
+    store = ActivationSessionStore(journal_root)
+    expected = "commit-prepared" if mode == "commit" else "rollback-prepared"
+    running = "committing" if mode == "commit" else "rolling-back"
+    succeeded = "committed" if mode == "commit" else "rolled-back"
+    failed = "commit-failed" if mode == "commit" else "rollback-required"
+    with store.lock():
+        session = store.load(session_id)
+        if session.state != expected:
+            raise ActivationSessionError(
+                f"System transition requires {expected}, found {session.state}"
+            )
+
+    destination = (
+        session.candidate_system_path if mode == "commit" else session.previous_system_path
+    )
+    destination_path = Path(destination)
+    switch = destination_path / "bin" / "switch-to-configuration"
+    if (
+        destination_path.is_symlink()
+        or not destination_path.is_dir()
+        or not switch.is_file()
+        or not os.access(switch, os.X_OK)
+    ):
+        with store.lock():
+            store.write(replace(session, state="recovery-required" if mode == "commit" else failed))
+        raise ActivationSessionError("Journaled system closure is unavailable")
+
+    current_before = str(current_link.resolve()) if current_link.exists() else None
+    profile_before = str(profile_link.resolve()) if profile_link.exists() else None
+    expected_current = session.candidate_system_path
+    expected_profile = (
+        session.previous_system_path if mode == "commit" else session.candidate_system_path
+    )
+    if current_before != expected_current or profile_before != expected_profile:
+        with store.lock():
+            store.write(
+                replace(
+                    session,
+                    state="recovery-required" if mode == "commit" else failed,
+                )
+            )
+        raise ActivationSessionError("Runtime or profile changed before transition")
+
+    systemctl = which("systemctl")
+    nix_env = which("nix-env")
+    if not systemctl or not nix_env:
+        with store.lock():
+            store.write(
+                replace(
+                    session,
+                    state="recovery-required" if mode == "commit" else failed,
+                )
+            )
+        raise ActivationSessionError("Required system transition tools are unavailable")
+
+    if mode == "commit":
+        timer = f"ncm-test-rollback-{session_id}.timer"
+        try:
+            stopped = runner(
+                [systemctl, "stop", timer],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            with store.lock():
+                store.write(replace(session, state="recovery-required"))
+            raise ActivationSessionError(
+                f"Automatic recovery timer could not be stopped: {error}"
+            ) from error
+        if stopped.returncode != 0:
+            with store.lock():
+                store.write(replace(session, state="recovery-required"))
+            raise ActivationSessionError("Automatic recovery timer could not be stopped")
+
+    with store.lock():
+        session = store.load(session_id)
+        if session.state != expected:
+            raise ActivationSessionError("Activation session changed during transition")
+        session = replace(session, state=running)
+        store.write(session)
+
+    profile_command = [
+        nix_env,
+        "--profile",
+        str(profile_link),
+        "--set",
+        destination,
+    ]
+    try:
+        profile_result = runner(
+            profile_command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=os.environ.copy(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        profile_result = subprocess.CompletedProcess(profile_command, 125, "", "execution failed")
+    switch_result: subprocess.CompletedProcess[str] | None = None
+    if profile_result.returncode == 0:
+        try:
+            switch_result = runner(
+                [str(switch), "switch"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            switch_result = subprocess.CompletedProcess(
+                [str(switch), "switch"], 125, "", "execution failed"
+            )
+    current = str(current_link.resolve()) if current_link.exists() else None
+    profile = str(profile_link.resolve()) if profile_link.exists() else None
+    ok = (
+        profile_result.returncode == 0
+        and switch_result is not None
+        and switch_result.returncode == 0
+        and current == destination
+        and profile == destination
+    )
+    compensated = False
+    if not ok:
+        compensation = (
+            session.previous_system_path
+            if mode == "commit"
+            else session.candidate_system_path
+        )
+        compensation_switch = Path(compensation) / "bin" / "switch-to-configuration"
+        try:
+            restore_profile = runner(
+                [nix_env, "--profile", str(profile_link), "--set", compensation],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=os.environ.copy(),
+            )
+            restore_switch = runner(
+                [str(compensation_switch), "switch"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=os.environ.copy(),
+            ) if restore_profile.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            restore_profile = subprocess.CompletedProcess([], 125, "", "execution failed")
+            restore_switch = None
+        current = str(current_link.resolve()) if current_link.exists() else None
+        profile = str(profile_link.resolve()) if profile_link.exists() else None
+        compensated = (
+            restore_profile.returncode == 0
+            and restore_switch is not None
+            and restore_switch.returncode == 0
+            and current == compensation
+            and profile == compensation
+        )
+    final_state = succeeded if ok else (
+        "recovered" if mode == "commit" and compensated else
+        "committed" if mode == "rollback" and compensated else
+        "recovery-required" if mode == "commit" else failed
+    )
+    final = replace(
+        session,
+        state=final_state,
+        activation_exit_code=(
+            (switch_result.returncode if switch_result is not None else profile_result.returncode)
+            if mode == "commit"
+            else session.activation_exit_code
+        ),
+        recovery_exit_code=(
+            (switch_result.returncode if switch_result is not None else profile_result.returncode)
+            if mode == "rollback"
+            else session.recovery_exit_code
+        ),
+    )
+    with store.lock():
+        store.write(final)
+    result = {
+        **final.to_mapping(),
+        "status": final.state,
+        "systemPath": destination,
+        "profileCommand": profile_command,
+        "switchCommand": [str(switch), "switch"],
+        "profileExitCode": profile_result.returncode,
+        "switchExitCode": switch_result.returncode if switch_result else None,
+        "profileMatches": profile == destination,
+        "currentSystemMatches": current == destination,
+        "switchEnabled": True,
+        "rollbackEnabled": final.state == "committed",
+        "compensated": compensated,
+        "arbitraryCommandsAccepted": False,
+    }
+    if not ok:
+        raise ActivationSessionError(
+            f"System {mode} did not reach the exact journaled closure; "
+            f"compensation {'succeeded' if compensated else 'failed'}"
+        )
+    return result
 
 
 def recovery_main(argv: list[str] | None = None) -> int:
@@ -305,6 +577,33 @@ def recovery_main(argv: list[str] | None = None) -> int:
         )
     except (ActivationSessionError, ValueError) as error:
         print(f"ncm-test-recover: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def transition_main(argv: list[str] | None = None) -> int:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="ncm-system-transition")
+    parser.add_argument("--journal-root", type=Path, required=True)
+    parser.add_argument("--session-id", required=True)
+    parser.add_argument("--mode", choices=("commit", "rollback"), required=True)
+    parser.add_argument("--timeout", type=int, default=300)
+    arguments = parser.parse_args(argv)
+    if os.name != "posix" or not hasattr(os, "geteuid") or os.geteuid() != 0:
+        print("ncm-system-transition: root on POSIX is required", file=sys.stderr)
+        return 1
+    try:
+        result = transition_activation_session(
+            arguments.journal_root,
+            arguments.session_id,
+            mode=arguments.mode,
+            timeout=arguments.timeout,
+        )
+    except (ActivationSessionError, ValueError) as error:
+        print(f"ncm-system-transition: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, sort_keys=True))
     return 0

@@ -35,6 +35,7 @@ from .home_manager_inspector import (
     inspect_home_manager,
     managed_user_state_path,
 )
+from .generation_inspector import GenerationInspection, inspect_generations
 from .migration import load_migration_preview
 from .managed_plan import managed_plan_identity, plan_managed_state
 from .model import ManagedState
@@ -89,6 +90,7 @@ class NcmServer(ThreadingHTTPServer):
         home_manager_inspector: Callable[..., HomeManagerInspection] = inspect_home_manager,
         home_manager_planner: Callable[..., Any] = plan_home_manager_adoption,
         home_manager_validator: Callable[..., Any] = validate_home_manager_adoption,
+        generation_inspector: Callable[..., GenerationInspection] = inspect_generations,
         local_write_enabled: bool = True,
     ) -> None:
         super().__init__(server_address, handler)
@@ -103,6 +105,7 @@ class NcmServer(ThreadingHTTPServer):
         self.home_manager_inspector = home_manager_inspector
         self.home_manager_planner = home_manager_planner
         self.home_manager_validator = home_manager_validator
+        self.generation_inspector = generation_inspector
         self.local_write_enabled = local_write_enabled
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
@@ -373,6 +376,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(build_preview(state, self.server.output_path))
             elif path == "/api/system":
                 self._json(inspect_system(self.server.config_root).to_mapping())
+            elif path == "/api/generations":
+                self._json(self.server.generation_inspector().to_mapping())
             elif path == "/api/adoption":
                 self._json(plan_adoption(self.server.config_root).to_mapping())
             elif path == "/api/helper":
@@ -722,6 +727,75 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.server.helper_adapter.recover_test_activation(
                         session_id=payload["sessionId"]
                     )
+                )
+                return
+            if path == "/api/helper/commit-tested-system":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if (
+                    set(payload) != {"sessionId", "confirmed"}
+                    or payload.get("confirmed") is not True
+                    or not isinstance(payload.get("sessionId"), str)
+                    or not re.fullmatch(r"[0-9a-f]{24}", payload["sessionId"])
+                ):
+                    raise ValidationError(
+                        "An exact sessionId and explicit confirmation are required"
+                    )
+                build = self.server.build_manager.latest(after=0)
+                outputs = build.get("outputPaths") or []
+                fingerprint = build.get("planFingerprint")
+                if (
+                    build.get("status") != "passed"
+                    or len(outputs) != 1
+                    or not isinstance(fingerprint, str)
+                ):
+                    raise ValidationError(
+                        "A successful single-output build preview is required"
+                    )
+                self._json(
+                    self.server.helper_adapter.commit_tested_system(
+                        system_path=outputs[0],
+                        plan_fingerprint=fingerprint,
+                        session_id=payload["sessionId"],
+                    ),
+                    HTTPStatus.ACCEPTED,
+                )
+                return
+            if path == "/api/helper/activation-session-status":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if (
+                    set(payload) != {"sessionId"}
+                    or not isinstance(payload.get("sessionId"), str)
+                    or not re.fullmatch(r"[0-9a-f]{24}", payload["sessionId"])
+                ):
+                    raise ValidationError("A single exact sessionId is required")
+                self._json(
+                    self.server.helper_adapter.activation_session_status(
+                        session_id=payload["sessionId"]
+                    )
+                )
+                return
+            if path == "/api/helper/rollback-committed-system":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if (
+                    set(payload) != {"sessionId", "confirmed"}
+                    or payload.get("confirmed") is not True
+                    or not isinstance(payload.get("sessionId"), str)
+                    or not re.fullmatch(r"[0-9a-f]{24}", payload["sessionId"])
+                ):
+                    raise ValidationError(
+                        "An exact committed sessionId and explicit confirmation are required"
+                    )
+                self._json(
+                    self.server.helper_adapter.rollback_committed_system(
+                        session_id=payload["sessionId"]
+                    ),
+                    HTTPStatus.ACCEPTED,
                 )
                 return
             state = self._read_state()

@@ -94,4 +94,24 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+
+  <action id="org.nixos.nix-control-manager.commit-tested-system">
+    <description>Make the exact tested NixOS system permanent</description>
+    <message>Authentication is required to switch the system profile to the exact tested closure</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.rollback-committed-system">
+    <description>Roll back the last committed Nix Control Manager system</description>
+    <message>Authentication is required to restore the exact previous system closure</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

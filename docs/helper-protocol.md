@@ -227,3 +227,24 @@ entrypoint and verifies `/run/current-system`; a mismatch leaves
 
 The system profile and boot generation are not changed. Runtime timers cannot
 cover power loss or kernel panic and do not replace normal boot recovery.
+
+## Live-control backend boundary
+
+Helper configuration schema 6 adds the explicit `mode: "live-control"`. It
+retains the exact live-test gates and adds three typed operations:
+`commit-tested-system`, `activation-session-status`, and
+`rollback-committed-system`.
+
+Commit accepts only a target ID, the exact validated system path and
+fingerprint, and the 24-hex session ID created by the preceding test. The
+backend re-evaluates the source, resolves the derivation output, verifies the
+active test session and peer UID, then schedules a root transition whose paths
+come only from the root-owned journal. The transition stops automatic test
+recovery, sets `/nix/var/nix/profiles/system` to the tested closure, invokes its
+fixed `switch` entrypoint, and verifies both runtime and profile links.
+
+Rollback accepts only the target and session ID. It can restore only the exact
+previous closure recorded in that committed session. Commit and rollback have
+separate Polkit actions and compensating transitions; partial failures remain
+visible as recovery-required states. No operation accepts a command, profile
+path, arbitrary generation, or replacement closure.

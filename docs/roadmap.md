@@ -62,13 +62,16 @@
   NixOS adoption remains unavailable);
 - opt-in exact-output `test` activation with a UID-bound receipt, root-only
   journal, timer-first automatic runtime recovery, and separate manual recovery
-  (implemented experimentally; permanent `switch` remains disabled);
+  (implemented experimentally);
 - green end-to-end recovery regression in a disposable NixOS VM, including
   receipt replay rejection, unchanged profile/source proofs, and timer-driven
   restoration of the previous runtime closure (implemented and part of flake
   checks), with TTY, manual, power-loss, and failed-recovery operator guidance
   (implemented);
-- `switch`, generation history, and boot-generation rollback.
+- exact tested-output `switch`, read-only generation history, and journal-bound
+  rollback to the immediately previous closure (implemented in the separate
+  `live-control` mode); arbitrary generation selection and bootloader editing
+  remain future work.
 
 ## Milestone 4 — Typed NixOS options
 

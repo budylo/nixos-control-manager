@@ -5,10 +5,12 @@ import unittest
 
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
+    COMMIT_TESTED_SYSTEM_ACTION_ID,
     HOME_MANAGER_APPLY_ACTION_ID,
     HOME_MANAGER_RECOVER_ACTION_ID,
     PeerIdentity,
     MANAGED_APPLY_ACTION_ID,
+    ROLLBACK_COMMITTED_SYSTEM_ACTION_ID,
 )
 from nix_control_manager.polkit_authorizer import PolkitAuthorizer
 
@@ -90,6 +92,8 @@ class PolkitAuthorizerTests(unittest.TestCase):
             HOME_MANAGER_APPLY_ACTION_ID,
             HOME_MANAGER_RECOVER_ACTION_ID,
             MANAGED_APPLY_ACTION_ID,
+            COMMIT_TESTED_SYSTEM_ACTION_ID,
+            ROLLBACK_COMMITTED_SYSTEM_ACTION_ID,
         ):
             self.assertTrue(
                 authorizer.authorize(
@@ -98,7 +102,7 @@ class PolkitAuthorizerTests(unittest.TestCase):
                     {"targetId": "fixture", "writeScope": "ncm/state.json:ncm/packages.nix"},
                 )
             )
-        self.assertEqual(len(self.commands), 3)
+        self.assertEqual(len(self.commands), 5)
 
     def test_denies_invalid_details_and_pkcheck_failure(self) -> None:
         authorizer = PolkitAuthorizer(

@@ -26,6 +26,7 @@ from .candidate import (
 )
 from .helper_backend_common import match_local_adoption_plan
 from .helper_protocol import (
+    CommitTestedSystemPayload,
     PreviewActivationPayload,
     ValidateHomeManagerPlanPayload,
     ValidatePlanPayload,
@@ -223,13 +224,22 @@ class LiveReadOnlyHelperBackend:
             runner=self.runner,
             which=self.which,
         )
-        if (
-            validation.status != "passed"
-            or validation.plan_fingerprint != payload.plan_fingerprint
-            or not validation.checks
-        ):
+        if validation.status != "passed" or not validation.checks:
+            detail = ""
+            if validation.checks:
+                failed = validation.checks[-1]
+                diagnostic = (failed.stderr or failed.stdout).strip()
+                if diagnostic:
+                    if len(diagnostic) > 6000:
+                        diagnostic = diagnostic[:3000] + "\n…\n" + diagnostic[-3000:]
+                    detail = f": {diagnostic}"
             raise HelperBackendError(
-                "validation-failed", "The exact candidate no longer passes validation"
+                "validation-failed",
+                f"The exact candidate no longer passes validation{detail}",
+            )
+        if validation.plan_fingerprint != payload.plan_fingerprint:
+            raise HelperBackendError(
+                "plan-mismatch", "The adoption plan changed during validation"
             )
         drv_lines = [
             line.strip()
@@ -257,9 +267,12 @@ class LiveReadOnlyHelperBackend:
             raise HelperBackendError("output-query-failed", str(error)) from error
         outputs = [line.strip() for line in queried.stdout.splitlines() if line.strip()]
         if queried.returncode != 0 or outputs != [payload.system_path]:
+            actual = outputs[0] if len(outputs) == 1 else "no single output"
             raise HelperBackendError(
                 "output-mismatch",
-                "The supplied system path is not the exact validated candidate output",
+                "The supplied system path is not the exact validated candidate output "
+                f"(expected {payload.system_path}, evaluated {actual}, "
+                f"derivation {drv_lines[0]})",
             )
         system_path = Path(payload.system_path)
         switch = system_path / "bin" / "switch-to-configuration"
@@ -518,6 +531,191 @@ class LiveReadOnlyHelperBackend:
             "configurationWriteEnabled": False,
         }
 
+    def _schedule_system_transition(
+        self,
+        target: HelperTarget,
+        session: ActivationSession,
+        *,
+        mode: str,
+    ) -> Mapping[str, Any]:
+        if target.test_journal_root is None:
+            raise HelperBackendError("operation-disabled", "Activation journal is disabled")
+        systemd_run = self._system_tool("systemd-run")
+        transition = self._system_tool("ncm-system-transition")
+        transition_path = os.environ.get("PATH")
+        if not transition_path:
+            raise HelperBackendError(
+                "system-tool-unavailable", "The helper PATH is unavailable"
+            )
+        unit = f"ncm-system-{mode}-{session.session_id}"
+        command = [
+            systemd_run,
+            "--quiet",
+            "--no-block",
+            "--collect",
+            f"--unit={unit}",
+            "--property=Type=oneshot",
+            f"--setenv=PATH={transition_path}",
+            transition,
+            "--journal-root",
+            str(target.test_journal_root),
+            "--session-id",
+            session.session_id,
+            "--mode",
+            mode,
+            "--timeout",
+            str(self.timeout),
+        ]
+        try:
+            scheduled = self.runner(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise HelperBackendError("transition-schedule-failed", str(error)) from error
+        if scheduled.returncode != 0:
+            raise HelperBackendError(
+                "transition-schedule-failed",
+                f"The exact system {mode} unit could not be scheduled",
+            )
+        return {
+            **session.to_mapping(),
+            "status": "committing" if mode == "commit" else "rolling-back",
+            "systemPath": (
+                session.candidate_system_path
+                if mode == "commit"
+                else session.previous_system_path
+            ),
+            "transitionUnit": unit,
+            "switchEnabled": True,
+            "rollbackEnabled": True,
+            "arbitraryCommandsAccepted": False,
+        }
+
+    def commit_tested_system(
+        self,
+        target: HelperTarget,
+        payload: CommitTestedSystemPayload,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        if (
+            not target.permanent_switch_enabled
+            or not target.test_activation_enabled
+            or target.test_journal_root is None
+        ):
+            raise HelperBackendError("operation-disabled", "Permanent switch is disabled")
+        self._verified_candidate(target, payload.preview_payload())
+        store = ActivationSessionStore(target.test_journal_root)
+        try:
+            with store.lock():
+                session = store.load(payload.session_id)
+                if (
+                    session.state != "active"
+                    or session.target_id != target.target_id
+                    or session.peer_uid != peer_uid
+                    or session.plan_fingerprint != payload.plan_fingerprint
+                    or session.candidate_system_path != payload.system_path
+                ):
+                    raise ActivationSessionError(
+                        "Only this user's exact active test session can be committed"
+                    )
+                current = str(Path("/run/current-system").resolve())
+                profile = str(Path("/nix/var/nix/profiles/system").resolve())
+                if (
+                    current != session.candidate_system_path
+                    or profile != session.previous_system_path
+                ):
+                    raise ActivationSessionError(
+                        "Runtime or profile changed after the tested activation"
+                    )
+                prepared = replace(session, state="commit-prepared")
+                store.write(prepared)
+        except ActivationSessionError as error:
+            raise HelperBackendError("commit-precondition-failed", str(error)) from error
+        try:
+            return self._schedule_system_transition(target, prepared, mode="commit")
+        except HelperBackendError:
+            try:
+                with store.lock():
+                    latest = store.load(payload.session_id)
+                    if latest.state == "commit-prepared":
+                        store.write(replace(latest, state="active"))
+            except ActivationSessionError:
+                pass
+            raise
+
+    def rollback_committed_system(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        if not target.permanent_switch_enabled or target.test_journal_root is None:
+            raise HelperBackendError("operation-disabled", "Generation rollback is disabled")
+        store = ActivationSessionStore(target.test_journal_root)
+        try:
+            with store.lock():
+                session = store.load(session_id)
+                if (
+                    session.state != "committed"
+                    or session.target_id != target.target_id
+                    or session.peer_uid != peer_uid
+                ):
+                    raise ActivationSessionError(
+                        "Only this user's committed NCM activation can be rolled back"
+                    )
+                current = str(Path("/run/current-system").resolve())
+                profile = str(Path("/nix/var/nix/profiles/system").resolve())
+                if (
+                    current != session.candidate_system_path
+                    or profile != session.candidate_system_path
+                ):
+                    raise ActivationSessionError(
+                        "Current runtime/profile no longer matches the committed session"
+                    )
+                prepared = replace(session, state="rollback-prepared")
+                store.write(prepared)
+        except ActivationSessionError as error:
+            raise HelperBackendError("rollback-precondition-failed", str(error)) from error
+        try:
+            return self._schedule_system_transition(target, prepared, mode="rollback")
+        except HelperBackendError:
+            try:
+                with store.lock():
+                    latest = store.load(session_id)
+                    if latest.state == "rollback-prepared":
+                        store.write(replace(latest, state="committed"))
+            except ActivationSessionError:
+                pass
+            raise
+
+    def activation_session_status(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        if not target.permanent_switch_enabled or target.test_journal_root is None:
+            raise HelperBackendError("operation-disabled", "Activation status is disabled")
+        try:
+            store = ActivationSessionStore(target.test_journal_root)
+            with store.lock():
+                session = store.load(session_id)
+            if session.target_id != target.target_id or session.peer_uid != peer_uid:
+                raise ActivationSessionError("Activation session does not match this user")
+        except ActivationSessionError as error:
+            raise HelperBackendError("activation-status-failed", str(error)) from error
+        return {
+            **session.to_mapping(),
+            "status": session.state,
+            "systemPath": (
+                session.previous_system_path
+                if session.state in {"recovered", "rolled-back"}
+                else session.candidate_system_path
+            ),
+            "switchEnabled": True,
+            "rollbackEnabled": session.state == "committed",
+            "arbitraryCommandsAccepted": False,
+        }
+
 
 class RoutingHelperBackend:
     def __init__(
@@ -613,6 +811,25 @@ class RoutingHelperBackend:
         self, target: HelperTarget, session_id: str, peer_uid: int
     ):
         return self._backend(target).recover_test_activation(target, session_id, peer_uid)
+
+    def commit_tested_system(
+        self, target: HelperTarget, payload: CommitTestedSystemPayload, peer_uid: int
+    ):
+        return self._backend(target).commit_tested_system(target, payload, peer_uid)
+
+    def rollback_committed_system(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ):
+        return self._backend(target).rollback_committed_system(
+            target, session_id, peer_uid
+        )
+
+    def activation_session_status(
+        self, target: HelperTarget, session_id: str, peer_uid: int
+    ):
+        return self._backend(target).activation_session_status(
+            target, session_id, peer_uid
+        )
 
     def discard_validated_plan(
         self, target: HelperTarget, plan: ValidatePlanPayload, peer_uid: int

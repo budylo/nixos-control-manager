@@ -55,6 +55,9 @@ class SequenceSender:
         if request["operation"] == "test-activation" and isinstance(response.get("result"), dict):
             response["result"]["planFingerprint"] = request["payload"]["planFingerprint"]
             response["result"]["systemPath"] = request["payload"]["systemPath"]
+        if request["operation"] == "commit-tested-system" and isinstance(response.get("result"), dict):
+            response["result"]["planFingerprint"] = request["payload"]["planFingerprint"]
+            response["result"]["systemPath"] = request["payload"]["systemPath"]
         return response
 
 
@@ -177,6 +180,45 @@ def managed_capabilities() -> dict:
         ]
     )
     return result
+
+
+def permanent_capabilities() -> dict:
+    result = managed_capabilities()
+    target = result["result"]["targets"][0]
+    target.update(
+        {
+            "dryActivatePreviewEnabled": True,
+            "testActivationEnabled": True,
+            "permanentSwitchEnabled": True,
+            "rollbackGenerationEnabled": True,
+        }
+    )
+    result["result"]["operations"].extend(
+        [
+            "commit-tested-system",
+            "rollback-committed-system",
+            "activation-session-status",
+        ]
+    )
+    return result
+
+
+def permanent_result(status: str) -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "permanent",
+        "status": "ok",
+        "result": {
+            "status": status,
+            "sessionId": "c" * 24,
+            "systemPath": "/nix/store/" + "d" * 32 + "-nixos-system-test",
+            "planFingerprint": "e" * 64,
+            "switchEnabled": True,
+            "rollbackEnabled": status != "rolled-back",
+            "arbitraryCommandsAccepted": False,
+        },
+        "error": None,
+    }
 
 
 def managed_validation() -> dict:
@@ -498,6 +540,47 @@ class HelperUiAdapterTests(unittest.TestCase):
         self.assertEqual(
             sender.requests[3][1]["operation"], "recover-test-activation"
         )
+
+    def test_permanent_switch_status_and_rollback_remain_bound_to_one_session(self) -> None:
+        sender = SequenceSender(
+            permanent_capabilities(),
+            permanent_result("committing"),
+            permanent_capabilities(),
+            permanent_result("committed"),
+            permanent_capabilities(),
+            permanent_result("rolling-back"),
+        )
+        adapter = self.adapter(sender)
+        system_path = "/nix/store/" + "d" * 32 + "-nixos-system-test"
+        committed = adapter.commit_tested_system(
+            system_path=system_path,
+            plan_fingerprint=build_validate_request(
+                self.root, target_id="live", flake_target=None
+            )["payload"]["planFingerprint"],
+            session_id="c" * 24,
+        )
+        self.assertEqual(committed["status"], "committing")
+        request = sender.requests[1][1]
+        self.assertEqual(request["operation"], "commit-tested-system")
+        self.assertEqual(request["payload"]["sessionId"], "c" * 24)
+        self.assertEqual(request["payload"]["systemPath"], system_path)
+
+        status = adapter.activation_session_status(session_id="c" * 24)
+        self.assertEqual(status["status"], "committed")
+        self.assertEqual(sender.requests[3][1]["operation"], "activation-session-status")
+
+        rollback = adapter.rollback_committed_system(session_id="c" * 24)
+        self.assertEqual(rollback["status"], "rolling-back")
+        self.assertEqual(sender.requests[5][1]["operation"], "rollback-committed-system")
+
+    def test_permanent_switch_capability_fails_closed_without_exact_scope(self) -> None:
+        advertised = permanent_capabilities()
+        advertised["result"]["targets"][0]["allowedRelativePaths"].append(
+            "configuration.nix"
+        )
+        status = self.adapter(SequenceSender(advertised)).status()
+        self.assertTrue(status["available"])
+        self.assertFalse(status["permanentSwitchEnabled"])
 
     def test_live_home_manager_validation_and_apply_are_exact_and_non_activating(self) -> None:
         validation_request = build_home_manager_validate_request(

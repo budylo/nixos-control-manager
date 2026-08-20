@@ -422,6 +422,78 @@ def _target_v5(raw: Any) -> HelperTarget:
         raise HelperConfigurationError(str(error)) from error
 
 
+def _target_v6(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "target")
+    if mapping.get("mode") != "live-control":
+        return _target_v5(raw)
+    _exact_keys(
+        mapping,
+        {
+            "targetId",
+            "mode",
+            "configurationRoot",
+            "journalRoot",
+            "testJournalRoot",
+            "testTimeoutSeconds",
+            "homeManagerRoot",
+            "homeManagerJournalRoot",
+            "managedJournalRoot",
+            "allowedRelativePaths",
+            "flakeTarget",
+        },
+        "target",
+    )
+    if any(
+        mapping[key] is not None
+        for key in ("journalRoot", "homeManagerRoot", "homeManagerJournalRoot")
+    ):
+        raise HelperConfigurationError(
+            "live-control must disable fixture and Home Manager journals"
+        )
+    root = _absolute_path(mapping["configurationRoot"], "configurationRoot")
+    normalized = str(root).replace("\\", "/")
+    if root.as_posix() != "/etc/nixos" and not normalized.endswith("/etc/nixos"):
+        raise HelperConfigurationError("live-control is restricted to /etc/nixos")
+    test_journal = _absolute_path(mapping["testJournalRoot"], "testJournalRoot")
+    managed_journal = _absolute_path(
+        mapping["managedJournalRoot"], "managedJournalRoot"
+    )
+    for label, path in (
+        ("testJournalRoot", test_journal),
+        ("managedJournalRoot", managed_journal),
+    ):
+        if path == root or path.is_relative_to(root):
+            raise HelperConfigurationError(f"{label} must be outside configurationRoot")
+    if test_journal == managed_journal:
+        raise HelperConfigurationError("live-control journals must be separate")
+    allowed = _allowed_paths(mapping["allowedRelativePaths"])
+    if allowed != frozenset({"ncm/state.json", "ncm/packages.nix"}):
+        raise HelperConfigurationError(
+            "live-control requires the exact NCM-owned two-file allow-list"
+        )
+    timeout = mapping["testTimeoutSeconds"]
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 30 <= timeout <= 1800:
+        raise HelperConfigurationError("testTimeoutSeconds must be between 30 and 1800")
+    try:
+        return HelperTarget(
+            target_id=mapping["targetId"],
+            configuration_root=root,
+            journal_root=None,
+            allowed_relative_paths=allowed,
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target=_flake_target(mapping["flakeTarget"]),
+            test_activation_enabled=True,
+            test_journal_root=test_journal,
+            test_timeout_seconds=timeout,
+            managed_write_enabled=True,
+            managed_journal_root=managed_journal,
+            permanent_switch_enabled=True,
+        )
+    except (TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
 @dataclass(frozen=True, slots=True)
 class HelperDaemonConfig:
     socket_path: Path
@@ -448,9 +520,9 @@ class HelperDaemonConfig:
             "helper configuration",
         )
         schema_version = mapping["schemaVersion"]
-        if schema_version not in {1, 2, 3, 4, 5}:
+        if schema_version not in {1, 2, 3, 4, 5, 6}:
             raise HelperConfigurationError(
-                "Only helper configuration schemaVersion 1 through 5 are supported"
+                "Only helper configuration schemaVersion 1 through 6 are supported"
             )
         timeout = mapping["validationTimeout"]
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 900:
@@ -464,6 +536,7 @@ class HelperDaemonConfig:
             3: _target_v3,
             4: _target_v4,
             5: _target_v5,
+            6: _target_v6,
         }[schema_version]
         targets = tuple(target_loader(item) for item in targets_raw)
         if len({target.target_id for target in targets}) != len(targets):

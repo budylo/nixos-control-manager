@@ -306,6 +306,7 @@ def validate_adoption(
                 if mode == "channels":
                     command = (
                         instantiate,
+                        "--show-trace",
                         "<nixpkgs/nixos>",
                         "-A",
                         "system",

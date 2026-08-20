@@ -12,10 +12,10 @@ case "$1" in
   dry-activate)
     echo "NCM disposable candidate dry activation"
     ;;
-  test)
+  test|switch)
     candidate="$(${pkgs.coreutils}/bin/dirname "$(${pkgs.coreutils}/bin/dirname "$0")")"
     ${pkgs.coreutils}/bin/ln -sfn "$candidate" /run/current-system
-    echo active > /run/ncm-live-test-candidate
+    echo "$1" > /run/ncm-live-test-candidate
     ;;
   *)
     echo "unsupported VM-only activation mode: $1" >&2

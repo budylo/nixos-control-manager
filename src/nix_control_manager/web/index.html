@@ -28,7 +28,7 @@
           <p class="nav-label">Конфігурація</p>
           <button id="homeManagerNav" class="nav-item" type="button"><span>⌂</span> Home Manager</button>
           <button class="nav-item" type="button" disabled><span>❄</span> Flakes <small>згодом</small></button>
-          <button class="nav-item" type="button" disabled><span>◴</span> Покоління <small>згодом</small></button>
+          <button id="generationsNav" class="nav-item" type="button"><span>◴</span> Покоління</button>
         </nav>
 
         <div class="sidebar-statuses">
@@ -40,9 +40,9 @@
             <span class="note-dot muted"></span>
             <div><strong>Системний helper</strong><small>пошук read-only socket…</small></div>
           </div>
-          <div class="sidebar-note">
+          <div id="safetyModeNote" class="sidebar-note">
             <span class="note-dot"></span>
-            <div><strong>Безпечний режим</strong><small>build лише в Nix store; постійний switch вимкнено</small></div>
+            <div><strong>Безпечний режим</strong><small>build лише в Nix store; очікування helper-а</small></div>
           </div>
         </div>
       </aside>
@@ -225,6 +225,46 @@
             <p>Виберіть виявленого користувача або змініть пошуковий запит.</p>
           </div>
         </div>
+
+        <div id="generationsPage" class="page-panel" hidden>
+          <section class="hero generations-hero">
+            <div>
+              <span class="hero-tag">Історія системи · лише читання</span>
+              <h2>Покоління NixOS.<br><em>Завжди видно шлях назад.</em></h2>
+              <p>NCM читає системний профіль, поточну runtime-систему та покоління, з яким запущено WSL. Жодне посилання профілю або активна система на цьому етапі не змінюються.</p>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">◴</span>
+            </div>
+          </section>
+
+          <section id="generationStatus" class="generation-status" aria-live="polite">
+            <span class="effective-settings-icon" aria-hidden="true">◴</span>
+            <div>
+              <strong id="generationStatusTitle">Читання системного профілю…</strong>
+              <small id="generationStatusDetail">Без запуску rebuild або зміни профілю.</small>
+            </div>
+            <button id="refreshGenerations" type="button">Оновити</button>
+          </section>
+
+          <section class="catalog-heading">
+            <div>
+              <p class="section-kicker">Системний профіль</p>
+              <h2>Доступні покоління</h2>
+            </div>
+            <p id="generationCount" class="result-count"></p>
+          </section>
+          <section id="generationList" class="generation-list" aria-live="polite"></section>
+          <section id="generationBoundary" class="generation-boundary">
+            <span>○</span>
+            <div>
+              <strong id="generationBoundaryTitle">Кероване перемикання очікує helper-а</strong>
+              <small id="generationBoundaryDetail">Постійним можна зробити лише точний output активної test-сесії; відкат обмежено останньою NCM-активацією.</small>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
 
@@ -387,6 +427,8 @@
           <button id="runActivationPreviewButton" class="button helper-button compact" type="button" disabled>Системний dry-preview</button>
           <button id="runTestActivationButton" class="button danger compact" type="button" disabled>Тимчасово виконати test</button>
           <button id="recoverTestActivationButton" class="button secondary compact" type="button" hidden>Відновити зараз</button>
+          <button id="commitTestedSystemButton" class="button primary compact" type="button" hidden>Зробити постійним</button>
+          <button id="rollbackCommittedSystemButton" class="button danger compact" type="button" hidden>Відкотити цю активацію</button>
         </div>
         <pre id="closureDiffLog" class="candidate-validation-log activation-impact-log" hidden></pre>
         <pre id="activationPreviewLog" class="candidate-validation-log activation-impact-log" hidden></pre>
@@ -396,7 +438,7 @@
         <pre><code id="planCode">Завантаження…</code></pre>
       </div>
       <footer>
-        <div class="validation-state"><span>○</span><div><strong>Постійний switch вимкнено</strong><small>Test доступний лише в окремому opt-in режимі з автоматичним відновленням</small></div></div>
+        <div class="validation-state"><span>○</span><div><strong>Exact-output activation</strong><small>Постійний switch доступний лише після успішного build, dry-preview і test тієї самої сесії</small></div></div>
         <button id="closePlanFooter" class="button secondary" type="button">Готово</button>
       </footer>
     </aside>

@@ -146,6 +146,40 @@ class HelperDaemonConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(HelperConfigurationError, "two-file"):
             HelperDaemonConfig.load(self.config_path)
 
+    def test_schema_v6_combines_only_exact_managed_test_and_switch_scope(self) -> None:
+        live = Path(self.temporary.name) / "etc" / "nixos"
+        live.mkdir(parents=True)
+        raw = {
+            **{key: value for key, value in self.raw.items() if key != "targets"},
+            "schemaVersion": 6,
+            "targets": [
+                {
+                    "targetId": "control",
+                    "mode": "live-control",
+                    "configurationRoot": str(live),
+                    "journalRoot": None,
+                    "testJournalRoot": str(Path(self.temporary.name) / "test-journal"),
+                    "testTimeoutSeconds": 300,
+                    "homeManagerRoot": None,
+                    "homeManagerJournalRoot": None,
+                    "managedJournalRoot": str(Path(self.temporary.name) / "managed-journal"),
+                    "allowedRelativePaths": ["ncm/state.json", "ncm/packages.nix"],
+                    "flakeTarget": None,
+                }
+            ],
+        }
+        self.write(raw)
+        target = HelperDaemonConfig.load(self.config_path).targets[0]
+        self.assertTrue(target.test_activation_enabled)
+        self.assertTrue(target.managed_write_enabled)
+        self.assertTrue(target.permanent_switch_enabled)
+        self.assertFalse(target.apply_enabled)
+
+        raw["targets"][0]["testJournalRoot"] = raw["targets"][0]["managedJournalRoot"]
+        self.write(raw)
+        with self.assertRaisesRegex(HelperConfigurationError, "separate"):
+            HelperDaemonConfig.load(self.config_path)
+
     def test_schema_v2_rejects_writable_live_target_shapes(self) -> None:
         raw = json.loads(json.dumps(self.raw))
         raw["schemaVersion"] = 2
