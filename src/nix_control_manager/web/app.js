@@ -1795,6 +1795,10 @@ function updateBuildPreviewControls() {
 }
 
 function updateActivationPreviewControls() {
+  ui.runTestActivationButton.textContent = "Тимчасово виконати test";
+  ui.recoverTestActivationButton.textContent = "Відновити зараз";
+  ui.commitTestedSystemButton.textContent = "Зробити постійним";
+  ui.rollbackCommittedSystemButton.textContent = "Відкотити цю активацію";
   const ready = model.buildPreview?.activationPreviewReady === true;
   const helperReady = model.helper?.dryActivatePreviewEnabled === true;
   ui.runActivationPreviewButton.disabled = !ready || !helperReady;
@@ -2358,8 +2362,8 @@ async function initialize() {
     model.savedPackages = new Set(state.packages);
     initializeHomePackageSelections();
     renderSystemTarget(system);
-    renderAdoptionPlan(adoption);
     renderHelperStatus(helper);
+    renderAdoptionPlan(adoption);
     renderBuildPreview(buildPreview);
     if (activeBuildStatuses.has(buildPreview.status)) pollBuildPreview();
     renderHomeBuildPreview(homeBuildPreview);
