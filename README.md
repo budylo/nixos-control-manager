@@ -1,5 +1,7 @@
 # Nix Control Manager
 
+[![CI](https://github.com/budylo/nixos-control-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/budylo/nixos-control-manager/actions/workflows/ci.yml)
+
 Nix Control Manager is an approachable graphical control center for NixOS. It
 keeps the operating system declarative by generating a small, transparent NixOS
 module instead of rewriting a user's configuration.

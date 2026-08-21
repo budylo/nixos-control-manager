@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Python and web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up minimum supported Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Test with Python 3.11
+        run: python -m unittest discover -s tests
+
+      - name: Set up current Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+
+      - name: Test and compile with Python 3.14
+        run: |
+          python -m unittest discover -s tests
+          python -m compileall -q src tests
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: Test and parse the web client
+        run: |
+          node tests/test_web_settings.js
+          node --check src/nix_control_manager/web/settings.js
+          node --check src/nix_control_manager/web/app.js
+
+  nix-static:
+    name: Nix evaluation and static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Evaluate every flake output
+        run: nix flake check --no-build --show-trace
+
+      - name: Build non-VM flake checks
+        run: |
+          nix build --no-link --print-build-logs \
+            .#checks.x86_64-linux.settings-options \
+            .#checks.x86_64-linux.web-settings \
+            .#checks.x86_64-linux.activation-transition \
+            .#checks.x86_64-linux.home-manager-detection \
+            .#checks.x86_64-linux.nixos-module \
+            .#checks.x86_64-linux.channel-module
+
+  nixos-vms:
+    name: NixOS VM integration suite
+    needs:
+      - quality
+      - nix-static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Nix and configure KVM
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Verify hardware virtualization
+        run: test -r /dev/kvm -a -w /dev/kvm
+
+      - name: Run VM tests sequentially
+        run: |
+          tests=(
+            helper-vm-test
+            live-read-only-ui-vm-test
+            live-test-recovery-vm-test
+            live-home-manager-vm-test
+            live-managed-vm-test
+            live-control-vm-test
+          )
+          for test_name in "${tests[@]}"; do
+            echo "::group::$test_name"
+            nix build --no-link --print-build-logs ".#$test_name"
+            echo "::endgroup::"
+          done
