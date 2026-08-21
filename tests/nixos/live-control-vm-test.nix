@@ -19,8 +19,34 @@ let
       }
     });
   '';
+  candidateNcmModule = import ../../packaging/nixos-module.nix {
+    defaultPackage = pkgs: pkgs.runCommand "ncm-candidate-helper" { }
+      "mkdir -p $out/bin";
+  };
+  candidateConfiguration = { ... }: {
+    imports = [ instrumentation candidateNcmModule ncmFixture ];
+    boot.loader.grub.devices = [ "nodev" ];
+    fileSystems."/".device = "none";
+    fileSystems."/".fsType = "tmpfs";
+    networking.hostName = "ncm-live-control";
+    system.stateVersion = "26.05";
+    users.groups.ncm-control = { };
+    users.users.ncm-control = {
+      isSystemUser = true;
+      group = "ncm-control";
+    };
+    services.nix-control-manager-helper = {
+      enable = true;
+      mode = "live-control";
+      targetId = "control";
+      allowedUsers = [ "ncm-control" ];
+      validationTimeout = 300;
+      testActivationTimeout = 120;
+    };
+    security.polkit.extraConfig = polkitRule;
+  };
   candidateSystem = (import (pkgs.path + "/nixos") {
-    configuration = liveConfiguration;
+    configuration = candidateConfiguration;
     system = pkgs.stdenv.hostPlatform.system;
   }).system;
   recoveryTools = pkgs.buildEnv {
@@ -56,7 +82,7 @@ SCRIPT
         "mkdir -p $out/bin";
     })
   '';
-  liveConfiguration = builtins.toFile "configuration.nix" ''
+  liveConfiguration = pkgs.writeText "ncm-live-control-configuration.nix" ''
     { ... }:
     {
       imports = [
