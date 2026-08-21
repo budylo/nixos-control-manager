@@ -170,6 +170,15 @@ pkgs.testers.runNixOSTest {
     t.assertIn("/etc/nixos/ncm", paths)
     t.assertIn("${testJournal}", paths)
     t.assertIn("${managedJournal}", paths)
+    dependencies = machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p Requires -p Wants"
+    )
+    t.assertNotIn("polkit.service", next(
+      line for line in dependencies.splitlines() if line.startswith("Requires=")
+    ))
+    t.assertIn("polkit.service", next(
+      line for line in dependencies.splitlines() if line.startswith("Wants=")
+    ))
 
     source_hashes = machine.succeed(
       "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"

@@ -21,6 +21,37 @@ from nix_control_manager.helper_transport import UnixJsonHelperServer, send_unix
 from nix_control_manager.transaction import initialize_transaction_fixture
 
 
+class TransportResilienceTests(unittest.TestCase):
+    def test_disconnected_client_does_not_terminate_helper(self) -> None:
+        class AbandonedConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def sendall(self, encoded):
+                raise BrokenPipeError("caller disconnected")
+
+        class Listener:
+            def accept(self):
+                return AbandonedConnection(), None
+
+        class Dispatcher:
+            def handle(self, request, *, peer):
+                return {"status": "ok", "requestId": request["requestId"]}
+
+        server = object.__new__(UnixJsonHelperServer)
+        server._socket = Listener()
+        server.dispatcher = Dispatcher()
+        server._peer_identity = lambda connection: object()
+        server._read_frame = lambda connection: (
+            b'{"requestId":"abandoned-client"}'
+        )
+
+        self.assertTrue(server.handle_once())
+
+
 @unittest.skipUnless(
     os.name == "posix" and hasattr(socket, "SO_PEERCRED"),
     "Linux SO_PEERCRED is required",

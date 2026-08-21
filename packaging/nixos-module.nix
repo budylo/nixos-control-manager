@@ -432,8 +432,17 @@ in
         "Test-gated Nix Control Manager system switch helper"
       else
         "Read-only Nix Control Manager system helper";
-      requires = [ "polkit.service" ];
+      # A tested system activation can restart polkit.  A hard Requires=
+      # relationship would then stop this helper while it is still handling
+      # the activation request, leaving the journal in "activating" until the
+      # recovery timer fires.  Authentication has already failed closed before
+      # activation starts, so Wants= is sufficient for the test-capable modes.
+      requires = optionals (!hasTestActivation) [ "polkit.service" ];
+      wants = optionals hasTestActivation [ "polkit.service" ];
       after = [ "polkit.service" ];
+      # Let the currently authorised helper finish the test/commit/rollback
+      # transaction even when the candidate changes this unit's definition.
+      restartIfChanged = !hasTestActivation;
       path = [ cfg.package pkgs.nix pkgs.systemd ];
       environment = {
         # ProtectHome makes /root intentionally inaccessible. Nix still probes
@@ -510,6 +519,11 @@ in
       environment.systemPackages = [ clientBundle ];
       systemd.user.services.${guiServiceName} = {
         description = "Nix Control Manager read-only graphical server";
+        # A test activation may change this unit (for example while testing an
+        # NCM upgrade).  Keep the request-owning GUI alive until the helper has
+        # returned the exact session receipt; a later login/restart can adopt
+        # the new unit definition.
+        restartIfChanged = !hasTestActivation;
         path = [ clientCfg.package pkgs.nix ];
         environment = {
           HOME = "/tmp";

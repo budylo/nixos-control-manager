@@ -151,7 +151,14 @@ class UnixJsonHelperServer:
                     error_message="The request frame is invalid",
                 )
             encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
-            connection.sendall(encoded)
+            try:
+                connection.sendall(encoded)
+            except OSError:
+                # The privileged operation may have completed after its local
+                # caller disconnected (for example while user units reload).
+                # The signed journal remains authoritative; one abandoned
+                # response must never terminate the system helper daemon.
+                pass
         return True
 
     def serve_until(self, stop_event: threading.Event) -> None:

@@ -196,6 +196,10 @@
           liveManagedGuiUnit = evaluatedLiveManaged.config.systemd.user.units."nix-control-manager-gui.service".unit;
           liveControlService = evaluatedLiveControl.config.systemd.services.nix-control-manager-helper;
           liveControlServiceUnit = evaluatedLiveControl.config.systemd.units."nix-control-manager-helper.service".unit;
+          liveControlGuiService =
+            evaluatedLiveControl.config.systemd.user.services.nix-control-manager-gui;
+          liveControlGuiUnit =
+            evaluatedLiveControl.config.systemd.user.units."nix-control-manager-gui.service".unit;
           channelService = evaluatedChannel.config.systemd.services.nix-control-manager-helper;
           channelSocket = evaluatedChannel.config.systemd.sockets.nix-control-manager-helper;
           channelPackage = evaluatedChannel.config.services.nix-control-manager-helper.package;
@@ -392,6 +396,9 @@
             assert liveTestService.serviceConfig.ReadWritePaths == [ "/var/lib/nix-control-manager/test-activations" ];
             assert liveTestService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveTestService.serviceConfig);
+            assert liveTestService.requires == [ ];
+            assert liveTestService.wants == [ "polkit.service" ];
+            assert liveTestService.restartIfChanged == false;
             assert liveHomeService.serviceConfig.ReadWritePaths == [
               "/etc/nixos"
               "/var/lib/nix-control-manager/home-manager-transactions"
@@ -411,6 +418,10 @@
             ];
             assert liveControlService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveControlService.serviceConfig);
+            assert liveControlService.requires == [ ];
+            assert liveControlService.wants == [ "polkit.service" ];
+            assert liveControlService.restartIfChanged == false;
+            assert liveControlGuiService.restartIfChanged == false;
             assert socket.socketConfig.SocketMode == "0660";
             assert socket.socketConfig.SocketGroup == "nix-control-manager";
             pkgs.runCommand "nix-control-manager-module-check" { } ''
@@ -427,6 +438,11 @@
               grep -F 'ReadOnlyPaths=/etc/nixos' ${liveTestServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/test-activations' ${liveTestServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveTestServiceUnit}/nix-control-manager-helper.service
+              grep -F 'Wants=polkit.service' ${liveTestServiceUnit}/nix-control-manager-helper.service
+              if grep -F 'Requires=polkit.service' ${liveTestServiceUnit}/nix-control-manager-helper.service; then
+                echo 'live-test service unexpectedly requires polkit' >&2
+                exit 1
+              fi
               grep -F 'ReadWritePaths=/etc/nixos' ${liveHomeServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/home-manager-transactions' ${liveHomeServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveHomeServiceUnit}/nix-control-manager-helper.service
@@ -437,6 +453,12 @@
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/managed-transactions' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/test-activations' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -F 'Wants=polkit.service' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              if grep -F 'Requires=polkit.service' ${liveControlServiceUnit}/nix-control-manager-helper.service; then
+                echo 'live-control service unexpectedly requires polkit' >&2
+                exit 1
+              fi
+              grep -F 'X-RestartIfChanged=false' ${liveControlGuiUnit}/nix-control-manager-gui.service
               grep -F -- '--helper-socket /run/nix-control-manager/helper.sock' ${liveManagedGuiUnit}/nix-control-manager-gui.service
               grep -F -- '--helper-target managed' ${liveManagedGuiUnit}/nix-control-manager-gui.service
               if grep -F 'ReadWritePaths=' ${liveServiceUnit}/nix-control-manager-helper.service; then

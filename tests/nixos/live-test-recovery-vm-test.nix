@@ -184,6 +184,17 @@ pkgs.testers.runNixOSTest {
         ).strip(),
         "",
     )
+    dependencies = machine.succeed(
+        "systemctl show nix-control-manager-helper.service -p Requires -p Wants"
+    )
+    t.assertNotIn(
+        "polkit.service",
+        next(line for line in dependencies.splitlines() if line.startswith("Requires=")),
+    )
+    t.assertIn(
+        "polkit.service",
+        next(line for line in dependencies.splitlines() if line.startswith("Wants=")),
+    )
     machine.succeed("test $(stat -c %a ${journalRoot}) = 700")
 
     source_hashes = machine.succeed(
