@@ -1,0 +1,74 @@
+[
+  {
+    "id": "desktop-start",
+    "name": "Зручний старт",
+    "description": "Браузер, офіс, медіа, паролі, передавання файлів і базова діагностика.",
+    "category": "Щоденне",
+    "symbol": "✦",
+    "packages": ["firefox", "thunderbird", "libreoffice-fresh", "vlc", "keepassxc", "localsend", "fastfetch"],
+    "options": {}
+  },
+  {
+    "id": "office-study",
+    "name": "Робота й навчання",
+    "description": "Документи, нотатки, PDF, електронні книжки, рукописні анотації та сканування.",
+    "category": "Щоденне",
+    "symbol": "▤",
+    "packages": ["libreoffice-fresh", "joplin-desktop", "kdePackages.okular", "calibre", "xournalpp", "simple-scan"],
+    "options": {}
+  },
+  {
+    "id": "creator-studio",
+    "name": "Творча студія",
+    "description": "Фото, векторна графіка, малювання, 3D, монтаж, звук і запис екрана.",
+    "category": "Творчість",
+    "symbol": "◈",
+    "packages": ["gimp", "inkscape", "krita", "blender", "darktable", "kdePackages.kdenlive", "audacity", "obs-studio"],
+    "options": {}
+  },
+  {
+    "id": "developer-toolbox",
+    "name": "Набір розробника",
+    "description": "Редактор, Git/GitHub і добірка сучасних консольних інструментів.",
+    "category": "Розробка",
+    "symbol": "⌘",
+    "packages": ["vscodium", "git", "gh", "jq", "ripgrep", "fd", "bat", "fzf", "lazygit", "shellcheck"],
+    "options": {}
+  },
+  {
+    "id": "gaming-ready",
+    "name": "Готово до ігор",
+    "description": "Steam, популярні лаунчери, Proton-GE та оверлей продуктивності.",
+    "category": "Ігри",
+    "symbol": "✣",
+    "packages": ["prismlauncher", "heroic", "lutris", "mangohud", "protonup-qt"],
+    "options": {"programs.steam.enable": true}
+  },
+  {
+    "id": "laptop-care",
+    "name": "Турбота про ноутбук",
+    "description": "Оновлення прошивки, TRIM, енергоспоживання та помірний zram.",
+    "category": "Система",
+    "symbol": "⌁",
+    "packages": ["powertop", "lm_sensors", "smartmontools"],
+    "options": {"services.upower.enable": true, "services.fwupd.enable": true, "services.fstrim.enable": true, "zramSwap.enable": true, "zramSwap.memoryPercent": 25}
+  },
+  {
+    "id": "virtualization-lab",
+    "name": "Віртуальна лабораторія",
+    "description": "Графічне керування віртуальними машинами на базі libvirt.",
+    "category": "Система",
+    "symbol": "▣",
+    "packages": ["virt-manager", "qemu", "libguestfs"],
+    "options": {"virtualisation.libvirtd.enable": true, "programs.virt-manager.enable": true}
+  },
+  {
+    "id": "privacy-toolkit",
+    "name": "Приватність і секрети",
+    "description": "Паролі, шифрування файлів, структуровані секрети та ключі OpenPGP.",
+    "category": "Безпека",
+    "symbol": "◆",
+    "packages": ["keepassxc", "age", "sops", "gnupg", "yubikey-manager"],
+    "options": {"networking.firewall.enable": true}
+  }
+]

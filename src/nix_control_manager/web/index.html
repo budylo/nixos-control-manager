@@ -84,6 +84,17 @@
           <button id="adoptionPlanButton" class="button secondary" type="button">Переглянути план</button>
         </section>
 
+        <section class="preset-section" aria-labelledby="presetTitle">
+          <div class="preset-heading">
+            <div>
+              <p class="section-kicker">Готові набори</p>
+              <h2 id="presetTitle">Один клік — кілька узгоджених змін</h2>
+            </div>
+            <p>Набір лише додає програми й опції; ваш ручний вибір не вилучається.</p>
+          </div>
+          <div id="presetCatalog" class="preset-catalog" aria-live="polite"></div>
+        </section>
+
         <section class="controls" aria-label="Пошук і фільтри">
           <label class="search">
             <span aria-hidden="true">⌕</span>
@@ -91,6 +102,11 @@
             <kbd>/</kbd>
           </label>
           <div id="categoryFilters" class="filters"></div>
+          <div class="profile-actions" aria-label="Перенесення профілю">
+            <button id="importProfileButton" class="profile-button" type="button">Імпортувати</button>
+            <button id="exportProfileButton" class="profile-button" type="button">Експортувати</button>
+            <input id="profileFileInput" type="file" accept="application/json,.json" hidden>
+          </div>
         </section>
 
         <section class="catalog-heading">
@@ -445,6 +461,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="settings.js" defer></script>
+    <script src="catalog.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>

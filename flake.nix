@@ -240,12 +240,19 @@
           settings-options = import ./tests/nixos/settings-options-check.nix {
             inherit pkgs;
           };
+          package-catalog = import ./tests/nixos/package-catalog-check.nix {
+            inherit pkgs;
+          };
           web-settings = pkgs.runCommand "nix-control-manager-web-settings-check" {
             nativeBuildInputs = [ pkgs.nodejs ];
           } ''
             NCM_SETTINGS_JS=${./src/nix_control_manager/web/settings.js} \
               node ${./tests/test_web_settings.js}
+            NCM_SETTINGS_JS=${./src/nix_control_manager/web/settings.js} \
+              NCM_CATALOG_JS=${./src/nix_control_manager/web/catalog.js} \
+              node ${./tests/test_web_catalog.js}
             node --check ${./src/nix_control_manager/web/settings.js}
+            node --check ${./src/nix_control_manager/web/catalog.js}
             node --check ${./src/nix_control_manager/web/app.js}
             touch "$out"
           '';

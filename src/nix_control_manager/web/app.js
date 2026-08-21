@@ -5,6 +5,10 @@ const ui = {
   filters: document.querySelector("#categoryFilters"),
   resultCount: document.querySelector("#resultCount"),
   title: document.querySelector("#catalogTitle"),
+  presetCatalog: document.querySelector("#presetCatalog"),
+  importProfileButton: document.querySelector("#importProfileButton"),
+  exportProfileButton: document.querySelector("#exportProfileButton"),
+  profileFileInput: document.querySelector("#profileFileInput"),
   changeCount: document.querySelector("#changeCount"),
   previewButton: document.querySelector("#previewButton"),
   saveButton: document.querySelector("#saveButton"),
@@ -147,6 +151,7 @@ const model = {
   token: "",
   localWriteEnabled: true,
   catalog: [],
+  presets: [],
   settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
   savedPackages: new Set(),
@@ -252,10 +257,15 @@ function updateChangeState() {
   ui.drawerSaveButton.disabled = (!model.localWriteEnabled && !managedWrite) || count === 0 || invalid;
   ui.previewButton.disabled = invalid;
   if (model.managedApplyIntent) clearManagedApplyIntent();
+  if (ui.presetCatalog) renderPresets();
+}
+
+function systemCatalog() {
+  return model.catalog.filter((app) => (app.scopes || ["system"]).includes("system"));
 }
 
 function buildFilters() {
-  const categories = ["Усі", ...new Set(model.catalog.map((app) => app.category))];
+  const categories = ["Усі", "Популярні", ...new Set(systemCatalog().map((app) => app.category))];
   ui.filters.replaceChildren(...categories.map((category) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -272,8 +282,10 @@ function buildFilters() {
 
 function matches(app) {
   const query = ui.search.value.trim().toLocaleLowerCase("uk");
-  const categoryMatch = model.category === "Усі" || app.category === model.category;
-  const text = `${app.name} ${app.attribute} ${app.description}`.toLocaleLowerCase("uk");
+  const categoryMatch = model.category === "Усі"
+    || (model.category === "Популярні" ? app.featured : app.category === model.category);
+  const text = `${app.name} ${app.attribute} ${app.description} ${(app.tags || []).join(" ")}`
+    .toLocaleLowerCase("uk");
   return categoryMatch && (!query || text.includes(query));
 }
 
@@ -318,11 +330,126 @@ function appCard(app) {
 }
 
 function renderCatalog() {
-  const visible = model.catalog.filter(matches);
+  const available = systemCatalog();
+  const visible = available.filter(matches);
   ui.catalog.replaceChildren(...visible.map(appCard));
   ui.emptyState.hidden = visible.length > 0;
-  ui.resultCount.textContent = `${visible.length} із ${model.catalog.length}`;
-  ui.title.textContent = model.category === "Усі" ? "Рекомендовані програми" : model.category;
+  ui.resultCount.textContent = `${visible.length} із ${available.length}`;
+  ui.title.textContent = model.category === "Усі" ? "Усі програми" : model.category;
+}
+
+function countLabel(count, one, few, many) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  const word = lastTwo >= 11 && lastTwo <= 14
+    ? many
+    : last === 1 ? one : last >= 2 && last <= 4 ? few : many;
+  return `${count} ${word}`;
+}
+
+function presetCard(preset) {
+  const card = document.createElement("article");
+  const delta = NcmCatalog.presetDelta(preset, currentState());
+  card.className = `preset-card${delta === 0 ? " complete" : ""}`;
+
+  const symbol = document.createElement("span");
+  symbol.className = "preset-symbol";
+  symbol.textContent = preset.symbol;
+  const copy = document.createElement("div");
+  const category = document.createElement("span");
+  category.className = "preset-category";
+  category.textContent = preset.category;
+  const name = document.createElement("h3");
+  name.textContent = preset.name;
+  const description = document.createElement("p");
+  description.textContent = preset.description;
+  const summary = document.createElement("small");
+  const optionCount = Object.keys(preset.options || {}).length;
+  summary.textContent = countLabel(preset.packages.length, "програма", "програми", "програм")
+    + (optionCount ? ` · ${countLabel(optionCount, "системна опція", "системні опції", "системних опцій")}` : "");
+  copy.append(category, name, description, summary);
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.disabled = delta === 0;
+  button.textContent = delta === 0 ? "Додано" : "Додати набір";
+  button.addEventListener("click", () => {
+    const result = NcmCatalog.applyPreset(preset, currentState());
+    model.selected = new Set(result.state.packages);
+    model.options = NcmSettings.normalizeOptions(result.state.options);
+    model.settingErrors.clear();
+    renderPresets();
+    renderCatalog();
+    renderSettings();
+    updateChangeState();
+    const changes = result.addedPackages + result.changedOptions;
+    showToast(`${preset.name}: додано або оновлено ${countLabel(changes, "елемент", "елементи", "елементів")}.`);
+  });
+  card.append(symbol, copy, button);
+  return card;
+}
+
+function renderPresets() {
+  ui.presetCatalog.replaceChildren(...model.presets.map(presetCard));
+}
+
+function exportProfile() {
+  try {
+    const content = NcmCatalog.serializeProfile(currentState(), model.settingsCatalog, NcmSettings);
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `nix-control-manager-profile-${stamp}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("Профіль експортовано у JSON-файл.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function importProfileFile() {
+  const [file] = ui.profileFileInput.files || [];
+  ui.profileFileInput.value = "";
+  if (!file) return;
+  if (file.size > 1024 * 1024) {
+    showToast("Файл профілю завеликий: дозволено до 1 МБ.", true);
+    return;
+  }
+  try {
+    const state = NcmCatalog.parseProfile(await file.text(), model.settingsCatalog, NcmSettings);
+    const knownPackages = new Set(model.catalog.map((app) => app.attribute));
+    for (const attribute of state.packages) {
+      if (!knownPackages.has(attribute)) {
+        model.catalog.push({
+          attribute,
+          name: attribute,
+          description: "Пакунок з імпортованого профілю; його буде збережено без змін.",
+          category: "Інші",
+          featured: false,
+          symbol: attribute.slice(0, 1).toLocaleUpperCase("uk"),
+          tags: ["імпорт"],
+          scopes: ["system"],
+        });
+      }
+    }
+    model.selected = new Set(state.packages);
+    model.options = NcmSettings.normalizeOptions(state.options);
+    model.settingErrors.clear();
+    buildFilters();
+    buildSettingsFilters();
+    renderPresets();
+    renderCatalog();
+    renderSettings();
+    updateChangeState();
+    showToast(`Профіль імпортовано: ${state.packages.length} пакунків, ${Object.keys(state.options).length} опцій.`);
+  } catch (error) {
+    showToast(`Не вдалося імпортувати профіль: ${error.message}`, true);
+  }
 }
 
 function settingDefinitions() {
@@ -869,7 +996,10 @@ function renderHomeManagerPackages() {
     ? model.homePackageSelections.get(homeUserKey(user)) || new Set()
     : new Set();
   const query = ui.homeManagerPackageSearch.value.trim().toLocaleLowerCase("uk");
-  const knownAttributes = new Set(model.catalog.map((app) => app.attribute));
+  const homeCatalog = model.catalog.filter(
+    (app) => (app.scopes || ["system", "home-manager"]).includes("home-manager"),
+  );
+  const knownAttributes = new Set(homeCatalog.map((app) => app.attribute));
   const unknown = [...selectedPackages]
     .filter((attribute) => !knownAttributes.has(attribute))
     .map((attribute) => ({
@@ -878,8 +1008,10 @@ function renderHomeManagerPackages() {
       description: "Пакунок із наявного user-state; він буде збережений у кандидатові.",
       category: "Інші",
       symbol: attribute.slice(0, 1).toLocaleUpperCase("uk"),
+      tags: ["наявний"],
+      scopes: ["home-manager"],
     }));
-  const available = [...model.catalog, ...unknown];
+  const available = [...homeCatalog, ...unknown];
   const visible = user
     ? available.filter((app) => {
       const text = `${app.name} ${app.attribute} ${app.description}`.toLocaleLowerCase("uk");
@@ -2326,8 +2458,9 @@ async function initialize() {
       ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";
       ui.drawerSaveButton.title = "Локальне збереження вимкнено в режимі лише читання";
     }
-    const [catalog, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
+    const [catalog, presets, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
       api("/api/catalog"),
+      api("/api/presets"),
       api("/api/settings-catalog"),
       api("/api/state"),
       api("/api/system"),
@@ -2339,6 +2472,7 @@ async function initialize() {
       api("/api/generations"),
     ]);
     model.catalog = catalog;
+    model.presets = presets;
     model.settingsCatalog = settingsCatalog;
     model.state = state;
     model.options = NcmSettings.normalizeOptions(JSON.parse(JSON.stringify(state.options || {})));
@@ -2355,6 +2489,8 @@ async function initialize() {
           category: "Інші",
           featured: false,
           symbol: attribute.slice(0, 1).toLocaleUpperCase("uk"),
+          tags: ["наявний"],
+          scopes: ["system"],
         });
       }
     }
@@ -2370,6 +2506,7 @@ async function initialize() {
     if (activeBuildStatuses.has(homeBuildPreview.status)) pollHomeBuildPreview();
     buildFilters();
     buildSettingsFilters();
+    renderPresets();
     renderCatalog();
     renderSettings();
     renderHomeManager();
@@ -2382,6 +2519,9 @@ async function initialize() {
 }
 
 ui.search.addEventListener("input", renderCatalog);
+ui.importProfileButton.addEventListener("click", () => ui.profileFileInput.click());
+ui.exportProfileButton.addEventListener("click", exportProfile);
+ui.profileFileInput.addEventListener("change", importProfileFile);
 ui.settingsSearch.addEventListener("input", renderSettings);
 ui.homeManagerPackageSearch.addEventListener("input", renderHomeManagerPackages);
 ui.programsNav.addEventListener("click", () => showPage("programs"));

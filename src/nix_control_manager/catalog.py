@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from importlib.resources import files
+from copy import deepcopy
 import json
 import re
 from typing import Any, Mapping
@@ -12,12 +13,58 @@ from .errors import ValidationError
 SETTING_VALUE_TYPES = frozenset(
     {"boolean", "string", "enum", "integer", "string-list", "integer-list"}
 )
+PACKAGE_SCOPES = frozenset({"system", "home-manager"})
 _SETTING_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+$")
+_PACKAGE_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*$")
+_PRESET_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+@lru_cache(maxsize=1)
+def _catalog_by_attribute() -> dict[str, dict[str, Any]]:
+    resource = files("nix_control_manager").joinpath("data/catalog.json")
+    raw = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise RuntimeError("Package catalog must be a JSON array")
+    definitions: dict[str, dict[str, Any]] = {}
+    required = {
+        "attribute", "name", "description", "category", "featured", "symbol",
+        "tags", "scopes",
+    }
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or set(item) != required:
+            raise RuntimeError(f"Package catalog entry {index} must use the exact schema")
+        attribute = item["attribute"]
+        if not isinstance(attribute, str) or not _PACKAGE_PATH.fullmatch(attribute):
+            raise RuntimeError(f"Invalid package attribute at entry {index}: {attribute!r}")
+        if attribute in definitions:
+            raise RuntimeError(f"Duplicate package attribute: {attribute}")
+        for field in ("name", "description", "category", "symbol"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise RuntimeError(f"{attribute}.{field} must be a non-empty string")
+        if not isinstance(item["featured"], bool):
+            raise RuntimeError(f"{attribute}.featured must be boolean")
+        tags = item["tags"]
+        scopes = item["scopes"]
+        if (
+            not isinstance(tags, list)
+            or not tags
+            or any(not isinstance(tag, str) or not tag.strip() for tag in tags)
+            or len(tags) != len(set(tags))
+        ):
+            raise RuntimeError(f"{attribute}.tags must be a unique non-empty string array")
+        if (
+            not isinstance(scopes, list)
+            or not scopes
+            or any(scope not in PACKAGE_SCOPES for scope in scopes)
+            or len(scopes) != len(set(scopes))
+        ):
+            raise RuntimeError(f"{attribute}.scopes contains an invalid or duplicate scope")
+        definitions[attribute] = item
+    return definitions
 
 
 def load_catalog() -> list[dict[str, Any]]:
-    resource = files("nix_control_manager").joinpath("data/catalog.json")
-    return json.loads(resource.read_text(encoding="utf-8"))
+    return deepcopy(list(_catalog_by_attribute().values()))
 
 
 @lru_cache(maxsize=1)
@@ -202,3 +249,70 @@ def validate_setting_value(path: str, value: Any) -> Any:
     if definition is None:
         return value
     return _validate_known_setting(definition, value, label=f"Option {path}")
+
+
+def _dependency_rule_active(when: str, value: Any) -> bool:
+    return (
+        when == "always"
+        or (when == "true" and value is True)
+        or (when == "non-empty" and isinstance(value, list) and bool(value))
+    )
+
+
+@lru_cache(maxsize=1)
+def _presets_by_id() -> dict[str, dict[str, Any]]:
+    resource = files("nix_control_manager").joinpath("data/presets.json")
+    raw = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise RuntimeError("Preset catalog must be a JSON array")
+    packages = _catalog_by_attribute()
+    settings = _settings_by_path()
+    definitions: dict[str, dict[str, Any]] = {}
+    required = {
+        "id", "name", "description", "category", "symbol", "packages", "options",
+    }
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or set(item) != required:
+            raise RuntimeError(f"Preset catalog entry {index} must use the exact schema")
+        preset_id = item["id"]
+        if not isinstance(preset_id, str) or not _PRESET_ID.fullmatch(preset_id):
+            raise RuntimeError(f"Invalid preset id at entry {index}: {preset_id!r}")
+        if preset_id in definitions:
+            raise RuntimeError(f"Duplicate preset id: {preset_id}")
+        for field in ("name", "description", "category", "symbol"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise RuntimeError(f"{preset_id}.{field} must be a non-empty string")
+        preset_packages = item["packages"]
+        if (
+            not isinstance(preset_packages, list)
+            or not preset_packages
+            or len(preset_packages) != len(set(preset_packages))
+        ):
+            raise RuntimeError(f"{preset_id}.packages must be a unique non-empty array")
+        for attribute in preset_packages:
+            if attribute not in packages:
+                raise RuntimeError(f"{preset_id} references unknown package {attribute!r}")
+            if "system" not in packages[attribute]["scopes"]:
+                raise RuntimeError(f"{preset_id} package {attribute!r} is not system-scoped")
+        options = item["options"]
+        if not isinstance(options, dict):
+            raise RuntimeError(f"{preset_id}.options must be an object")
+        for path, value in options.items():
+            if path not in settings:
+                raise RuntimeError(f"{preset_id} references unknown setting {path!r}")
+            try:
+                validate_setting_value(path, value)
+            except ValidationError as error:
+                raise RuntimeError(f"Invalid option in preset {preset_id}: {error}") from error
+        for path, value in options.items():
+            for rule in settings[path].get("requires", []):
+                if _dependency_rule_active(rule["when"], value) and options.get(rule["path"]) != rule["requiredValue"]:
+                    raise RuntimeError(
+                        f"Preset {preset_id} must explicitly satisfy {path} dependency {rule['path']}"
+                    )
+        definitions[preset_id] = item
+    return definitions
+
+
+def load_presets() -> list[dict[str, Any]]:
+    return deepcopy(list(_presets_by_id().values()))

@@ -49,7 +49,9 @@ jobs:
       - name: Test and parse the web client
         run: |
           node tests/test_web_settings.js
+          node tests/test_web_catalog.js
           node --check src/nix_control_manager/web/settings.js
+          node --check src/nix_control_manager/web/catalog.js
           node --check src/nix_control_manager/web/app.js
 
   nix-static:
@@ -70,6 +72,7 @@ jobs:
         run: |
           nix build --no-link --print-build-logs \
             .#checks.x86_64-linux.settings-options \
+            .#checks.x86_64-linux.package-catalog \
             .#checks.x86_64-linux.web-settings \
             .#checks.x86_64-linux.activation-transition \
             .#checks.x86_64-linux.home-manager-detection \

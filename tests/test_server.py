@@ -330,6 +330,7 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_and_empty_state_are_available(self) -> None:
         catalog = self.request_json("/api/catalog")
+        presets = self.request_json("/api/presets")
         settings_catalog = self.request_json("/api/settings-catalog")
         state = self.request_json("/api/state")
         system = self.request_json("/api/system")
@@ -337,7 +338,9 @@ class ServerTests(unittest.TestCase):
         helper = self.request_json("/api/helper")
         effective = self.request_json("/api/effective-settings")
         home_manager = self.request_json("/api/home-manager")
-        self.assertGreater(len(catalog), 10)
+        self.assertGreaterEqual(len(catalog), 130)
+        self.assertGreaterEqual(len(presets), 8)
+        self.assertIn("gaming-ready", {item["id"] for item in presets})
         self.assertGreaterEqual(len(settings_catalog), 30)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
         self.assertIn("enum", {item["valueType"] for item in settings_catalog})

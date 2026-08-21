@@ -385,6 +385,21 @@ shown; discarded weaker definitions are intentionally not presented as if they
 were still contributing. Options whose current scalar definitions conflict or
 cannot evaluate require manual review before NCM can start managing them.
 
+## Application catalog, presets, and profiles
+
+The graphical catalog contains more than 130 curated package-only entries in
+nine categories. Each entry declares whether it is suitable for the system
+module, Home Manager, or both; names, descriptions, and Ukrainian search tags
+make the catalog usable without knowing the exact nixpkgs attribute. A separate
+flake check verifies every advertised attribute against the pinned nixpkgs.
+
+Eight reusable presets merge coherent package and typed-option selections into
+the current draft. They never remove manually selected items and they do not
+save, build, or activate anything automatically. The same draft can be exported
+as the versioned state JSON and imported on another host. Imported data is
+schema- and type-checked in the browser, then still follows the normal Nix diff,
+server validation, and explicit persistence flow.
+
 ## Home Manager foundation
 
 The Home Manager page reports whether the existing configuration uses the
@@ -452,6 +467,8 @@ See [docs/architecture.md](docs/architecture.md) and
 PYTHONPATH=src python -m unittest discover -s tests -v
 python -m compileall -q src tests
 node --check src/nix_control_manager/web/app.js
+node tests/test_web_settings.js
+node tests/test_web_catalog.js
 ```
 
 On Linux, a manual integration check copies `/etc/nixos` to a temporary fixture,

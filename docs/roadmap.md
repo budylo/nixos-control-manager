@@ -127,7 +127,13 @@
 - user/system package scope (separate catalog selection and preview implemented;
   system persistence is available through `live-managed`; user persistence is
   available through `live-home-manager`);
-- profiles and reusable presets.
+- curated package catalog with scope metadata, search tags, and pinned-nixpkgs
+  attribute evaluation (implemented for more than 130 entries);
+- reusable additive presets spanning package selections and typed NixOS options
+  (implemented for eight first-party workflows);
+- portable system draft import/export using the versioned managed-state schema,
+  with browser validation and the unchanged preview-first persistence boundary
+  (implemented; cross-host hardware adaptation remains future work).
 
 ## Later
 
@@ -135,4 +141,4 @@
 - driver workflows with hardware-aware warnings;
 - Plasma Manager;
 - native desktop shell;
-- import/export and multi-host configuration.
+- multi-host configuration and hardware-aware profile adaptation.

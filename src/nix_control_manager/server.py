@@ -15,7 +15,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
-from .catalog import load_catalog, load_settings_catalog
+from .catalog import load_catalog, load_presets, load_settings_catalog
 from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
@@ -354,6 +354,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(load_catalog())
             elif path == "/api/settings-catalog":
                 self._json(load_settings_catalog())
+            elif path == "/api/presets":
+                self._json(load_presets())
             elif path == "/api/effective-settings":
                 self._json(
                     self.server.settings_inspector(
