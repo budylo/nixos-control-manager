@@ -43,6 +43,7 @@ from .nix_generator import generate_module
 from .preview import build_preview
 from .storage import load_state, save_generated_module, save_state
 from .settings_inspector import EffectiveSettingsInspection, inspect_effective_settings
+from .version import RELEASE_CHANNEL, RELEASE_VERSION
 from .system_inspector import inspect_system
 from .ui_helper import HelperUiAdapter, HelperUiError
 
@@ -344,6 +345,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     {
                         "application": "nix-control-manager",
                         "apiVersion": 1,
+                        "version": RELEASE_VERSION,
+                        "releaseChannel": RELEASE_CHANNEL,
                         "token": self.server.token,
                         "localWriteEnabled": self.server.local_write_enabled,
                     }

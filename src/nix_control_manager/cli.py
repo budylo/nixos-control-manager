@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from .errors import NcmError
+from .doctor import run_doctor
 from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .home_manager_adoption import (
@@ -26,6 +27,7 @@ from .preview import build_preview
 from .storage import load_state, save_generated_module, save_state
 from .system_inspector import inspect_system
 from .user_model import USER_INTEGRATIONS, UserManagedState
+from .version import RELEASE_VERSION
 
 
 def _path(value: str) -> Path:
@@ -58,7 +60,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ncm", description="Manage a generated NixOS module safely"
     )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {RELEASE_VERSION}"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    doctor = subparsers.add_parser(
+        "doctor", help="run read-only installation and environment checks"
+    )
+    doctor.add_argument(
+        "--config-root",
+        type=_path,
+        default=_path(os.environ.get("NCM_CONFIG_ROOT", "/etc/nixos")),
+    )
+    doctor.add_argument(
+        "--helper-socket",
+        type=_path,
+        default=_path(
+            os.environ.get(
+                "NCM_HELPER_SOCKET", "/run/nix-control-manager/helper.sock"
+            )
+        ),
+    )
+    doctor.add_argument("--json", action="store_true", dest="as_json")
 
     init = subparsers.add_parser("init", help="create an empty managed state")
     init.add_argument("--state", type=_path, default=_path("state.local.json"))
@@ -218,6 +242,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.command == "doctor":
+        report = run_doctor(args.config_root, helper_socket=args.helper_socket)
+        if args.as_json:
+            print(json.dumps(report.to_mapping(), ensure_ascii=False, indent=2))
+        else:
+            icons = {"passed": "PASS", "warning": "WARN", "failed": "FAIL"}
+            print(f"Nix Control Manager {RELEASE_VERSION} — read-only doctor")
+            for check in report.checks:
+                print(f"{icons[check.status]:4}  {check.title}: {check.detail}")
+            print(f"Result: {report.status}")
+            print("Changes made: none")
+        return 2 if report.status == "failed" else 0
+
     if args.command == "init":
         if args.state.exists():
             raise NcmError(f"Refusing to overwrite existing state: {args.state}")

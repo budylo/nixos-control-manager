@@ -135,6 +135,20 @@
   with browser validation and the unchanged preview-first persistence boundary
   (implemented; cross-host hardware adaptation remains future work).
 
+## Milestone 6 — First public alpha
+
+- synchronized public, Python-package, and Nix-package prerelease versions;
+- pinned flake installation with a read-only graphical client as the canonical
+  first-run path;
+- optional `live-read-only` helper documented separately from higher-authority
+  experimental modes;
+- visible application version and a non-mutating `ncm doctor` health check;
+- explicit single-input flake update with build/test/switch progression and
+  rollback guidance;
+- changelog, release notes, packaged-release smoke check, and tag validation;
+- GitHub prerelease publication gated behind Python/web, static Nix, and all
+  booted NixOS VM jobs.
+
 ## Later
 
 - safe flake input management;

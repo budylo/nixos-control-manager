@@ -26,6 +26,7 @@ button { color: inherit; }
 .brand strong, .brand span { display: block; }
 .brand strong { font-size: 14px; letter-spacing: .02em; }
 .brand span { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.brand-version { margin-left: 4px; padding: 2px 5px; border: 1px solid rgba(94,215,255,.22); border-radius: 5px; color: #8edff7; font-size: 7px; font-weight: 800; letter-spacing: .06em; vertical-align: 1px; }
 .nav-label { margin: 18px 10px 8px; color: #59677a; font-size: 10px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
 .nav-item { width: 100%; min-height: 42px; padding: 0 12px; display: flex; align-items: center; gap: 11px; border: 0; border-radius: 10px; background: transparent; color: #8f9daf; text-align: left; cursor: pointer; }
 .nav-item > span { width: 18px; color: #65758b; font-size: 18px; text-align: center; }

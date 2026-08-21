@@ -1,4 +1,5 @@
 const ui = {
+  appVersion: document.querySelector("#appVersion"),
   catalog: document.querySelector("#catalog"),
   emptyState: document.querySelector("#emptyState"),
   search: document.querySelector("#searchInput"),
@@ -2453,6 +2454,8 @@ async function initialize() {
   try {
     const config = await api("/api/config");
     model.token = config.token;
+    ui.appVersion.textContent = `v${config.version || "alpha"}`;
+    ui.appVersion.title = `${config.releaseChannel || "alpha"} release`;
     model.localWriteEnabled = config.localWriteEnabled !== false;
     if (!model.localWriteEnabled) {
       ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";

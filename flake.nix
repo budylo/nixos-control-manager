@@ -243,6 +243,10 @@
           package-catalog = import ./tests/nixos/package-catalog-check.nix {
             inherit pkgs;
           };
+          release-smoke = import ./tests/nixos/release-smoke-check.nix {
+            inherit pkgs;
+            ncmPackage = self.packages.${system}.default;
+          };
           web-settings = pkgs.runCommand "nix-control-manager-web-settings-check" {
             nativeBuildInputs = [ pkgs.nodejs ];
           } ''

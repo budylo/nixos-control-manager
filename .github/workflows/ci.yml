@@ -40,6 +40,7 @@ jobs:
         run: |
           python -m unittest discover -s tests
           python -m compileall -q src tests
+          python scripts/check_release.py
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -73,6 +74,7 @@ jobs:
           nix build --no-link --print-build-logs \
             .#checks.x86_64-linux.settings-options \
             .#checks.x86_64-linux.package-catalog \
+            .#checks.x86_64-linux.release-smoke \
             .#checks.x86_64-linux.web-settings \
             .#checks.x86_64-linux.activation-transition \
             .#checks.x86_64-linux.home-manager-detection \
@@ -111,3 +113,57 @@ jobs:
             nix build --no-link --print-build-logs ".#$test_name"
             echo "::endgroup::"
           done
+
+  release:
+    name: Publish tagged alpha prerelease
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - quality
+      - nix-static
+      - nixos-vms
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the exact tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+
+      - name: Validate tag and release metadata
+        run: python scripts/check_release.py --tag "$GITHUB_REF_NAME"
+
+      - name: Create reproducible source archive and checksums
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          git archive \
+            --format=tar.gz \
+            --prefix="nix-control-manager-${release_version}/" \
+            --output="dist/nix-control-manager-${release_version}.tar.gz" \
+            HEAD
+          (cd dist && sha256sum nix-control-manager-*.tar.gz > SHA256SUMS)
+
+      - name: Publish or refresh the GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --prerelease \
+              --title "Nix Control Manager ${GITHUB_REF_NAME#v}" \
+              --notes-file "$notes"
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --verify-tag \
+              --prerelease \
+              --title "Nix Control Manager ${GITHUB_REF_NAME#v}" \
+              --notes-file "$notes"
+          fi

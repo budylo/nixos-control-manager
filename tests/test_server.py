@@ -754,6 +754,8 @@ class ServerTests(unittest.TestCase):
         config = self.request_json("/api/config")
         self.assertEqual(config["application"], "nix-control-manager")
         self.assertEqual(config["apiVersion"], 1)
+        self.assertEqual(config["version"], "0.1.0-alpha.1")
+        self.assertEqual(config["releaseChannel"], "alpha")
         self.assertFalse(config["localWriteEnabled"])
         with self.assertRaises(HTTPError) as context:
             self.request_json(

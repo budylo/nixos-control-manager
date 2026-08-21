@@ -8,6 +8,12 @@ module instead of rewriting a user's configuration.
 
 Source repository: https://github.com/budylo/nixos-control-manager
 
+> **Alpha:** the first supported prerelease is `v0.1.0-alpha.1` for x86_64
+> NixOS flake configurations. Install the graphical client in read-only mode
+> first. See [the installation guide](docs/installation.md),
+> [controlled updates](docs/updating.md), and the
+> [alpha release notes](docs/releases/v0.1.0-alpha.1.md).
+
 This repository currently contains the first vertical slice:
 
 - a validated JSON state model;
@@ -78,6 +84,12 @@ This repository currently contains the first vertical slice:
 
 ## Try it
 
+Try the pinned alpha without installing or granting write authority:
+
+```console
+nix run github:budylo/nixos-control-manager/v0.1.0-alpha.1 -- serve --read-only --open
+```
+
 With Python 3.11 or newer:
 
 ```console
@@ -113,6 +125,8 @@ migration source; no live state file is created implicitly.
 ## CLI
 
 ```console
+ncm --version
+ncm doctor
 ncm init --state state.json
 ncm preview --state state.json --output managed.nix
 ncm generate --state state.json --output managed.nix

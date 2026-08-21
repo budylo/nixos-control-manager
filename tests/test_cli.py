@@ -4,10 +4,21 @@ import io
 import unittest
 from unittest.mock import Mock, patch
 
-from nix_control_manager.cli import main
+from nix_control_manager.cli import build_parser, main
+from nix_control_manager.version import RELEASE_VERSION
 
 
 class CliTests(unittest.TestCase):
+    def test_version_flag_reports_public_release_version(self) -> None:
+        with (
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            self.assertRaises(SystemExit) as exit_context,
+        ):
+            build_parser().parse_args(["--version"])
+
+        self.assertEqual(exit_context.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"ncm {RELEASE_VERSION}")
+
     def test_keyboard_interrupt_is_a_clean_shutdown(self) -> None:
         parser = Mock()
         parser.parse_args.return_value = Mock()
