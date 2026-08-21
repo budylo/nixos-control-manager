@@ -90,6 +90,7 @@ SCRIPT
   managedJournal = "/var/lib/nix-control-manager/managed-transactions";
   client = "${ncmPackage}/bin/ncm-helper-client --socket ${socketPath} --timeout 300";
   runAsUser = "${pkgs.util-linux}/bin/runuser -u ncm-control --";
+  userSystemctl = "${runAsUser} env XDG_RUNTIME_DIR=/run/user/1000 ${pkgs.systemd}/bin/systemctl --user";
 in
 pkgs.testers.runNixOSTest {
   name = "nix-control-manager-live-control";
@@ -103,8 +104,9 @@ pkgs.testers.runNixOSTest {
     nix.nixPath = [ "nixpkgs=${pkgs.path}" ];
     users.groups.ncm-control = { };
     users.users.ncm-control = {
-      isSystemUser = true;
+      isNormalUser = true;
       group = "ncm-control";
+      linger = true;
     };
     environment.systemPackages = [
       ncmPackage
@@ -121,6 +123,10 @@ pkgs.testers.runNixOSTest {
       allowedUsers = [ "ncm-control" ];
       validationTimeout = 300;
       testActivationTimeout = 120;
+    };
+    programs.nix-control-manager = {
+      enable = true;
+      openBrowser = false;
     };
     security.polkit.extraConfig = polkitRule;
     systemd.services.ncm-live-control-setup = {
@@ -153,6 +159,15 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("ncm-live-control-setup.service")
     machine.wait_for_unit("nix-control-manager-helper.socket")
+    machine.wait_for_unit("user@1000.service")
+    machine.succeed("${userSystemctl} start nix-control-manager-gui.service")
+    machine.wait_until_succeeds(
+      "${userSystemctl} is-active nix-control-manager-gui.service"
+    )
+    machine.wait_until_succeeds(
+      "${pkgs.python3}/bin/python3 -c "
+      "'import socket; socket.create_connection((\"127.0.0.1\", 8765), timeout=1).close()'"
+    )
 
     capabilities = json.loads(machine.succeed(
       "${runAsUser} ${client} capabilities", timeout=timeout
@@ -189,6 +204,33 @@ pkgs.testers.runNixOSTest {
       "from nix_control_manager.candidate import plan_identity; "
       "print(plan_identity(plan_adoption(Path(\"/etc/nixos\")), None)[0])'"
     ).strip()
+    helper_pid = machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p MainPID --value"
+    ).strip()
+    gui_pid = machine.succeed(
+      "${userSystemctl} show nix-control-manager-gui.service -p MainPID --value"
+    ).strip()
+    polkit_pid = machine.succeed(
+      "systemctl show polkit.service -p MainPID --value"
+    ).strip()
+
+    # Reproduce a GUI/client disappearing while the helper is still doing the
+    # comparatively slow exact-candidate validation.  The daemon must absorb
+    # the failed response write and continue serving the next request.
+    machine.succeed(
+      "${runAsUser} env PYTHONPATH=${../../src} ${pkgs.python3}/bin/python3 "
+      "${./abandon-live-preview.py} --socket ${socketPath} --config-root /etc/nixos "
+      "--target control --system-path " + candidate
+      + " --plan-fingerprint " + fingerprint,
+      timeout=timeout,
+    )
+    capabilities_after_disconnect = json.loads(machine.succeed(
+      "${runAsUser} ${client} capabilities", timeout=timeout
+    ))
+    t.assertEqual(capabilities_after_disconnect["status"], "ok")
+    t.assertEqual(machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p MainPID --value"
+    ).strip(), helper_pid)
 
     preview = json.loads(machine.succeed(
       "${runAsUser} ${client} preview-activation --target control "
@@ -209,6 +251,15 @@ pkgs.testers.runNixOSTest {
     t.assertEqual(activation["result"]["status"], "active")
     t.assertEqual(machine.succeed("readlink -f /run/current-system").strip(), candidate)
     t.assertEqual(machine.succeed("readlink -f /nix/var/nix/profiles/system").strip(), previous)
+    t.assertNotEqual(machine.succeed(
+      "systemctl show polkit.service -p MainPID --value"
+    ).strip(), polkit_pid)
+    t.assertEqual(machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p MainPID --value"
+    ).strip(), helper_pid)
+    t.assertEqual(machine.succeed(
+      "${userSystemctl} show nix-control-manager-gui.service -p MainPID --value"
+    ).strip(), gui_pid)
 
     commit = json.loads(machine.succeed(
       "${runAsUser} ${client} commit-tested-system --target control "
@@ -224,6 +275,12 @@ pkgs.testers.runNixOSTest {
     t.assertEqual(machine.succeed("readlink -f /run/current-system").strip(), candidate)
     t.assertEqual(machine.succeed("readlink -f /nix/var/nix/profiles/system").strip(), candidate)
     machine.wait_for_unit("nix-control-manager-helper.socket")
+    t.assertEqual(machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p MainPID --value"
+    ).strip(), helper_pid)
+    t.assertEqual(machine.succeed(
+      "${userSystemctl} show nix-control-manager-gui.service -p MainPID --value"
+    ).strip(), gui_pid)
 
     status = json.loads(machine.succeed(
       "${runAsUser} ${client} activation-session-status --target control --session-id " + session,
@@ -245,6 +302,16 @@ pkgs.testers.runNixOSTest {
     t.assertEqual(machine.succeed(
       "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"
     ), source_hashes)
+    t.assertEqual(machine.succeed(
+      "systemctl show nix-control-manager-helper.service -p MainPID --value"
+    ).strip(), helper_pid)
+    t.assertEqual(machine.succeed(
+      "${userSystemctl} show nix-control-manager-gui.service -p MainPID --value"
+    ).strip(), gui_pid)
+    t.assertEqual(machine.succeed(
+      "grep -c -E '^(test|switch)$' /run/ncm-live-test-candidate"
+    ).strip(), "2")
+    machine.fail("systemctl list-units --all 'ncm-test-rollback-*' --no-legend | grep .")
     machine.fail("journalctl -u polkit.service --no-pager | grep -F NCM_LIVE_CONTROL_UNEXPECTED_POLKIT_ACTION")
   '';
 }
