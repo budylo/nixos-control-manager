@@ -15,8 +15,29 @@ let
         configuration = root + "/configuration.nix";
       };
   pkgs = evaluated.pkgs;
+  config = evaluated.config;
   lib = pkgs.lib;
   catalog = builtins.fromJSON (builtins.readFile catalogPath);
+  enabled = path: lib.attrByPath path false config == true;
+  desktopEnvironments = builtins.map (item: item.name) (builtins.filter
+    (item: builtins.any enabled item.paths)
+    [
+      { name = "plasma"; paths = [ [ "services" "desktopManager" "plasma6" "enable" ] ]; }
+      { name = "gnome"; paths = [ [ "services" "desktopManager" "gnome" "enable" ] [ "services" "xserver" "desktopManager" "gnome" "enable" ] ]; }
+      { name = "xfce"; paths = [ [ "services" "xserver" "desktopManager" "xfce" "enable" ] ]; }
+      { name = "cinnamon"; paths = [ [ "services" "xserver" "desktopManager" "cinnamon" "enable" ] ]; }
+      { name = "mate"; paths = [ [ "services" "xserver" "desktopManager" "mate" "enable" ] ]; }
+      { name = "hyprland"; paths = [ [ "programs" "hyprland" "enable" ] ]; }
+      { name = "sway"; paths = [ [ "programs" "sway" "enable" ] ]; }
+    ]);
+  configurationFlags = builtins.map (item: item.name) (builtins.filter
+    (item: enabled item.path)
+    [
+      { name = "bluetooth"; path = [ "hardware" "bluetooth" "enable" ]; }
+      { name = "libvirtd"; path = [ "virtualisation" "libvirtd" "enable" ]; }
+      { name = "pipewire"; path = [ "services" "pipewire" "enable" ]; }
+      { name = "wsl"; path = [ "wsl" "enable" ]; }
+    ]);
   inspect = definition:
     let
       path = lib.splitString "." definition.attribute;
@@ -81,5 +102,9 @@ let
 in
 {
   system = pkgs.stdenv.hostPlatform.system;
+  context = {
+    inherit configurationFlags desktopEnvironments;
+    videoDrivers = lib.attrByPath [ "services" "xserver" "videoDrivers" ] [ ] config;
+  };
   packages = map inspect catalog;
 }

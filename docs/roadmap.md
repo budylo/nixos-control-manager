@@ -160,8 +160,11 @@
   (implemented);
 - prove the inspection is read-only in the booted NixOS UI VM workflow
   (implemented);
-- add curated package relationships, alternatives, desktop-environment fit,
-  hardware hints, and profile-level cross-host adaptation (future work).
+- add curated alternatives, companion-package relationships,
+  desktop-environment fit, hardware hints, and a distinct NixOS-WSL context,
+  always behind explicit user confirmation (implemented);
+- adapt imported profiles across several machines while accounting for each
+  target's hardware and desktop environment (future work).
 
 ## Later
 

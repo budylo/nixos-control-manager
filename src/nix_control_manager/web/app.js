@@ -12,6 +12,9 @@ const ui = {
   catalogCompatibilityTitle: document.querySelector("#catalogCompatibilityTitle"),
   catalogCompatibilityDetail: document.querySelector("#catalogCompatibilityDetail"),
   refreshCatalogCompatibility: document.querySelector("#refreshCatalogCompatibility"),
+  catalogGuidance: document.querySelector("#catalogGuidance"),
+  catalogGuidanceContext: document.querySelector("#catalogGuidanceContext"),
+  catalogGuidanceCards: document.querySelector("#catalogGuidanceCards"),
   importProfileButton: document.querySelector("#importProfileButton"),
   exportProfileButton: document.querySelector("#exportProfileButton"),
   profileFileInput: document.querySelector("#profileFileInput"),
@@ -158,6 +161,7 @@ const model = {
   localWriteEnabled: true,
   catalog: [],
   catalogCompatibility: { status: "loading", packages: [], warnings: [] },
+  catalogGuidance: { schemaVersion: 1, alternativeGroups: [], companions: [], contextRecommendations: [] },
   presets: [],
   settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
@@ -276,6 +280,7 @@ function updateChangeState() {
   ui.previewButton.disabled = invalid;
   if (model.managedApplyIntent) clearManagedApplyIntent();
   if (ui.presetCatalog) renderPresets();
+  if (ui.catalogGuidance) renderCatalogGuidance();
 }
 
 function systemCatalog() {
@@ -351,6 +356,33 @@ function appCard(app) {
     ? `Ліцензія: ${compatibility.license}`
     : compatibilityBadge.textContent;
   copy.append(name, packageName, description, compatibilityBadge);
+  if (compatibility.status === "incompatible") {
+    const alternative = NcmCatalog.bestAlternative(
+      app.attribute,
+      model.catalogGuidance,
+      model.catalogCompatibility,
+    );
+    if (alternative) {
+      const alternativeApp = model.catalog.find((item) => item.attribute === alternative.attribute);
+      const hint = document.createElement("div");
+      hint.className = "alternative-hint";
+      const hintText = document.createElement("span");
+      hintText.textContent = `Альтернатива: ${alternativeApp?.name || alternative.attribute}`;
+      const hintButton = document.createElement("button");
+      hintButton.type = "button";
+      hintButton.textContent = model.selected.has(alternative.attribute) ? "Додано" : "Додати";
+      hintButton.disabled = model.selected.has(alternative.attribute);
+      hintButton.title = alternative.reason;
+      hintButton.addEventListener("click", () => {
+        model.selected.add(alternative.attribute);
+        renderCatalog();
+        updateChangeState();
+        showToast(`Додано сумісну альтернативу: ${alternativeApp?.name || alternative.attribute}.`);
+      });
+      hint.append(hintText, hintButton);
+      copy.append(hint);
+    }
+  }
 
   const toggle = document.createElement("button");
   toggle.type = "button";
@@ -383,6 +415,101 @@ function renderCatalog() {
   ui.emptyState.hidden = visible.length > 0;
   ui.resultCount.textContent = `${visible.length} із ${available.length}`;
   ui.title.textContent = model.category === "Усі" ? "Усі програми" : model.category;
+}
+
+function catalogApp(attribute) {
+  return model.catalog.find((item) => item.attribute === attribute);
+}
+
+function guidanceContextLabel() {
+  const context = model.catalogCompatibility.context || {};
+  const desktopLabels = {
+    plasma: "Plasma",
+    gnome: "GNOME",
+    xfce: "Xfce",
+    cinnamon: "Cinnamon",
+    mate: "MATE",
+    hyprland: "Hyprland",
+    sway: "Sway",
+  };
+  const gpuLabels = { amd: "AMD GPU", intel: "Intel GPU", nvidia: "NVIDIA GPU" };
+  const facts = (context.desktopEnvironments || []).map((item) => desktopLabels[item] || item);
+  const isWsl = (context.configurationFlags || []).includes("wsl");
+  if (!isWsl) {
+    if (context.runtimeHardwareInspected && context.formFactor === "laptop") facts.push("ноутбук");
+    for (const vendor of context.gpuVendors || []) {
+      if (gpuLabels[vendor]) facts.push(gpuLabels[vendor]);
+    }
+    if (context.kvmAvailable) facts.push("KVM");
+  }
+  if (isWsl) facts.push("NixOS-WSL");
+  return facts.length
+    ? `Враховано: ${[...new Set(facts)].join(" · ")}. Нічого не додається автоматично.`
+    : "Показуємо лише пояснювані зв’язки; нічого не додається автоматично.";
+}
+
+function renderCatalogGuidance() {
+  if (!ui.catalogGuidance) return;
+  const alternatives = NcmCatalog.incompatibleAlternativeSuggestions(
+    systemCatalog(),
+    model.selected,
+    model.catalogGuidance,
+    model.catalogCompatibility,
+    2,
+  );
+  const companions = NcmCatalog.companionSuggestions(
+    model.selected,
+    model.catalogGuidance,
+    model.catalogCompatibility,
+    2,
+  );
+  const contextual = NcmCatalog.contextSuggestions(
+    model.selected,
+    model.catalogGuidance,
+    model.catalogCompatibility,
+    3,
+  );
+  const seen = new Set();
+  const suggestions = [...alternatives, ...companions, ...contextual]
+    .filter((item) => {
+      if (seen.has(item.attribute)) return false;
+      seen.add(item.attribute);
+      return true;
+    })
+    .slice(0, 4);
+  ui.catalogGuidance.hidden = suggestions.length === 0;
+  ui.catalogGuidanceContext.textContent = guidanceContextLabel();
+  const kindLabels = {
+    alternative: "Сумісна альтернатива",
+    companion: "Супутній інструмент",
+    context: "Для цієї системи",
+  };
+  ui.catalogGuidanceCards.replaceChildren(...suggestions.map((suggestion) => {
+    const app = catalogApp(suggestion.attribute);
+    const card = document.createElement("article");
+    card.className = `guidance-card ${suggestion.kind}`;
+    const kind = document.createElement("span");
+    kind.className = "guidance-kind";
+    kind.textContent = kindLabels[suggestion.kind] || "Рекомендація";
+    const title = document.createElement("strong");
+    title.textContent = suggestion.title;
+    const packageName = document.createElement("span");
+    packageName.className = "guidance-package";
+    packageName.textContent = `${app?.name || suggestion.attribute} · pkgs.${suggestion.attribute}`;
+    const reason = document.createElement("p");
+    reason.textContent = suggestion.reason;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Додати до вибору";
+    button.addEventListener("click", () => {
+      model.selected.add(suggestion.attribute);
+      renderCatalog();
+      updateChangeState();
+      showToast(`Додано за рекомендацією: ${app?.name || suggestion.attribute}.`);
+    });
+    card.append(kind, title, packageName, reason, button);
+    return card;
+  }));
 }
 
 function countLabel(count, one, few, many) {
@@ -497,6 +624,7 @@ async function refreshCatalogCompatibility() {
   buildFilters();
   renderPresets();
   renderCatalog();
+  renderCatalogGuidance();
   updateChangeState();
 }
 
@@ -2568,8 +2696,9 @@ async function initialize() {
       ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";
       ui.drawerSaveButton.title = "Локальне збереження вимкнено в режимі лише читання";
     }
-    const [catalog, presets, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
+    const [catalog, guidance, presets, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
       api("/api/catalog"),
+      api("/api/catalog-guidance"),
       api("/api/presets"),
       api("/api/settings-catalog"),
       api("/api/state"),
@@ -2582,6 +2711,7 @@ async function initialize() {
       api("/api/generations"),
     ]);
     model.catalog = catalog;
+    model.catalogGuidance = NcmCatalog.normalizeCatalogGuidance(guidance);
     model.presets = presets;
     model.settingsCatalog = settingsCatalog;
     model.state = state;

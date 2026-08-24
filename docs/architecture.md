@@ -195,6 +195,16 @@ lock file or configuration. A successful incompatible result can prevent a new
 selection; an inspector failure is only an unknown result and cannot become a
 hidden policy decision.
 
+The successful inspection also returns a deliberately small target-context
+snapshot. Evaluated NixOS options identify known desktop environments, selected
+services, WSL, and video drivers; bounded read-only probes under `/sys` and
+`/dev/kvm` add form-factor, GPU-vendor, and virtualization hints. These facts do
+not become managed state. The browser matches them against validated curated
+alternative groups, companion relationships, and contextual recommendations.
+It suppresses physical-host-only hints when WSL is active, removes unavailable
+targets, and presents each remaining result as an explicit one-package action.
+The recommendation engine cannot persist, build, or activate configuration.
+
 ## State and generated source
 
 The JSON state is versioned and convenient for the UI. The generated `.nix`

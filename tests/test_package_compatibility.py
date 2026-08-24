@@ -45,7 +45,17 @@ class PackageCompatibilityTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=json.dumps({"system": "x86_64-linux", "packages": records}),
+            stdout=json.dumps(
+                {
+                    "system": "x86_64-linux",
+                    "context": {
+                        "desktopEnvironments": ["plasma"],
+                        "configurationFlags": ["pipewire"],
+                        "videoDrivers": ["amdgpu"],
+                    },
+                    "packages": records,
+                }
+            ),
             stderr="",
         )
 
@@ -62,6 +72,9 @@ class PackageCompatibilityTests(unittest.TestCase):
         self.assertEqual(mapping["system"], "x86_64-linux")
         self.assertEqual(mapping["summary"]["incompatible"], 1)
         self.assertEqual(mapping["summary"]["unfree"], 1)
+        self.assertEqual(mapping["context"]["desktopEnvironments"], ["plasma"])
+        self.assertEqual(mapping["context"]["configurationFlags"], ["pipewire"])
+        self.assertEqual(mapping["context"]["videoDrivers"], ["amdgpu"])
         self.assertIn("unavailable", mapping["warnings"][0])
 
     def test_rejects_incomplete_or_reordered_evaluator_output(self) -> None:
@@ -69,7 +82,17 @@ class PackageCompatibilityTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=json.dumps({"system": "x86_64-linux", "packages": []}),
+            stdout=json.dumps(
+                {
+                    "system": "x86_64-linux",
+                    "context": {
+                        "desktopEnvironments": [],
+                        "configurationFlags": [],
+                        "videoDrivers": [],
+                    },
+                    "packages": [],
+                }
+            ),
             stderr="",
         )
 
@@ -102,6 +125,31 @@ class PackageCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(result.status, "blocked")
         self.assertFalse(called)
+
+    def test_detects_local_runtime_hardware_without_mutating_it(self) -> None:
+        sysfs = self.root / "sys"
+        battery = sysfs / "class/power_supply/BAT0"
+        gpu = sysfs / "bus/pci/devices/gpu0"
+        battery.mkdir(parents=True)
+        gpu.mkdir(parents=True)
+        (battery / "type").write_text("Battery\n", encoding="utf-8")
+        (gpu / "class").write_text("0x030000\n", encoding="utf-8")
+        (gpu / "vendor").write_text("0x10de\n", encoding="utf-8")
+        dev = self.root / "dev"
+        dev.mkdir()
+        (dev / "kvm").touch()
+
+        mapping = inspect_package_compatibility(
+            self.root,
+            which=lambda _: None,
+            sysfs_root=sysfs,
+            dev_root=dev,
+        ).to_mapping()
+
+        self.assertEqual(mapping["context"]["formFactor"], "laptop")
+        self.assertEqual(mapping["context"]["gpuVendors"], ["nvidia"])
+        self.assertTrue(mapping["context"]["kvmAvailable"])
+        self.assertTrue(mapping["context"]["runtimeHardwareInspected"])
 
 
 if __name__ == "__main__":

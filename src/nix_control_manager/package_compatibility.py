@@ -28,6 +28,19 @@ _ASSESSMENT_REASONS = frozenset(
     }
 )
 _MAX_DIAGNOSTIC_CHARS = 8_000
+_DESKTOP_ENVIRONMENTS = frozenset(
+    {"plasma", "gnome", "xfce", "cinnamon", "mate", "hyprland", "sway"}
+)
+_CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "wsl"})
+_GPU_VENDOR_IDS = {
+    "0x1002": "amd",
+    "0x10de": "nvidia",
+    "0x1414": "microsoft",
+    "0x1af4": "virtio",
+    "0x8086": "intel",
+}
+_LAPTOP_CHASSIS_TYPES = frozenset({"8", "9", "10", "14", "30", "31", "32"})
+_DESKTOP_CHASSIS_TYPES = frozenset({"3", "4", "5", "6", "7", "15", "16", "17", "23", "24"})
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 Which = Callable[[str], str | None]
@@ -52,12 +65,35 @@ class PackageAssessment:
 
 
 @dataclass(frozen=True, slots=True)
+class TargetContext:
+    desktop_environments: tuple[str, ...] = ()
+    configuration_flags: tuple[str, ...] = ()
+    video_drivers: tuple[str, ...] = ()
+    form_factor: str = "unknown"
+    gpu_vendors: tuple[str, ...] = ()
+    kvm_available: bool = False
+    runtime_hardware_inspected: bool = False
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "desktopEnvironments": list(self.desktop_environments),
+            "configurationFlags": list(self.configuration_flags),
+            "videoDrivers": list(self.video_drivers),
+            "formFactor": self.form_factor,
+            "gpuVendors": list(self.gpu_vendors),
+            "kvmAvailable": self.kvm_available,
+            "runtimeHardwareInspected": self.runtime_hardware_inspected,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PackageCompatibilityInspection:
     status: str
     configuration_mode: str
     flake_target: str | None
     system: str
     packages: tuple[PackageAssessment, ...]
+    context: TargetContext = TargetContext()
     warnings: tuple[str, ...] = ()
     duration_ms: int = 0
 
@@ -74,6 +110,7 @@ class PackageCompatibilityInspection:
             "configurationMode": self.configuration_mode,
             "flakeTarget": self.flake_target,
             "system": self.system,
+            "context": self.context.to_mapping(),
             "summary": counts,
             "packages": [package.to_mapping() for package in self.packages],
             "warnings": list(self.warnings),
@@ -99,6 +136,7 @@ def _result(
     *,
     system: str = "",
     packages: tuple[PackageAssessment, ...] | None = None,
+    context: TargetContext = TargetContext(),
     warning: str | None = None,
     duration_ms: int = 0,
 ) -> PackageCompatibilityInspection:
@@ -108,6 +146,7 @@ def _result(
         flake_target=target,
         system=system,
         packages=packages if packages is not None else _unknown_packages(),
+        context=context,
         warnings=(warning,) if warning else (),
         duration_ms=duration_ms,
     )
@@ -120,8 +159,21 @@ def _trim_diagnostic(value: str | None) -> str:
     return value if len(value) <= _MAX_DIAGNOSTIC_CHARS else value[:_MAX_DIAGNOSTIC_CHARS] + "\n… diagnostic truncated …"
 
 
-def _parse_packages(raw: Any) -> tuple[str, tuple[PackageAssessment, ...]]:
-    if not isinstance(raw, dict) or set(raw) != {"packages", "system"}:
+def _string_tuple(value: Any, *, allowed: frozenset[str] | None = None) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(value) != len(set(value))
+        or (allowed is not None and any(item not in allowed for item in value))
+    ):
+        raise ValueError("Nix inspector returned invalid target context metadata")
+    return tuple(value)
+
+
+def _parse_packages(
+    raw: Any,
+) -> tuple[str, tuple[PackageAssessment, ...], TargetContext]:
+    if not isinstance(raw, dict) or set(raw) != {"context", "packages", "system"}:
         raise ValueError("Nix inspector returned an invalid top-level document")
     system = raw["system"]
     records = raw["packages"]
@@ -129,6 +181,20 @@ def _parse_packages(raw: Any) -> tuple[str, tuple[PackageAssessment, ...]]:
         raise ValueError("Nix inspector returned an invalid host system")
     if not isinstance(records, list):
         raise ValueError("Nix inspector package records must be an array")
+    context_raw = raw["context"]
+    if not isinstance(context_raw, dict) or set(context_raw) != {
+        "configurationFlags", "desktopEnvironments", "videoDrivers",
+    }:
+        raise ValueError("Nix inspector returned invalid target context")
+    nix_context = TargetContext(
+        desktop_environments=_string_tuple(
+            context_raw["desktopEnvironments"], allowed=_DESKTOP_ENVIRONMENTS
+        ),
+        configuration_flags=_string_tuple(
+            context_raw["configurationFlags"], allowed=_CONFIGURATION_FLAGS
+        ),
+        video_drivers=_string_tuple(context_raw["videoDrivers"]),
+    )
     expected = [item["attribute"] for item in load_catalog()]
     if len(records) != len(expected):
         raise ValueError("Nix inspector returned an incomplete package catalog")
@@ -165,7 +231,64 @@ def _parse_packages(raw: Any) -> tuple[str, tuple[PackageAssessment, ...]]:
                 license_name=license_name[:256],
             )
         )
-    return system, tuple(parsed)
+    return system, tuple(parsed), nix_context
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip().lower()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _runtime_hardware_context(sysfs_root: Path, dev_root: Path) -> TargetContext:
+    battery = False
+    power_root = sysfs_root / "class/power_supply"
+    try:
+        battery = any(
+            _read_text(path / "type") == "battery"
+            for path in power_root.iterdir()
+            if path.is_dir()
+        )
+    except OSError:
+        pass
+    chassis = _read_text(sysfs_root / "class/dmi/id/chassis_type")
+    if battery or chassis in _LAPTOP_CHASSIS_TYPES:
+        form_factor = "laptop"
+    elif chassis in _DESKTOP_CHASSIS_TYPES:
+        form_factor = "desktop"
+    else:
+        form_factor = "unknown"
+
+    gpu_vendors: list[str] = []
+    pci_root = sysfs_root / "bus/pci/devices"
+    try:
+        for device in list(pci_root.iterdir())[:512]:
+            if not _read_text(device / "class").startswith("0x03"):
+                continue
+            vendor = _GPU_VENDOR_IDS.get(_read_text(device / "vendor"), "other")
+            if vendor not in gpu_vendors:
+                gpu_vendors.append(vendor)
+    except OSError:
+        pass
+    return TargetContext(
+        form_factor=form_factor,
+        gpu_vendors=tuple(gpu_vendors),
+        kvm_available=(dev_root / "kvm").exists(),
+        runtime_hardware_inspected=sysfs_root.is_dir(),
+    )
+
+
+def _merge_context(nix_context: TargetContext, runtime: TargetContext) -> TargetContext:
+    return TargetContext(
+        desktop_environments=nix_context.desktop_environments,
+        configuration_flags=nix_context.configuration_flags,
+        video_drivers=nix_context.video_drivers,
+        form_factor=runtime.form_factor,
+        gpu_vendors=runtime.gpu_vendors,
+        kvm_available=runtime.kvm_available,
+        runtime_hardware_inspected=runtime.runtime_hardware_inspected,
+    )
 
 
 def inspect_package_compatibility(
@@ -175,19 +298,26 @@ def inspect_package_compatibility(
     timeout: int = 120,
     runner: Runner = subprocess.run,
     which: Which = shutil.which,
+    sysfs_root: Path = Path("/sys"),
+    dev_root: Path = Path("/dev"),
 ) -> PackageCompatibilityInspection:
     """Evaluate catalog package availability against the target configuration."""
     started = time.monotonic()
     inspection = inspect_system(config_root)
+    runtime_context = _runtime_hardware_context(sysfs_root, dev_root)
     mode = inspection.configuration_mode
     target = flake_target
     if timeout < 1:
-        return _result("blocked", mode, target, warning="Inspection timeout must be positive.")
+        return _result(
+            "blocked", mode, target, context=runtime_context,
+            warning="Inspection timeout must be positive.",
+        )
     if mode == "missing":
         return _result(
             "blocked",
             mode,
             target,
+            context=runtime_context,
             warning="No configuration.nix or flake.nix entrypoint was found.",
         )
     if not inspection.config_root.is_dir():
@@ -195,6 +325,7 @@ def inspect_package_compatibility(
             "blocked",
             mode,
             target,
+            context=runtime_context,
             warning="The configuration root is not a readable directory.",
         )
     if mode == "flake":
@@ -204,6 +335,7 @@ def inspect_package_compatibility(
                 "blocked",
                 mode,
                 target,
+                context=runtime_context,
                 warning=(
                     "A flake target containing only letters, digits, underscores, "
                     "or hyphens is required."
@@ -215,6 +347,7 @@ def inspect_package_compatibility(
             "unavailable",
             mode,
             target,
+            context=runtime_context,
             warning="The nix command is unavailable; package compatibility was not inspected.",
         )
 
@@ -258,6 +391,7 @@ def inspect_package_compatibility(
             "timed-out",
             mode,
             target,
+            context=runtime_context,
             warning=f"Package compatibility inspection exceeded {timeout} seconds.",
             duration_ms=round((time.monotonic() - started) * 1000),
         )
@@ -266,6 +400,7 @@ def inspect_package_compatibility(
             "failed",
             mode,
             target,
+            context=runtime_context,
             warning=f"The nix evaluator could not be started: {error}",
             duration_ms=round((time.monotonic() - started) * 1000),
         )
@@ -277,6 +412,7 @@ def inspect_package_compatibility(
             "failed",
             mode,
             target,
+            context=runtime_context,
             warning=(
                 "Nix could not evaluate package compatibility."
                 + (f"\n{diagnostic}" if diagnostic else "")
@@ -284,12 +420,13 @@ def inspect_package_compatibility(
             duration_ms=duration,
         )
     try:
-        system, packages = _parse_packages(json.loads(completed.stdout))
+        system, packages, nix_context = _parse_packages(json.loads(completed.stdout))
     except (json.JSONDecodeError, ValueError) as error:
         return _result(
             "failed",
             mode,
             target,
+            context=runtime_context,
             warning=f"Nix returned an invalid package compatibility document: {error}",
             duration_ms=duration,
         )
@@ -305,6 +442,7 @@ def inspect_package_compatibility(
         target,
         system=system,
         packages=packages,
+        context=_merge_context(nix_context, runtime_context),
         warning=warning,
         duration_ms=duration,
     )

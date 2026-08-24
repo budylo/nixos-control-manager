@@ -24,6 +24,7 @@ from nix_control_manager.model import ManagedState
 from nix_control_manager.package_compatibility import (
     PackageAssessment,
     PackageCompatibilityInspection,
+    TargetContext,
 )
 from nix_control_manager.settings_inspector import (
     EffectiveDefinition,
@@ -301,6 +302,14 @@ class ServerTests(unittest.TestCase):
                         license_name="unfree",
                     ),
                 ),
+                context=TargetContext(
+                    desktop_environments=("plasma",),
+                    configuration_flags=("pipewire",),
+                    form_factor="laptop",
+                    gpu_vendors=("amd",),
+                    kvm_available=True,
+                    runtime_hardware_inspected=True,
+                ),
                 duration_ms=37,
             ),
             home_manager_inspector=lambda *args, **kwargs: HomeManagerInspection(
@@ -356,6 +365,7 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_and_empty_state_are_available(self) -> None:
         catalog = self.request_json("/api/catalog")
+        guidance = self.request_json("/api/catalog-guidance")
         compatibility = self.request_json("/api/catalog-compatibility")
         presets = self.request_json("/api/presets")
         settings_catalog = self.request_json("/api/settings-catalog")
@@ -366,12 +376,16 @@ class ServerTests(unittest.TestCase):
         effective = self.request_json("/api/effective-settings")
         home_manager = self.request_json("/api/home-manager")
         self.assertGreaterEqual(len(catalog), 130)
+        self.assertEqual(guidance["schemaVersion"], 1)
+        self.assertGreaterEqual(len(guidance["alternativeGroups"]), 15)
         self.assertEqual(compatibility["status"], "passed")
         self.assertTrue(compatibility["readOnly"])
         self.assertEqual(compatibility["system"], "x86_64-linux")
         self.assertEqual(compatibility["summary"]["compatible"], 1)
         self.assertEqual(compatibility["summary"]["incompatible"], 1)
         self.assertEqual(compatibility["packages"][1]["reason"], "evaluation-rejected")
+        self.assertEqual(compatibility["context"]["desktopEnvironments"], ["plasma"])
+        self.assertEqual(compatibility["context"]["formFactor"], "laptop")
         self.assertGreaterEqual(len(presets), 8)
         self.assertIn("gaming-ready", {item["id"] for item in presets})
         self.assertGreaterEqual(len(settings_catalog), 30)

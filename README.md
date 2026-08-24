@@ -414,6 +414,15 @@ packages. Definitively unavailable packages cannot be newly selected, while an
 existing selection remains removable. If inspection itself is unavailable, the
 catalog stays usable and the normal build-preview remains the final authority.
 
+The same inspection reports a small, bounded target context: known desktop
+environments, relevant enabled features, configured video drivers, and
+read-only runtime hints for form factor, GPU vendor, and KVM. NCM combines it
+with a curated guidance catalog to offer compatible alternatives, useful
+companion packages, and target-specific suggestions. NixOS-WSL is treated as a
+distinct environment so hardware inherited from the Windows host does not
+produce misleading laptop or virtualization recommendations. Every suggestion
+has its own **Add to selection** action; nothing is selected automatically.
+
 Eight reusable presets merge coherent package and typed-option selections into
 the current draft. They never remove manually selected items and they do not
 save, build, or activate anything automatically. The same draft can be exported

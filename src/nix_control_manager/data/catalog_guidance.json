@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "alternativeGroups": [
+    {
+      "id": "web-browser",
+      "title": "Веббраузери",
+      "description": "Виберіть браузер відповідно до потрібного рушія та способу керування.",
+      "members": [
+        {"attribute": "firefox", "desktopEnvironments": []},
+        {"attribute": "chromium", "desktopEnvironments": []},
+        {"attribute": "qutebrowser", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "torrent-client",
+      "title": "Torrent-клієнти",
+      "description": "Повнофункціональний qBittorrent або легший Transmission.",
+      "members": [
+        {"attribute": "qbittorrent", "desktopEnvironments": ["plasma"]},
+        {"attribute": "transmission_4-gtk", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate"]}
+      ]
+    },
+    {
+      "id": "office-suite",
+      "title": "Офісні пакети",
+      "description": "LibreOffice має відкритий формат і ширший набір інструментів; ONLYOFFICE зосереджений на сумісності з Microsoft Office.",
+      "members": [
+        {"attribute": "libreoffice-fresh", "desktopEnvironments": []},
+        {"attribute": "onlyoffice-desktopeditors", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "pdf-reader",
+      "title": "Перегляд PDF",
+      "description": "Графічний Okular або мінімалістичний клавіатурний Zathura.",
+      "members": [
+        {"attribute": "kdePackages.okular", "desktopEnvironments": ["plasma"]},
+        {"attribute": "zathura", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate", "hyprland", "sway"]}
+      ]
+    },
+    {
+      "id": "video-player",
+      "title": "Відеопрогравачі",
+      "description": "VLC універсальний, MPV мінімалістичний, Celluloid додає GTK-інтерфейс до MPV.",
+      "members": [
+        {"attribute": "vlc", "desktopEnvironments": ["plasma"]},
+        {"attribute": "mpv", "desktopEnvironments": ["hyprland", "sway"]},
+        {"attribute": "celluloid", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate"]}
+      ]
+    },
+    {
+      "id": "music-player",
+      "title": "Музичні програвачі",
+      "description": "Оберіть бібліотеку Strawberry, легкий Audacious або простий Amberol.",
+      "members": [
+        {"attribute": "strawberry", "desktopEnvironments": ["plasma"]},
+        {"attribute": "audacious", "desktopEnvironments": ["xfce", "cinnamon", "mate"]},
+        {"attribute": "amberol", "desktopEnvironments": ["gnome"]}
+      ]
+    },
+    {
+      "id": "video-editor",
+      "title": "Відеомонтаж",
+      "description": "Kdenlive краще інтегрується з Plasma, Shotcut є нейтральною альтернативою.",
+      "members": [
+        {"attribute": "kdePackages.kdenlive", "desktopEnvironments": ["plasma"]},
+        {"attribute": "shotcut", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "raw-photo",
+      "title": "Обробка RAW",
+      "description": "Два зрілі неразруйнівні редактори фотографій із різними робочими процесами.",
+      "members": [
+        {"attribute": "darktable", "desktopEnvironments": []},
+        {"attribute": "rawtherapee", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "code-editor",
+      "title": "Редактори коду",
+      "description": "Графічний VSCodium або клавіатурні редактори для термінала.",
+      "members": [
+        {"attribute": "vscodium", "desktopEnvironments": []},
+        {"attribute": "neovim", "desktopEnvironments": ["hyprland", "sway"]},
+        {"attribute": "helix", "desktopEnvironments": ["hyprland", "sway"]},
+        {"attribute": "emacs", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "windows-game-manager",
+      "title": "Windows-ігри та лаунчери",
+      "description": "Heroic працює з Epic/GOG, Lutris об’єднує різні джерела, Bottles ізолює Wine-середовища.",
+      "members": [
+        {"attribute": "heroic", "desktopEnvironments": []},
+        {"attribute": "lutris", "desktopEnvironments": []},
+        {"attribute": "bottles", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "password-manager",
+      "title": "Менеджери паролів",
+      "description": "KeePassXC зберігає локальну базу, Bitwarden орієнтований на синхронізацію.",
+      "members": [
+        {"attribute": "keepassxc", "desktopEnvironments": []},
+        {"attribute": "bitwarden-desktop", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "file-manager",
+      "title": "Файлові менеджери",
+      "description": "Рідний файловий менеджер зазвичай найкраще інтегрується з робочим середовищем.",
+      "members": [
+        {"attribute": "kdePackages.dolphin", "desktopEnvironments": ["plasma"]},
+        {"attribute": "nautilus", "desktopEnvironments": ["gnome"]},
+        {"attribute": "nemo", "desktopEnvironments": ["cinnamon"]},
+        {"attribute": "thunar", "desktopEnvironments": ["xfce"]}
+      ]
+    },
+    {
+      "id": "archive-manager",
+      "title": "Графічні архіватори",
+      "description": "Ark пасує до Plasma, File Roller — до GTK-середовищ.",
+      "members": [
+        {"attribute": "kdePackages.ark", "desktopEnvironments": ["plasma"]},
+        {"attribute": "file-roller", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate"]}
+      ]
+    },
+    {
+      "id": "backup-tool",
+      "title": "Резервні копії",
+      "description": "Restic і Borg — автоматизовані CLI-рішення; Déjà Dup пропонує простий графічний процес.",
+      "members": [
+        {"attribute": "restic", "desktopEnvironments": []},
+        {"attribute": "borgbackup", "desktopEnvironments": []},
+        {"attribute": "deja-dup", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate"]}
+      ]
+    },
+    {
+      "id": "resource-monitor",
+      "title": "Моніторинг ресурсів",
+      "description": "htop класичний і компактний; btop має більш наочне представлення.",
+      "members": [
+        {"attribute": "htop", "desktopEnvironments": []},
+        {"attribute": "btop", "desktopEnvironments": []}
+      ]
+    },
+    {
+      "id": "disk-usage",
+      "title": "Аналіз місця на диску",
+      "description": "Консольні ncdu/dust або графічна карта Baobab.",
+      "members": [
+        {"attribute": "ncdu", "desktopEnvironments": []},
+        {"attribute": "dust", "desktopEnvironments": ["hyprland", "sway"]},
+        {"attribute": "baobab", "desktopEnvironments": ["gnome", "xfce", "cinnamon", "mate"]}
+      ]
+    },
+    {
+      "id": "partition-manager",
+      "title": "Керування розділами",
+      "description": "KDE Partition Manager інтегрується з Plasma, GParted не залежить від середовища.",
+      "members": [
+        {"attribute": "kdePackages.partitionmanager", "desktopEnvironments": ["plasma"]},
+        {"attribute": "gparted", "desktopEnvironments": []}
+      ]
+    }
+  ],
+  "companions": [
+    {"source": "git", "target": "lazygit", "reason": "Зручний інтерактивний огляд гілок, комітів і змін Git."},
+    {"source": "git", "target": "gh", "reason": "Керування репозиторіями, pull request і релізами GitHub з термінала."},
+    {"source": "sops", "target": "age", "reason": "age є простим рекомендованим backend для шифрування файлів SOPS."},
+    {"source": "obs-studio", "target": "ffmpeg", "reason": "Корисний для перевірки, конвертації та автоматичної обробки записів."},
+    {"source": "yt-dlp", "target": "ffmpeg", "reason": "Дозволяє об’єднувати потоки та конвертувати завантажені медіафайли."},
+    {"source": "mpv", "target": "yt-dlp", "reason": "MPV зможе напряму відкривати більше мережевих відеопосилань."},
+    {"source": "cmake", "target": "gnumake", "reason": "Поширений виконавець збірки для проєктів, згенерованих CMake."},
+    {"source": "cmake", "target": "gcc", "reason": "Компілятор для типових C і C++ проєктів CMake."},
+    {"source": "rustup", "target": "git", "reason": "Багато Rust-проєктів і Cargo-залежностей отримуються через Git."},
+    {"source": "protonup-qt", "target": "heroic", "reason": "Heroic може використовувати встановлені користувацькі версії Wine-GE і Proton-GE."},
+    {"source": "restic", "target": "rclone", "reason": "rclone додає широкий вибір віддалених сховищ для резервних копій."},
+    {"source": "yubikey-manager", "target": "gnupg", "reason": "Корисно для OpenPGP-ключів, що зберігаються на YubiKey."},
+    {"source": "easyeffects", "target": "pavucontrol", "reason": "Допомагає перевіряти маршрути та рівні PipeWire/PulseAudio."},
+    {"source": "virt-manager", "target": "libguestfs", "reason": "Додає безпечні інструменти для огляду й редагування дисків віртуальних машин."},
+    {"source": "syncthing", "target": "localsend", "reason": "LocalSend доповнює постійну синхронізацію швидким одноразовим передаванням."}
+  ],
+  "contextRecommendations": [
+    {
+      "id": "plasma-native-tools",
+      "title": "Добре інтегрується з Plasma",
+      "reason": "Рідні KDE-програми використовують спільні діалоги, теми й системні служби Plasma.",
+      "match": {"desktopEnvironments": ["plasma"]},
+      "packages": ["kdePackages.dolphin", "kdePackages.ark", "kdePackages.okular", "kdePackages.partitionmanager"]
+    },
+    {
+      "id": "gnome-native-tools",
+      "title": "Добре інтегрується з GNOME",
+      "reason": "GTK-програми відповідають робочому процесу й оформленню GNOME.",
+      "match": {"desktopEnvironments": ["gnome"]},
+      "packages": ["nautilus", "file-roller", "baobab", "gnome-disk-utility", "celluloid", "amberol"]
+    },
+    {
+      "id": "xfce-native-tools",
+      "title": "Легкі програми для Xfce",
+      "reason": "Ці інструменти не додають важкого desktop stack і добре пасують до Xfce.",
+      "match": {"desktopEnvironments": ["xfce"]},
+      "packages": ["thunar", "file-roller", "pavucontrol", "audacious"]
+    },
+    {
+      "id": "laptop-diagnostics",
+      "title": "Діагностика ноутбука",
+      "reason": "Локально виявлено мобільний формфактор або батарею; ці інструменти допомагають зі споживанням, температурою та дисками.",
+      "match": {"formFactors": ["laptop"]},
+      "packages": ["powertop", "lm_sensors", "smartmontools"]
+    },
+    {
+      "id": "local-kvm-lab",
+      "title": "Локальна віртуалізація доступна",
+      "reason": "На поточній машині доступний KVM, тому можна використовувати апаратно прискорені віртуальні машини.",
+      "match": {"kvmAvailable": true},
+      "packages": ["virt-manager", "qemu", "libguestfs"]
+    },
+    {
+      "id": "gpu-observability",
+      "title": "Інструменти для графіки",
+      "reason": "Локально виявлено графічний адаптер; ці пакунки допомагають перевіряти пристрій, температури й навантаження.",
+      "match": {"gpuVendors": ["amd", "intel", "nvidia"]},
+      "packages": ["pciutils", "lm_sensors", "mangohud"]
+    },
+    {
+      "id": "pipewire-controls",
+      "title": "Керування звуком PipeWire",
+      "reason": "У цільовій конфігурації ввімкнено PipeWire; доступні графічний контроль потоків та ефекти.",
+      "match": {"configurationFlags": ["pipewire"]},
+      "packages": ["pavucontrol", "easyeffects"]
+    },
+    {
+      "id": "wsl-essentials",
+      "title": "Корисне в NixOS-WSL",
+      "reason": "Для WSL пріоритетні легкі інструменти діагностики, місця на диску та перенесення файлів.",
+      "match": {"configurationFlags": ["wsl"]},
+      "packages": ["fastfetch", "ncdu", "duf", "rsync"]
+    }
+  ]
+}

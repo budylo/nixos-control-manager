@@ -15,7 +15,12 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
-from .catalog import load_catalog, load_presets, load_settings_catalog
+from .catalog import (
+    load_catalog,
+    load_catalog_guidance,
+    load_presets,
+    load_settings_catalog,
+)
 from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
@@ -363,6 +368,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(_load_ui_state(self.server.state_path).to_mapping())
             elif path == "/api/catalog":
                 self._json(load_catalog())
+            elif path == "/api/catalog-guidance":
+                self._json(load_catalog_guidance())
             elif path == "/api/catalog-compatibility":
                 self._json(
                     self.server.compatibility_inspector(

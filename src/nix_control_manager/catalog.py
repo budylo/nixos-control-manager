@@ -14,6 +14,12 @@ SETTING_VALUE_TYPES = frozenset(
     {"boolean", "string", "enum", "integer", "string-list", "integer-list"}
 )
 PACKAGE_SCOPES = frozenset({"system", "home-manager"})
+DESKTOP_ENVIRONMENTS = frozenset(
+    {"plasma", "gnome", "xfce", "cinnamon", "mate", "hyprland", "sway"}
+)
+FORM_FACTORS = frozenset({"laptop", "desktop", "unknown"})
+GPU_VENDORS = frozenset({"amd", "intel", "microsoft", "nvidia", "virtio", "other"})
+CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "wsl"})
 _SETTING_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+$")
 _PACKAGE_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*$")
 _PRESET_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -65,6 +71,142 @@ def _catalog_by_attribute() -> dict[str, dict[str, Any]]:
 
 def load_catalog() -> list[dict[str, Any]]:
     return deepcopy(list(_catalog_by_attribute().values()))
+
+
+def _string_array(
+    value: Any,
+    *,
+    label: str,
+    allowed: frozenset[str] | None = None,
+    allow_empty: bool = False,
+) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or (not allow_empty and not value)
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise RuntimeError(f"{label} must be a unique string array")
+    if allowed is not None and any(item not in allowed for item in value):
+        raise RuntimeError(f"{label} contains an unsupported value")
+    return value
+
+
+@lru_cache(maxsize=1)
+def _catalog_guidance() -> dict[str, Any]:
+    resource = files("nix_control_manager").joinpath("data/catalog_guidance.json")
+    raw = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or set(raw) != {
+        "schemaVersion",
+        "alternativeGroups",
+        "companions",
+        "contextRecommendations",
+    }:
+        raise RuntimeError("Catalog guidance must use the exact top-level schema")
+    if raw["schemaVersion"] != 1:
+        raise RuntimeError("Catalog guidance schemaVersion must be 1")
+    packages = _catalog_by_attribute()
+
+    groups = raw["alternativeGroups"]
+    if not isinstance(groups, list):
+        raise RuntimeError("alternativeGroups must be an array")
+    group_ids: set[str] = set()
+    grouped_packages: set[str] = set()
+    for index, group in enumerate(groups):
+        label = f"alternativeGroups[{index}]"
+        if not isinstance(group, dict) or set(group) != {
+            "id", "title", "description", "members",
+        }:
+            raise RuntimeError(f"{label} must use the exact schema")
+        group_id = group["id"]
+        if not isinstance(group_id, str) or not _PRESET_ID.fullmatch(group_id) or group_id in group_ids:
+            raise RuntimeError(f"{label}.id is invalid or duplicated")
+        group_ids.add(group_id)
+        for field in ("title", "description"):
+            if not isinstance(group[field], str) or not group[field].strip():
+                raise RuntimeError(f"{label}.{field} must be non-empty")
+        members = group["members"]
+        if not isinstance(members, list) or len(members) < 2:
+            raise RuntimeError(f"{label}.members must contain at least two packages")
+        local_members: set[str] = set()
+        for member_index, member in enumerate(members):
+            member_label = f"{label}.members[{member_index}]"
+            if not isinstance(member, dict) or set(member) != {
+                "attribute", "desktopEnvironments",
+            }:
+                raise RuntimeError(f"{member_label} must use the exact schema")
+            attribute = member["attribute"]
+            if attribute not in packages or attribute in local_members or attribute in grouped_packages:
+                raise RuntimeError(f"{member_label}.attribute is unknown or duplicated")
+            local_members.add(attribute)
+            grouped_packages.add(attribute)
+            _string_array(
+                member["desktopEnvironments"],
+                label=f"{member_label}.desktopEnvironments",
+                allowed=DESKTOP_ENVIRONMENTS,
+                allow_empty=True,
+            )
+
+    companions = raw["companions"]
+    if not isinstance(companions, list):
+        raise RuntimeError("companions must be an array")
+    companion_pairs: set[tuple[str, str]] = set()
+    for index, companion in enumerate(companions):
+        label = f"companions[{index}]"
+        if not isinstance(companion, dict) or set(companion) != {"source", "target", "reason"}:
+            raise RuntimeError(f"{label} must use the exact schema")
+        source = companion["source"]
+        target = companion["target"]
+        pair = (source, target)
+        if source not in packages or target not in packages or source == target or pair in companion_pairs:
+            raise RuntimeError(f"{label} references an unknown or duplicate package pair")
+        companion_pairs.add(pair)
+        if not isinstance(companion["reason"], str) or not companion["reason"].strip():
+            raise RuntimeError(f"{label}.reason must be non-empty")
+
+    recommendations = raw["contextRecommendations"]
+    if not isinstance(recommendations, list):
+        raise RuntimeError("contextRecommendations must be an array")
+    recommendation_ids: set[str] = set()
+    match_fields = {
+        "desktopEnvironments": DESKTOP_ENVIRONMENTS,
+        "formFactors": FORM_FACTORS,
+        "gpuVendors": GPU_VENDORS,
+        "configurationFlags": CONFIGURATION_FLAGS,
+    }
+    for index, recommendation in enumerate(recommendations):
+        label = f"contextRecommendations[{index}]"
+        if not isinstance(recommendation, dict) or set(recommendation) != {
+            "id", "title", "reason", "match", "packages",
+        }:
+            raise RuntimeError(f"{label} must use the exact schema")
+        recommendation_id = recommendation["id"]
+        if (
+            not isinstance(recommendation_id, str)
+            or not _PRESET_ID.fullmatch(recommendation_id)
+            or recommendation_id in recommendation_ids
+        ):
+            raise RuntimeError(f"{label}.id is invalid or duplicated")
+        recommendation_ids.add(recommendation_id)
+        for field in ("title", "reason"):
+            if not isinstance(recommendation[field], str) or not recommendation[field].strip():
+                raise RuntimeError(f"{label}.{field} must be non-empty")
+        match = recommendation["match"]
+        if not isinstance(match, dict) or not match or set(match) - (set(match_fields) | {"kvmAvailable"}):
+            raise RuntimeError(f"{label}.match contains unsupported conditions")
+        for field, allowed in match_fields.items():
+            if field in match:
+                _string_array(match[field], label=f"{label}.match.{field}", allowed=allowed)
+        if "kvmAvailable" in match and not isinstance(match["kvmAvailable"], bool):
+            raise RuntimeError(f"{label}.match.kvmAvailable must be boolean")
+        for attribute in _string_array(recommendation["packages"], label=f"{label}.packages"):
+            if attribute not in packages:
+                raise RuntimeError(f"{label} references unknown package {attribute!r}")
+    return raw
+
+
+def load_catalog_guidance() -> dict[str, Any]:
+    return deepcopy(_catalog_guidance())
 
 
 @lru_cache(maxsize=1)

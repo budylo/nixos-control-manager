@@ -225,6 +225,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"cancelHomeBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"runActivationPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"catalogCompatibility\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"catalogGuidance\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -278,6 +279,12 @@ pkgs.testers.runNixOSTest {
     original_hashes = machine.succeed(
         "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"
     )
+    guidance = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/catalog-guidance"
+    ))
+    t.assertEqual(guidance["schemaVersion"], 1)
+    t.assertGreaterEqual(len(guidance["alternativeGroups"]), 15)
+    t.assertGreaterEqual(len(guidance["contextRecommendations"]), 8)
     compatibility = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
         timeout=long_timeout,
@@ -290,6 +297,19 @@ pkgs.testers.runNixOSTest {
     t.assertGreaterEqual(len(compatibility["packages"]), 130)
     t.assertGreaterEqual(compatibility["summary"]["compatible"], 100)
     t.assertEqual(compatibility["summary"]["unknown"], 0)
+    t.assertEqual(
+        set(compatibility["context"]),
+        {
+            "configurationFlags",
+            "desktopEnvironments",
+            "formFactor",
+            "gpuVendors",
+            "kvmAvailable",
+            "runtimeHardwareInspected",
+            "videoDrivers",
+        },
+    )
+    t.assertTrue(compatibility["context"]["runtimeHardwareInspected"])
     t.assertEqual(
         machine.succeed(
             "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"

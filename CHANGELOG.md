@@ -12,7 +12,12 @@ release name; Python packaging may normalize prereleases to PEP 440 spelling.
 - per-package explanations for missing attributes, unsupported platforms,
   broken packages, evaluator rejection, and unfree licenses;
 - compatibility summary and smart filters in the graphical catalog, with
-  fail-open behavior when the target cannot be inspected.
+  fail-open behavior when the target cannot be inspected;
+- curated compatible alternatives, companion-package suggestions, and
+  recommendations matched to the target desktop, enabled features, form
+  factor, GPU, virtualization support, or NixOS-WSL;
+- explicit-confirmation recommendation cards: catalog guidance never changes
+  the draft, saves configuration, or activates the system by itself.
 
 ## [0.1.0-alpha.1] - 2026-08-21
 
