@@ -147,7 +147,7 @@ pkgs.testers.runNixOSTest {
     denied_status, _ = machine.execute(
         "${runAs "managed-denied"} ${client} apply-managed-plan --target managed "
         f"--plan-fingerprint {denied_validation['planFingerprint']} "
-        f"--receipt {denied_validation['validationReceipt']} > /tmp/denied.json",
+        f"--receipt={denied_validation['validationReceipt']} > /tmp/denied.json",
         timeout=timeout,
     )
     t.assertEqual(denied_status, 2)
@@ -162,7 +162,7 @@ pkgs.testers.runNixOSTest {
     applied = json.loads(machine.succeed(
         "${runAs "managed-authorized"} ${client} apply-managed-plan --target managed "
         f"--plan-fingerprint {validated['planFingerprint']} "
-        f"--receipt {validated['validationReceipt']}",
+        f"--receipt={validated['validationReceipt']}",
         timeout=timeout,
     ))["result"]
     t.assertEqual(applied["state"], "committed")

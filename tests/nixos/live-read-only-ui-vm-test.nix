@@ -545,7 +545,7 @@ pkgs.testers.runNixOSTest {
 
     apply_command = (
         "${runAsUi} ${client} apply-plan --target live "
-        f"--plan-fingerprint {fake_fingerprint} --receipt {fake_receipt} "
+        f"--plan-fingerprint {fake_fingerprint} --receipt={fake_receipt} "
         "> /tmp/live-apply.json"
     )
     apply_status, _ = machine.execute(apply_command, timeout=long_timeout)

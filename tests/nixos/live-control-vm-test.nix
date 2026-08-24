@@ -270,7 +270,7 @@ pkgs.testers.runNixOSTest {
 
     activation = json.loads(machine.succeed(
       "${runAsUser} ${client} test-activation --target control --system-path "
-      + candidate + " --plan-fingerprint " + fingerprint + " --receipt " + receipt,
+      + candidate + " --plan-fingerprint " + fingerprint + " --receipt=" + receipt,
       timeout=timeout,
     ))
     session = activation["result"]["sessionId"]

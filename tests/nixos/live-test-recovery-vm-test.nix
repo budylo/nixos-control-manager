@@ -234,7 +234,7 @@ pkgs.testers.runNixOSTest {
     activation_command = (
         "${runAsUser} ${client} test-activation --target live-test "
         "--system-path " + candidate + " --plan-fingerprint " + fingerprint
-        + " --receipt " + receipt
+        + " --receipt=" + receipt
     )
     activation = json.loads(machine.succeed(activation_command, timeout=long_timeout))
     if activation["status"] != "ok":

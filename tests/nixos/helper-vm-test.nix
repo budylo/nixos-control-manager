@@ -122,7 +122,7 @@ pkgs.testers.runNixOSTest {
     denied_command = (
         "${runAs "ncm-denied"} ${client} apply-plan --target fixture "
         f"--plan-fingerprint {denied_result['planFingerprint']} "
-        f"--receipt {denied_result['validationReceipt']} > /tmp/denied.json"
+        f"--receipt={denied_result['validationReceipt']} > /tmp/denied.json"
     )
     denied_status, _ = machine.execute(denied_command, timeout=long_timeout)
     t.assertEqual(denied_status, 2)
@@ -143,7 +143,7 @@ pkgs.testers.runNixOSTest {
     authorized_apply = json.loads(machine.succeed(
         "${runAs "ncm-authorized"} ${client} apply-plan --target fixture "
         f"--plan-fingerprint {authorized_result['planFingerprint']} "
-        f"--receipt {authorized_result['validationReceipt']}",
+        f"--receipt={authorized_result['validationReceipt']}",
         timeout=long_timeout,
     ))
     t.assertEqual(authorized_apply["status"], "ok")

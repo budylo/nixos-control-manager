@@ -168,7 +168,7 @@ pkgs.testers.runNixOSTest {
     denied_command = (
         "${runAs "hm-denied"} ${client} apply-home-manager-plan --target live-home "
         f"--plan-fingerprint {denied_result['planFingerprint']} "
-        f"--receipt {denied_result['validationReceipt']} > /tmp/hm-denied.json"
+        f"--receipt={denied_result['validationReceipt']} > /tmp/hm-denied.json"
     )
     denied_status, _ = machine.execute(denied_command, timeout=timeout)
     t.assertEqual(denied_status, 2)
