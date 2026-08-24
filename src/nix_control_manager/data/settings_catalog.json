@@ -85,7 +85,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "medium"
+    "risk": "medium",
+    "service": {"category": "desktop", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "services.pipewire.pulse.enable",
@@ -149,7 +150,8 @@
         "message": "Blueman потребує ввімкненої системної підтримки Bluetooth."
       }
     ],
-    "risk": "low"
+    "risk": "low",
+    "service": {"category": "desktop", "mode": "integration", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "services.upower.enable",
@@ -159,7 +161,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "low"
+    "risk": "low",
+    "service": {"category": "hardware", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "zramSwap.enable",
@@ -200,7 +203,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "connectivity", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "networking.networkmanager.wifi.backend",
@@ -232,7 +236,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "security", "mode": "integration", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "networking.firewall.allowedTCPPorts",
@@ -284,7 +289,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": false,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "connectivity", "mode": "background", "exposure": "remote-access", "platforms": ["nixos", "wsl"]}
   },
   {
     "path": "services.openssh.enable",
@@ -294,7 +300,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": false,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "connectivity", "mode": "background", "exposure": "remote-access", "platforms": ["nixos", "wsl"]}
   },
   {
     "path": "services.printing.enable",
@@ -304,7 +311,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "low"
+    "risk": "low",
+    "service": {"category": "desktop", "mode": "background", "exposure": "local-network", "platforms": ["nixos"]}
   },
   {
     "path": "services.flatpak.enable",
@@ -314,7 +322,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "medium"
+    "risk": "medium",
+    "service": {"category": "desktop", "mode": "integration", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "programs.steam.enable",
@@ -334,7 +343,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": false,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "virtualization", "mode": "background", "exposure": "none", "platforms": ["nixos", "wsl"]}
   },
   {
     "path": "virtualisation.libvirtd.enable",
@@ -344,7 +354,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": false,
-    "risk": "high"
+    "risk": "high",
+    "service": {"category": "virtualization", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "programs.virt-manager.enable",
@@ -364,7 +375,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "medium"
+    "risk": "medium",
+    "service": {"category": "hardware", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "services.fstrim.enable",
@@ -374,7 +386,8 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "low"
+    "risk": "low",
+    "service": {"category": "maintenance", "mode": "scheduled", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "nix.gc.automatic",
@@ -384,7 +397,107 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": false,
-    "risk": "medium"
+    "risk": "medium",
+    "service": {"category": "maintenance", "mode": "scheduled", "exposure": "none", "platforms": ["nixos", "wsl"]}
+  },
+  {
+    "path": "services.avahi.enable",
+    "name": "Локальне виявлення Avahi",
+    "description": "Дозволяє знаходити принтери, медіапристрої та інші сервіси в локальній мережі через mDNS/DNS-SD.",
+    "category": "Служби",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium",
+    "service": {"category": "connectivity", "mode": "background", "exposure": "local-network", "platforms": ["nixos"]}
+  },
+  {
+    "path": "services.fail2ban.enable",
+    "name": "Захист Fail2ban",
+    "description": "Тимчасово блокує адреси з повторними невдалими спробами входу до мережевих служб.",
+    "category": "Безпека",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium",
+    "service": {"category": "security", "mode": "background", "exposure": "none", "platforms": ["nixos", "wsl"]}
+  },
+  {
+    "path": "services.irqbalance.enable",
+    "name": "Розподіл переривань IRQBalance",
+    "description": "Розподіляє апаратні переривання між ядрами процесора для рівномірнішого навантаження.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low",
+    "service": {"category": "maintenance", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
+  },
+  {
+    "path": "services.thermald.enable",
+    "name": "Температурний контроль Thermald",
+    "description": "Допомагає сумісним Intel-пристроям керувати температурою та уникати перегрівання.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium",
+    "service": {"category": "hardware", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
+  },
+  {
+    "path": "services.smartd.enable",
+    "name": "Моніторинг дисків SMART",
+    "description": "Стежить за показниками SMART накопичувачів і журналює ознаки можливих несправностей.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "low",
+    "service": {"category": "hardware", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
+  },
+  {
+    "path": "services.earlyoom.enable",
+    "name": "Захист пам’яті EarlyOOM",
+    "description": "Завчасно завершує процеси при критичній нестачі RAM, щоб система не зависла повністю.",
+    "category": "Обслуговування",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high",
+    "service": {"category": "maintenance", "mode": "background", "exposure": "none", "platforms": ["nixos", "wsl"]}
+  },
+  {
+    "path": "services.pcscd.enable",
+    "name": "Смарт-картки PC/SC",
+    "description": "Вмикає системний доступ до смарт-карток, токенів автентифікації та сумісних зчитувачів.",
+    "category": "Обладнання",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "low",
+    "service": {"category": "hardware", "mode": "background", "exposure": "none", "platforms": ["nixos"]}
+  },
+  {
+    "path": "services.resolved.enable",
+    "name": "Системний DNS-resolver",
+    "description": "Вмикає systemd-resolved для локального кешування та узгодження DNS між мережевими підключеннями.",
+    "category": "Мережа",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high",
+    "service": {"category": "connectivity", "mode": "background", "exposure": "none", "platforms": ["nixos", "wsl"]}
+  },
+  {
+    "path": "services.gvfs.enable",
+    "name": "Інтеграція файлів GVfs",
+    "description": "Надає графічним програмам кошик, MTP-пристрої та доступ до віддалених файлових ресурсів.",
+    "category": "Робочий стіл",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "low",
+    "service": {"category": "desktop", "mode": "integration", "exposure": "none", "platforms": ["nixos"]}
   },
   {
     "path": "programs.nix-ld.enable",

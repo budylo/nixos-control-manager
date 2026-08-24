@@ -112,4 +112,38 @@ assert.deepEqual(
   [],
 );
 
+const serviceDefinitions = [
+  {
+    path: "services.openssh.enable",
+    valueType: "boolean",
+    service: { platforms: ["nixos", "wsl"] },
+  },
+  {
+    path: "services.fwupd.enable",
+    valueType: "boolean",
+    service: { platforms: ["nixos"] },
+  },
+  { path: "services.pipewire.pulse.enable", valueType: "boolean" },
+];
+assert.deepEqual(
+  settings.serviceDefinitions(serviceDefinitions).map((definition) => definition.path),
+  ["services.openssh.enable", "services.fwupd.enable"],
+);
+assert.deepEqual(
+  settings.serviceTargetStatus(serviceDefinitions[1], { configurationFlags: ["wsl"] }),
+  { target: "wsl", supported: false },
+);
+assert.deepEqual(
+  settings.serviceSummary(
+    serviceDefinitions,
+    { "services.openssh.enable": false },
+    [
+      { path: "services.openssh.enable", available: true, value: true },
+      { path: "services.fwupd.enable", available: false, assessment: "option-missing" },
+    ],
+    { configurationFlags: ["wsl"] },
+  ),
+  { total: 2, managed: 1, enabled: 1, pending: 1, attention: 1, notRecommended: 1 },
+);
+
 console.log("web settings helpers: ok");

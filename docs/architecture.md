@@ -187,6 +187,16 @@ unknown instead of being guessed. A repair action may add the typed parent value
 only after the user selects it. The Python state model separately rejects
 contradictions where both sides are already owned by NCM.
 
+The Services control center is a projection of this same catalog and ownership
+model. A validated `service` marker adds only presentation metadata: category,
+runtime mode, network exposure, and supported target kinds. It does not add a
+second state schema, generator, persistence endpoint, or activation route.
+Consequently a service card and the corresponding general settings card always
+edit the same typed option, use the same effective-value provenance and
+dependency result, and produce the same deterministic `managed.nix`. Target
+suitability is guidance derived from the read-only WSL context; it is visible
+but never becomes an automatic mutation or a substitute for build validation.
+
 Package compatibility uses a separate fixed expression and the same evaluated
 NixOS target. It checks attribute existence, `meta.availableOn`, `meta.broken`,
 license metadata, and whether the package output can be evaluated under the

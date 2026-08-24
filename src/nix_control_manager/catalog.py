@@ -20,6 +20,12 @@ DESKTOP_ENVIRONMENTS = frozenset(
 FORM_FACTORS = frozenset({"laptop", "desktop", "unknown"})
 GPU_VENDORS = frozenset({"amd", "intel", "microsoft", "nvidia", "virtio", "other"})
 CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "wsl"})
+SERVICE_CATEGORIES = frozenset(
+    {"connectivity", "desktop", "hardware", "maintenance", "security", "virtualization"}
+)
+SERVICE_MODES = frozenset({"background", "integration", "scheduled"})
+SERVICE_EXPOSURES = frozenset({"none", "local-network", "remote-access"})
+SERVICE_PLATFORMS = frozenset({"nixos", "wsl"})
 _SETTING_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+$")
 _PACKAGE_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*$")
 _PRESET_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -235,6 +241,7 @@ def _settings_by_path() -> dict[str, dict[str, Any]]:
         "pattern",
         "patternMessage",
         "requires",
+        "service",
     }
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
@@ -259,6 +266,29 @@ def _settings_by_path() -> dict[str, dict[str, Any]]:
                 raise RuntimeError(f"{path}.{field} must be a non-empty string")
         if item["risk"] not in {"low", "medium", "high"}:
             raise RuntimeError(f"{path}.risk is invalid")
+        service = item.get("service")
+        if service is not None:
+            if value_type != "boolean" or not isinstance(service, dict) or set(service) != {
+                "category",
+                "mode",
+                "exposure",
+                "platforms",
+            }:
+                raise RuntimeError(f"{path}.service must use the exact boolean-service schema")
+            if service["category"] not in SERVICE_CATEGORIES:
+                raise RuntimeError(f"{path}.service.category is invalid")
+            if service["mode"] not in SERVICE_MODES:
+                raise RuntimeError(f"{path}.service.mode is invalid")
+            if service["exposure"] not in SERVICE_EXPOSURES:
+                raise RuntimeError(f"{path}.service.exposure is invalid")
+            platforms = service["platforms"]
+            if (
+                not isinstance(platforms, list)
+                or not platforms
+                or any(platform not in SERVICE_PLATFORMS for platform in platforms)
+                or len(platforms) != len(set(platforms))
+            ):
+                raise RuntimeError(f"{path}.service.platforms is invalid")
         if "pattern" in item:
             if value_type != "string" or not isinstance(item["pattern"], str):
                 raise RuntimeError(f"{path}.pattern is valid only for string settings")
@@ -322,7 +352,7 @@ def _settings_by_path() -> dict[str, dict[str, Any]]:
 
 
 def load_settings_catalog() -> list[dict[str, Any]]:
-    return [dict(definition) for definition in _settings_by_path().values()]
+    return deepcopy(list(_settings_by_path().values()))
 
 
 def setting_definition(path: str) -> Mapping[str, Any] | None:

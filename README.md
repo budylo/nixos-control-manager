@@ -358,13 +358,13 @@ are in [`docs/live-managed.md`](docs/live-managed.md).
 
 ## Typed system settings
 
-The graphical interface now includes a typed NixOS settings catalog. Thirty-two
+The graphical interface now includes a typed NixOS settings catalog. Forty-one
 curated options cover locale and time, Plasma/SDDM, sound, Bluetooth, power and
 zram, NetworkManager, TCP/UDP firewall ports, SSH, Tailscale, printing,
 Flatpak, Steam, Docker/libvirt, firmware and SSD maintenance, Nix garbage
-collection, nix-ld compatibility, and the boot menu timeout. Boolean, enum,
-string, integer, and list editors expose the exact option path, NixOS type,
-curated default, and impact level.
+collection, nix-ld compatibility, the boot menu timeout, and additional common
+system services. Boolean, enum, string, integer, and list editors expose the
+exact option path, NixOS type, curated default, and impact level.
 
 Settings are opt-in individually: an untouched catalog default is not emitted.
 Known values are validated independently in the browser and Python model;
@@ -398,6 +398,23 @@ warning. Only definitions that remain active after Nix override filtering are
 shown; discarded weaker definitions are intentionally not presented as if they
 were still contributing. Options whose current scalar definitions conflict or
 cannot evaluate require manual review before NCM can start managing them.
+
+### Services control center
+
+The Services page is a focused view over the same typed option model rather
+than a second configuration store. Its 23 curated boolean services are grouped
+into desktop, hardware, connectivity, security, virtualization, and
+maintenance. Each card adds service-specific context: runtime mode, network
+exposure, impact, and whether the service is suitable for NixOS-WSL or intended
+for a physical NixOS installation.
+
+The overview deliberately distinguishes services that are effectively enabled
+in the evaluated configuration, services explicitly owned by NCM, and proposed
+values that would change the evaluated state. Taking an option under management
+first adopts its compatible live value. Enabling or disabling it then changes
+only the draft; the existing Nix preview, dependency checks, persistence,
+build-preview, dry analysis, test activation, and exact-output switch gates
+remain unchanged.
 
 ## Application catalog, presets, and profiles
 

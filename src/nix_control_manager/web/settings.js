@@ -129,12 +129,58 @@
     return issues;
   }
 
+  function serviceDefinitions(definitions) {
+    return (definitions || []).filter(
+      (definition) => definition.valueType === "boolean" && definition.service,
+    );
+  }
+
+  function serviceTargetStatus(definition, context) {
+    const target = (context?.configurationFlags || []).includes("wsl") ? "wsl" : "nixos";
+    const platforms = definition?.service?.platforms || [];
+    return {
+      target,
+      supported: platforms.includes(target),
+    };
+  }
+
+  function serviceSummary(definitions, options, effectiveSettings, context) {
+    const services = serviceDefinitions(definitions);
+    const effective = new Map(
+      (effectiveSettings || []).map((setting) => [setting.path, setting]),
+    );
+    let managed = 0;
+    let enabled = 0;
+    let pending = 0;
+    let attention = 0;
+    let notRecommended = 0;
+    for (const definition of services) {
+      const actual = effective.get(definition.path);
+      const isManaged = Object.hasOwn(options || {}, definition.path);
+      if (isManaged) managed += 1;
+      if (actual?.available && actual.value === true) enabled += 1;
+      if (
+        isManaged
+        && actual?.available
+        && JSON.stringify(options[definition.path]) !== JSON.stringify(actual.value)
+      ) pending += 1;
+      if (["conflict", "evaluation-failed", "option-missing"].includes(actual?.assessment)) {
+        attention += 1;
+      }
+      if (!serviceTargetStatus(definition, context).supported) notRecommended += 1;
+    }
+    return { total: services.length, managed, enabled, pending, attention, notRecommended };
+  }
+
   const api = {
     normalizeOptions,
     optionChangeCount,
     parseEditorValue,
     formatEditorValue,
     dependencyIssues,
+    serviceDefinitions,
+    serviceTargetStatus,
+    serviceSummary,
   };
   root.NcmSettings = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

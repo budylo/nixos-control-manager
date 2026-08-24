@@ -18,6 +18,14 @@ release name; Python packaging may normalize prereleases to PEP 440 spelling.
   factor, GPU, virtualization support, or NixOS-WSL;
 - explicit-confirmation recommendation cards: catalog guidance never changes
   the draft, saves configuration, or activates the system by itself.
+- dedicated Services control center with 23 curated NixOS services across
+  desktop, hardware, connectivity, security, virtualization, and maintenance;
+- service-specific risk, runtime mode, network exposure, and NixOS/WSL
+  suitability labels, backed by the evaluated effective value and definition
+  provenance;
+- separate managed, effective-enabled, and pending-change service summaries;
+  service actions reuse the existing preview, validation, build, and activation
+  safety boundaries instead of mutating the running system directly.
 
 ## [0.1.0-alpha.1] - 2026-08-21
 

@@ -76,8 +76,10 @@ const ui = {
   safetyModeNote: document.querySelector("#safetyModeNote"),
   programsNav: document.querySelector("#programsNav"),
   settingsNav: document.querySelector("#settingsNav"),
+  servicesNav: document.querySelector("#servicesNav"),
   programsPage: document.querySelector("#programsPage"),
   settingsPage: document.querySelector("#settingsPage"),
+  servicesPage: document.querySelector("#servicesPage"),
   pageTitle: document.querySelector("#pageTitle"),
   settingsCatalog: document.querySelector("#settingsCatalog"),
   settingsEmptyState: document.querySelector("#settingsEmptyState"),
@@ -89,6 +91,18 @@ const ui = {
   effectiveSettingsStatus: document.querySelector("#effectiveSettingsStatus"),
   effectiveSettingsDetail: document.querySelector("#effectiveSettingsDetail"),
   refreshEffectiveSettings: document.querySelector("#refreshEffectiveSettings"),
+  serviceSummaryCards: document.querySelector("#serviceSummaryCards"),
+  serviceContextNote: document.querySelector("#serviceContextNote"),
+  servicesInspectionStatus: document.querySelector("#servicesInspectionStatus"),
+  servicesInspectionTitle: document.querySelector("#servicesInspectionTitle"),
+  servicesInspectionDetail: document.querySelector("#servicesInspectionDetail"),
+  refreshServices: document.querySelector("#refreshServices"),
+  servicesSearch: document.querySelector("#servicesSearch"),
+  servicesFilters: document.querySelector("#servicesFilters"),
+  servicesTitle: document.querySelector("#servicesTitle"),
+  servicesCount: document.querySelector("#servicesCount"),
+  servicesCatalog: document.querySelector("#servicesCatalog"),
+  servicesEmptyState: document.querySelector("#servicesEmptyState"),
   topActions: document.querySelector(".top-actions"),
   homeManagerNav: document.querySelector("#homeManagerNav"),
   homeManagerPage: document.querySelector("#homeManagerPage"),
@@ -172,6 +186,7 @@ const model = {
   settingErrors: new Map(),
   dependencyIssues: [],
   settingsCategory: "Усі",
+  servicesCategory: "Усі",
   page: "programs",
   category: "Усі",
   preview: { diff: "", generated: "" },
@@ -281,6 +296,7 @@ function updateChangeState() {
   if (model.managedApplyIntent) clearManagedApplyIntent();
   if (ui.presetCatalog) renderPresets();
   if (ui.catalogGuidance) renderCatalogGuidance();
+  if (ui.serviceSummaryCards) renderServiceOverview();
 }
 
 function systemCatalog() {
@@ -561,6 +577,7 @@ function presetCard(preset) {
     renderPresets();
     renderCatalog();
     renderSettings();
+    renderServices();
     updateChangeState();
     const changes = result.addedPackages + result.changedOptions;
     showToast(`${preset.name}: додано або оновлено ${countLabel(changes, "елемент", "елементи", "елементів")}.`);
@@ -625,6 +642,8 @@ async function refreshCatalogCompatibility() {
   renderPresets();
   renderCatalog();
   renderCatalogGuidance();
+  buildServicesFilters();
+  renderServices();
   updateChangeState();
 }
 
@@ -677,10 +696,12 @@ async function importProfileFile() {
     model.settingErrors.clear();
     buildFilters();
     buildSettingsFilters();
+    buildServicesFilters();
     renderPresets();
     renderCatalog();
     renderCatalogCompatibility();
     renderSettings();
+    renderServices();
     updateChangeState();
     showToast(`Профіль імпортовано: ${state.packages.length} пакунків, ${Object.keys(state.options).length} опцій.`);
   } catch (error) {
@@ -728,6 +749,62 @@ function settingMatches(definition) {
     || definition.category === model.settingsCategory;
   const text = `${definition.name} ${definition.path} ${definition.description} ${definition.category}`
     .toLocaleLowerCase("uk");
+  return categoryMatch && (!query || text.includes(query));
+}
+
+const serviceCategoryLabels = {
+  connectivity: "Мережа і зв’язок",
+  desktop: "Робочий стіл",
+  hardware: "Обладнання",
+  maintenance: "Обслуговування",
+  security: "Безпека",
+  virtualization: "Віртуалізація",
+};
+
+function serviceDefinitions() {
+  return NcmSettings.serviceDefinitions(model.settingsCatalog);
+}
+
+function serviceTargetContext() {
+  return model.catalogCompatibility?.context || { configurationFlags: [] };
+}
+
+function serviceNeedsAttention(definition) {
+  const actual = effectiveSetting(definition.path);
+  return !NcmSettings.serviceTargetStatus(definition, serviceTargetContext()).supported
+    || ["conflict", "evaluation-failed", "option-missing"].includes(actual?.assessment);
+}
+
+function buildServicesFilters() {
+  const categories = [
+    "Усі",
+    "Керовані",
+    "Потребують уваги",
+    ...new Set(serviceDefinitions().map((definition) => definition.service.category)),
+  ];
+  ui.servicesFilters.replaceChildren(...categories.map((category) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `filter${category === model.servicesCategory ? " active" : ""}`;
+    button.textContent = serviceCategoryLabels[category] || category;
+    button.addEventListener("click", () => {
+      model.servicesCategory = category;
+      buildServicesFilters();
+      renderServices();
+    });
+    return button;
+  }));
+}
+
+function serviceMatches(definition) {
+  const query = ui.servicesSearch.value.trim().toLocaleLowerCase("uk");
+  const categoryMatch = model.servicesCategory === "Усі"
+    || (model.servicesCategory === "Керовані" && Object.hasOwn(model.options, definition.path))
+    || (model.servicesCategory === "Потребують уваги" && serviceNeedsAttention(definition))
+    || definition.service.category === model.servicesCategory;
+  const text = `${definition.name} ${definition.path} ${definition.description} ${definition.category} ${
+    serviceCategoryLabels[definition.service.category] || definition.service.category
+  }`.toLocaleLowerCase("uk");
   return categoryMatch && (!query || text.includes(query));
 }
 
@@ -940,6 +1017,7 @@ function settingDependencyPanel(definition) {
       model.options[issue.requiredPath] = JSON.parse(JSON.stringify(issue.requiredValue));
       model.settingErrors.delete(issue.requiredPath);
       renderSettings();
+      renderServices();
       updateChangeState();
     });
     item.append(copy, repair);
@@ -950,13 +1028,15 @@ function settingDependencyPanel(definition) {
 
 function refreshDependencyPanels() {
   refreshDependencyIssues();
-  for (const card of ui.settingsCatalog.querySelectorAll(".setting-card[data-setting-path]")) {
-    const definition = settingDefinitions().find((item) => item.path === card.dataset.settingPath);
-    card.querySelector(".setting-dependency")?.remove();
-    if (!definition?.unknown) {
-      const panel = settingDependencyPanel(definition);
-      const field = card.querySelector(".setting-field");
-      if (panel) card.insertBefore(panel, field);
+  for (const container of [ui.settingsCatalog, ui.servicesCatalog]) {
+    for (const card of container.querySelectorAll(".setting-card[data-setting-path]")) {
+      const definition = settingDefinitions().find((item) => item.path === card.dataset.settingPath);
+      card.querySelector(".setting-dependency")?.remove();
+      if (!definition?.unknown) {
+        const panel = settingDependencyPanel(definition);
+        const field = card.querySelector(".setting-field");
+        if (panel) card.insertBefore(panel, field);
+      }
     }
   }
 }
@@ -991,6 +1071,7 @@ async function refreshEffectiveSettings() {
   model.effectiveSettings = { status: "loading", settings: [], warnings: [] };
   renderEffectiveSettingsStatus();
   renderSettings();
+  renderServices();
   try {
     model.effectiveSettings = await api("/api/effective-settings");
   } catch (error) {
@@ -998,15 +1079,16 @@ async function refreshEffectiveSettings() {
   }
   renderEffectiveSettingsStatus();
   renderSettings();
+  renderServices();
 }
 
-function settingControl(definition, managed, card) {
+function settingControl(definition, managed, card, surface = "settings") {
   const field = document.createElement("div");
   field.className = "setting-field";
-  const controlId = `setting-${definition.path.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const controlId = `setting-${surface}-${definition.path.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   const label = document.createElement("label");
   label.htmlFor = controlId;
-  label.textContent = "Значення";
+  label.textContent = surface === "services" ? "Бажаний стан" : "Значення";
   let control;
 
   if (definition.valueType === "boolean" || definition.valueType === "enum") {
@@ -1077,7 +1159,42 @@ function settingControl(definition, managed, card) {
   return field;
 }
 
-function settingCard(definition) {
+function serviceMetadata(definition) {
+  const metadata = document.createElement("div");
+  metadata.className = "service-meta";
+  const modeLabels = {
+    background: "постійна фонова",
+    integration: "системна інтеграція",
+    scheduled: "періодичний запуск",
+  };
+  const exposureLabels = {
+    none: "без мережевого входу",
+    "local-network": "видима в локальній мережі",
+    "remote-access": "віддалений доступ",
+  };
+  const riskLabels = { low: "низький вплив", medium: "помірний вплив", high: "високий вплив" };
+  const badges = [
+    [serviceCategoryLabels[definition.service.category], "category"],
+    [modeLabels[definition.service.mode], "mode"],
+    [exposureLabels[definition.service.exposure], `exposure ${definition.service.exposure}`],
+    [riskLabels[definition.risk], `risk ${definition.risk}`],
+  ];
+  const target = NcmSettings.serviceTargetStatus(definition, serviceTargetContext());
+  if (!target.supported) {
+    badges.push([target.target === "wsl" ? "не рекомендовано для WSL" : "інша цільова система", "target-warning"]);
+  } else if (target.target === "wsl") {
+    badges.push(["підходить для WSL", "target-ok"]);
+  }
+  for (const [text, className] of badges) {
+    const badge = document.createElement("span");
+    badge.className = `service-badge ${className}`;
+    badge.textContent = text;
+    metadata.append(badge);
+  }
+  return metadata;
+}
+
+function settingCard(definition, surface = "settings") {
   const card = document.createElement("article");
   const managed = Object.hasOwn(model.options, definition.path);
   const actual = effectiveSetting(definition.path);
@@ -1087,7 +1204,8 @@ function settingCard(definition) {
   const inspectionBlocked = !managed && [
     "conflict", "evaluation-failed", "option-missing",
   ].includes(actual?.assessment);
-  card.className = `setting-card${managed ? " managed" : ""}${definition.unknown ? " unknown" : ""}`;
+  const serviceAttention = surface === "services" && serviceNeedsAttention(definition);
+  card.className = `setting-card${surface === "services" ? " service-card" : ""}${managed ? " managed" : ""}${definition.unknown ? " unknown" : ""}${serviceAttention ? " service-attention" : ""}`;
   card.dataset.settingPath = definition.path;
 
   const header = document.createElement("header");
@@ -1104,7 +1222,9 @@ function settingCard(definition) {
     ? "Збережено"
     : (managed
       ? "Керується"
-      : (inspectionPending ? "Перевірка…" : (inspectionBlocked ? "Ручний огляд" : "Не керувати")));
+      : (inspectionPending
+        ? "Перевірка…"
+        : (inspectionBlocked ? "Ручний огляд" : (surface === "services" ? "Керувати" : "Не керувати"))));
   manage.setAttribute("aria-pressed", String(managed));
   manage.disabled = definition.unknown || inspectionPending || inspectionBlocked;
   if (inspectionBlocked) {
@@ -1123,16 +1243,22 @@ function settingCard(definition) {
       ));
     }
     renderSettings();
+    renderServices();
     updateChangeState();
   });
   header.append(heading, manage);
 
   const description = document.createElement("p");
   description.textContent = definition.description;
-  const metadata = document.createElement("div");
-  metadata.className = "setting-meta";
-  const riskLabels = { low: "низький вплив", medium: "помірний вплив", high: "високий вплив" };
-  metadata.textContent = `${definition.category} · ${definition.nixosType} · ${riskLabels[definition.risk]}`;
+  let metadata;
+  if (surface === "services") {
+    metadata = serviceMetadata(definition);
+  } else {
+    metadata = document.createElement("div");
+    metadata.className = "setting-meta";
+    const riskLabels = { low: "низький вплив", medium: "помірний вплив", high: "високий вплив" };
+    metadata.textContent = `${definition.category} · ${definition.nixosType} · ${riskLabels[definition.risk]}`;
+  }
   card.append(header, description, metadata);
 
   if (definition.unknown) {
@@ -1144,7 +1270,7 @@ function settingCard(definition) {
     card.append(effectiveSettingPanel(definition, managed));
     const dependency = settingDependencyPanel(definition);
     if (dependency) card.append(dependency);
-    card.append(settingControl(definition, managed, card));
+    card.append(settingControl(definition, managed, card, surface));
   }
   return card;
 }
@@ -1164,6 +1290,79 @@ function renderSettings() {
   ui.unknownSettingsNote.textContent = unknownCount
     ? `${unknownCount} опцій поза каталогом збережено без змін і показано лише для читання.`
     : "";
+}
+
+function renderServicesInspectionStatus() {
+  const inspection = model.effectiveSettings;
+  ui.refreshServices.disabled = inspection.status === "loading";
+  ui.servicesInspectionStatus.classList.toggle("passed", inspection.status === "passed");
+  ui.servicesInspectionStatus.classList.toggle("attention", inspection.status === "failed");
+  if (["idle", "loading"].includes(inspection.status)) {
+    ui.servicesInspectionTitle.textContent = inspection.status === "loading"
+      ? "Читаємо фактичний стан служб…"
+      : "Фактична конфігурація ще не прочитана";
+    ui.servicesInspectionDetail.textContent = "Nix evaluator не запускає, не зупиняє і не перезапускає служби.";
+    return;
+  }
+  if (inspection.status === "passed") {
+    const summary = NcmSettings.serviceSummary(
+      model.settingsCatalog,
+      model.options,
+      inspection.settings,
+      serviceTargetContext(),
+    );
+    ui.servicesInspectionTitle.textContent = summary.attention
+      ? `Стан прочитано · ручний огляд: ${summary.attention}`
+      : "Фактичний стан служб прочитано";
+    ui.servicesInspectionDetail.textContent = `${inspection.durationMs} мс · лише читання конфігурації`;
+    return;
+  }
+  ui.servicesInspectionTitle.textContent = "Фактичний стан служб недоступний";
+  ui.servicesInspectionDetail.textContent = inspection.warnings?.[0]?.split("\n", 1)[0]
+    || "Каталог залишається доступним; остаточну перевірку виконає build-preview.";
+}
+
+function renderServiceOverview() {
+  const summary = NcmSettings.serviceSummary(
+    model.settingsCatalog,
+    model.options,
+    model.effectiveSettings.settings,
+    serviceTargetContext(),
+  );
+  const cards = [
+    [String(summary.total), "у перевіреному каталозі", "catalog"],
+    [String(summary.enabled), "фактично увімкнено", "enabled"],
+    [String(summary.managed), "керуються NCM", "managed"],
+    [String(summary.pending), "підготовлено змін", summary.pending ? "pending" : "stable"],
+  ].map(([value, label, className]) => {
+    const card = document.createElement("article");
+    card.className = `service-summary-card ${className}`;
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    const small = document.createElement("small");
+    small.textContent = label;
+    card.append(strong, small);
+    return card;
+  });
+  ui.serviceSummaryCards.replaceChildren(...cards);
+  const isWsl = (serviceTargetContext().configurationFlags || []).includes("wsl");
+  ui.serviceContextNote.textContent = isWsl
+    ? `Ціль: NixOS-WSL · ${summary.notRecommended} служб для фізичної NixOS позначено застереженням.`
+    : "Ціль: звичайна NixOS · нічого не вмикається автоматично.";
+}
+
+function renderServices() {
+  refreshDependencyIssues();
+  const definitions = serviceDefinitions();
+  const visible = definitions.filter(serviceMatches);
+  ui.servicesCatalog.replaceChildren(...visible.map((definition) => settingCard(definition, "services")));
+  ui.servicesEmptyState.hidden = visible.length > 0;
+  ui.servicesCount.textContent = `${visible.length} із ${definitions.length}`;
+  ui.servicesTitle.textContent = model.servicesCategory === "Усі"
+    ? "Усі служби"
+    : (serviceCategoryLabels[model.servicesCategory] || model.servicesCategory);
+  renderServicesInspectionStatus();
+  renderServiceOverview();
 }
 
 function homeUserKey(user) {
@@ -1354,15 +1553,18 @@ function renderHomeManager() {
 function showPage(page) {
   model.page = page;
   const settings = page === "settings";
+  const services = page === "services";
   const homeManager = page === "home-manager";
   const generations = page === "generations";
-  const programs = !settings && !homeManager && !generations;
+  const programs = !settings && !services && !homeManager && !generations;
   ui.programsPage.hidden = !programs;
   ui.settingsPage.hidden = !settings;
+  ui.servicesPage.hidden = !services;
   ui.homeManagerPage.hidden = !homeManager;
   ui.generationsPage.hidden = !generations;
   ui.programsNav.classList.toggle("active", programs);
   ui.settingsNav.classList.toggle("active", settings);
+  ui.servicesNav.classList.toggle("active", services);
   ui.homeManagerNav.classList.toggle("active", homeManager);
   ui.generationsNav.classList.toggle("active", generations);
   ui.topActions.hidden = homeManager || generations;
@@ -1370,8 +1572,11 @@ function showPage(page) {
     ? "Покоління"
     : homeManager
     ? "Home Manager"
+    : services
+    ? "Служби"
     : (settings ? "Налаштування" : "Програми");
   if (settings) renderSettings();
+  if (services) renderServices();
   if (homeManager) renderHomeManager();
   if (generations) renderGenerations();
 }
@@ -2746,9 +2951,11 @@ async function initialize() {
     if (activeBuildStatuses.has(homeBuildPreview.status)) pollHomeBuildPreview();
     buildFilters();
     buildSettingsFilters();
+    buildServicesFilters();
     renderPresets();
     renderCatalog();
     renderSettings();
+    renderServices();
     renderHomeManager();
     renderGenerations();
     updateChangeState();
@@ -2765,9 +2972,11 @@ ui.importProfileButton.addEventListener("click", () => ui.profileFileInput.click
 ui.exportProfileButton.addEventListener("click", exportProfile);
 ui.profileFileInput.addEventListener("change", importProfileFile);
 ui.settingsSearch.addEventListener("input", renderSettings);
+ui.servicesSearch.addEventListener("input", renderServices);
 ui.homeManagerPackageSearch.addEventListener("input", renderHomeManagerPackages);
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
+ui.servicesNav.addEventListener("click", () => showPage("services"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.generationsNav.addEventListener("click", () => showPage("generations"));
 ui.refreshGenerations.addEventListener("click", refreshGenerations);
@@ -2788,6 +2997,7 @@ ui.prepareHomeApplyButton.addEventListener("click", prepareHomeApply);
 ui.commitHomeApplyButton.addEventListener("click", commitHomeApply);
 ui.homeApplyConfirmation.addEventListener("change", updateHomeApplyControls);
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
+ui.refreshServices.addEventListener("click", refreshEffectiveSettings);
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
 ui.backdrop.addEventListener("click", closePreview);
@@ -2819,6 +3029,8 @@ document.addEventListener("keydown", (event) => {
     ? null
     : model.page === "settings"
     ? ui.settingsSearch
+    : model.page === "services"
+    ? ui.servicesSearch
     : (model.page === "programs" ? ui.search : ui.homeManagerPackageSearch);
   if (!activeSearch) return;
   if (event.key === "/" && document.activeElement !== activeSearch) {

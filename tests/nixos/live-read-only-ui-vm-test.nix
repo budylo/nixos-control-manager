@@ -226,6 +226,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"runActivationPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"catalogCompatibility\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"catalogGuidance\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"servicesPage\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"servicesNav\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -285,6 +287,12 @@ pkgs.testers.runNixOSTest {
     t.assertEqual(guidance["schemaVersion"], 1)
     t.assertGreaterEqual(len(guidance["alternativeGroups"]), 15)
     t.assertGreaterEqual(len(guidance["contextRecommendations"]), 8)
+    settings_catalog = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/settings-catalog"
+    ))
+    services = [definition for definition in settings_catalog if "service" in definition]
+    t.assertEqual(len(services), 23)
+    t.assertIn("services.openssh.enable", {definition["path"] for definition in services})
     compatibility = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
         timeout=long_timeout,

@@ -76,7 +76,7 @@
 ## Milestone 4 — Typed NixOS options
 
 - curated first catalog with checked option paths, descriptions, NixOS types,
-  defaults, suggestions, and impact labels (implemented for 32 options; dynamic
+  defaults, suggestions, and impact labels (implemented for 41 options; dynamic
   nixpkgs metadata/provenance ingestion remains);
 - render booleans, enums, strings, integers, and string/integer lists with
   browser and server validation (implemented); numbers beyond integers and
@@ -165,6 +165,23 @@
   always behind explicit user confirmation (implemented);
 - adapt imported profiles across several machines while accounting for each
   target's hardware and desktop environment (future work).
+
+## Milestone 8 — Service control center
+
+- expose a dedicated Services page without introducing a second ownership or
+  persistence model (implemented as a projection of typed NixOS settings);
+- curate 23 common services across desktop, hardware, connectivity, security,
+  virtualization, and maintenance, with every exact option evaluated against
+  pinned nixpkgs (implemented);
+- show effective enabled state, NCM ownership, pending changes, definition
+  provenance, runtime mode, network exposure, and impact separately
+  (implemented);
+- distinguish physical NixOS and NixOS-WSL suitability while keeping the label
+  advisory and all changes explicit (implemented);
+- reuse dependency analysis and the existing preview, validation, build,
+  test-activation, switch, and rollback boundaries (implemented);
+- add deeper service-specific relationships such as firewall-port guidance and
+  mutually exclusive service choices (future work).
 
 ## Later
 

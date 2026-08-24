@@ -1,6 +1,10 @@
 import unittest
 
 from nix_control_manager.catalog import (
+    SERVICE_CATEGORIES,
+    SERVICE_EXPOSURES,
+    SERVICE_MODES,
+    SERVICE_PLATFORMS,
     SETTING_VALUE_TYPES,
     load_settings_catalog,
     setting_definition,
@@ -102,6 +106,47 @@ class SettingsCatalogTests(unittest.TestCase):
             },
         )
         self.assertTrue(all(rule["requiredValue"] is True for _, rule in rules))
+
+    def test_service_catalog_is_curated_boolean_and_target_aware(self) -> None:
+        catalog = load_settings_catalog()
+        services = [definition for definition in catalog if "service" in definition]
+
+        self.assertEqual(len(services), 23)
+        self.assertTrue(all(definition["valueType"] == "boolean" for definition in services))
+        self.assertEqual(
+            {definition["service"]["category"] for definition in services},
+            SERVICE_CATEGORIES,
+        )
+        self.assertTrue(
+            {definition["service"]["mode"] for definition in services} <= SERVICE_MODES
+        )
+        self.assertTrue(
+            {definition["service"]["exposure"] for definition in services}
+            <= SERVICE_EXPOSURES
+        )
+        self.assertTrue(
+            {
+                platform
+                for definition in services
+                for platform in definition["service"]["platforms"]
+            }
+            <= SERVICE_PLATFORMS
+        )
+        self.assertTrue(
+            {"services.openssh.enable", "services.fail2ban.enable"}
+            <= {definition["path"] for definition in services}
+        )
+
+    def test_catalog_loader_returns_nested_copies(self) -> None:
+        first = load_settings_catalog()
+        first_service = next(definition for definition in first if "service" in definition)
+        first_service["service"]["platforms"].append("mutated")
+
+        second = load_settings_catalog()
+        second_service = next(
+            definition for definition in second if definition["path"] == first_service["path"]
+        )
+        self.assertNotIn("mutated", second_service["service"]["platforms"])
 
 
 if __name__ == "__main__":

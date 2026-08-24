@@ -23,7 +23,7 @@
           <p class="nav-label">Система</p>
           <button id="programsNav" class="nav-item active" type="button"><span>▦</span> Програми</button>
           <button id="settingsNav" class="nav-item" type="button"><span>◇</span> Налаштування</button>
-          <button class="nav-item" type="button" disabled><span>◎</span> Служби <small>згодом</small></button>
+          <button id="servicesNav" class="nav-item" type="button"><span>◎</span> Служби</button>
           <button class="nav-item" type="button" disabled><span>⌁</span> Драйвери <small>згодом</small></button>
           <p class="nav-label">Конфігурація</p>
           <button id="homeManagerNav" class="nav-item" type="button"><span>⌂</span> Home Manager</button>
@@ -190,6 +190,64 @@
             <span>⌕</span>
             <h3>Налаштувань не знайдено</h3>
             <p>Спробуйте іншу назву або категорію.</p>
+          </div>
+        </div>
+
+        <div id="servicesPage" class="page-panel" hidden>
+          <section class="hero services-hero">
+            <div>
+              <span class="hero-tag">Фонові можливості NixOS</span>
+              <h2>Керуйте службами.<br><em>З розумінням їхнього впливу.</em></h2>
+              <p>Тут зібрані перевірені служби мережі, обладнання, безпеки й обслуговування. Зміна лише готує декларативну опцію; збереження, build і активація залишаються окремими підтвердженими кроками.</p>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">◎</span>
+            </div>
+          </section>
+
+          <section class="service-overview" aria-labelledby="serviceOverviewTitle">
+            <div class="service-overview-heading">
+              <div>
+                <p class="section-kicker">Огляд</p>
+                <h2 id="serviceOverviewTitle">Стан служб цієї системи</h2>
+              </div>
+              <p id="serviceContextNote">Фактичний стан читається через Nix evaluator.</p>
+            </div>
+            <div id="serviceSummaryCards" class="service-summary-cards" aria-live="polite"></div>
+          </section>
+
+          <section id="servicesInspectionStatus" class="effective-settings-status" aria-live="polite">
+            <span class="effective-settings-icon" aria-hidden="true">◎</span>
+            <div>
+              <strong id="servicesInspectionTitle">Фактична конфігурація ще не прочитана</strong>
+              <small id="servicesInspectionDetail">Жодна служба не запускається під час перевірки.</small>
+            </div>
+            <button id="refreshServices" type="button">Оновити стан</button>
+          </section>
+
+          <section class="controls" aria-label="Пошук служб">
+            <label class="search">
+              <span aria-hidden="true">⌕</span>
+              <input id="servicesSearch" type="search" placeholder="Пошук служб або можливостей…" autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <div id="servicesFilters" class="filters"></div>
+          </section>
+
+          <section class="catalog-heading">
+            <div>
+              <p class="section-kicker">Перевірений каталог</p>
+              <h2 id="servicesTitle">Усі служби</h2>
+            </div>
+            <p id="servicesCount" class="result-count"></p>
+          </section>
+          <section id="servicesCatalog" class="settings-catalog services-catalog" aria-live="polite"></section>
+          <div id="servicesEmptyState" class="empty-state" hidden>
+            <span>⌕</span>
+            <h3>Служб не знайдено</h3>
+            <p>Спробуйте іншу назву або групу.</p>
           </div>
         </div>
 

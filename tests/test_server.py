@@ -388,11 +388,16 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(compatibility["context"]["formFactor"], "laptop")
         self.assertGreaterEqual(len(presets), 8)
         self.assertIn("gaming-ready", {item["id"] for item in presets})
-        self.assertGreaterEqual(len(settings_catalog), 30)
+        self.assertGreaterEqual(len(settings_catalog), 40)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
         self.assertIn("enum", {item["valueType"] for item in settings_catalog})
         self.assertIn(
             "zramSwap.memoryPercent", {item["path"] for item in settings_catalog}
+        )
+        services = [item for item in settings_catalog if "service" in item]
+        self.assertEqual(len(services), 23)
+        self.assertIn(
+            "services.openssh.enable", {item["path"] for item in services}
         )
         self.assertEqual(state["packages"], [])
         self.assertEqual(system["configuration"]["mode"], "missing")
@@ -415,6 +420,8 @@ class ServerTests(unittest.TestCase):
             self.assertIn("Nix Control Manager", html)
             self.assertIn('id="homeApplyConfirmation"', html)
             self.assertIn('id="commitHomeApplyButton"', html)
+            self.assertIn('id="servicesPage"', html)
+            self.assertIn('id="servicesNav"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
     def test_managed_save_hides_receipt_and_requires_exact_confirmation(self) -> None:
