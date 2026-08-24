@@ -7,6 +7,11 @@ const ui = {
   resultCount: document.querySelector("#resultCount"),
   title: document.querySelector("#catalogTitle"),
   presetCatalog: document.querySelector("#presetCatalog"),
+  catalogCompatibility: document.querySelector("#catalogCompatibility"),
+  catalogCompatibilityIcon: document.querySelector("#catalogCompatibilityIcon"),
+  catalogCompatibilityTitle: document.querySelector("#catalogCompatibilityTitle"),
+  catalogCompatibilityDetail: document.querySelector("#catalogCompatibilityDetail"),
+  refreshCatalogCompatibility: document.querySelector("#refreshCatalogCompatibility"),
   importProfileButton: document.querySelector("#importProfileButton"),
   exportProfileButton: document.querySelector("#exportProfileButton"),
   profileFileInput: document.querySelector("#profileFileInput"),
@@ -152,6 +157,7 @@ const model = {
   token: "",
   localWriteEnabled: true,
   catalog: [],
+  catalogCompatibility: { status: "loading", packages: [], warnings: [] },
   presets: [],
   settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
@@ -246,12 +252,23 @@ function updateChangeState() {
   const dependencyErrors = model.dependencyIssues.filter(
     (issue) => issue.status === "unsatisfied",
   ).length;
-  const invalid = model.settingErrors.size > 0 || dependencyErrors > 0;
+  const compatibilityErrors = NcmCatalog.selectionCompatibilityIssues(
+    model.selected,
+    model.catalogCompatibility,
+  ).length;
+  const invalid = model.settingErrors.size > 0 || dependencyErrors > 0 || compatibilityErrors > 0;
   ui.changeCount.textContent = model.settingErrors.size
     ? `${model.settingErrors.size} некоректне значення`
     : dependencyErrors
       ? `${dependencyErrors} невирішена залежність`
-    : (count ? `${count} ${label}` : "Немає змін");
+      : compatibilityErrors
+        ? countLabel(
+          compatibilityErrors,
+          "несумісний пакет",
+          "несумісні пакети",
+          "несумісних пакетів",
+        )
+      : (count ? `${count} ${label}` : "Немає змін");
   ui.changeCount.classList.toggle("invalid", invalid);
   const managedWrite = model.helper?.managedWriteEnabled === true;
   ui.saveButton.disabled = (!model.localWriteEnabled && !managedWrite) || count === 0 || invalid;
@@ -266,7 +283,10 @@ function systemCatalog() {
 }
 
 function buildFilters() {
-  const categories = ["Усі", "Популярні", ...new Set(systemCatalog().map((app) => app.category))];
+  const smart = model.catalogCompatibility.status === "passed"
+    ? ["Сумісні", "Потребують уваги"]
+    : [];
+  const categories = ["Усі", "Популярні", ...smart, ...new Set(systemCatalog().map((app) => app.category))];
   ui.filters.replaceChildren(...categories.map((category) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -283,8 +303,12 @@ function buildFilters() {
 
 function matches(app) {
   const query = ui.search.value.trim().toLocaleLowerCase("uk");
+  const compatibility = NcmCatalog.packageCompatibility(model.catalogCompatibility, app.attribute);
   const categoryMatch = model.category === "Усі"
-    || (model.category === "Популярні" ? app.featured : app.category === model.category);
+    || (model.category === "Популярні" && app.featured)
+    || (model.category === "Сумісні" && compatibility.status === "compatible" && !compatibility.unfree)
+    || (model.category === "Потребують уваги" && (compatibility.status !== "compatible" || compatibility.unfree))
+    || app.category === model.category;
   const text = `${app.name} ${app.attribute} ${app.description} ${(app.tags || []).join(" ")}`
     .toLocaleLowerCase("uk");
   return categoryMatch && (!query || text.includes(query));
@@ -293,7 +317,8 @@ function matches(app) {
 function appCard(app) {
   const card = document.createElement("article");
   const selected = model.selected.has(app.attribute);
-  card.className = `app-card${selected ? " selected" : ""}`;
+  const compatibility = NcmCatalog.packageCompatibility(model.catalogCompatibility, app.attribute);
+  card.className = `app-card${selected ? " selected" : ""}${compatibility.status === "incompatible" ? " incompatible" : ""}`;
 
   const symbol = document.createElement("div");
   symbol.className = "app-symbol";
@@ -308,7 +333,24 @@ function appCard(app) {
   packageName.textContent = `pkgs.${app.attribute}`;
   const description = document.createElement("p");
   description.textContent = app.description;
-  copy.append(name, packageName, description);
+  const compatibilityBadge = document.createElement("span");
+  const compatibilityCopy = {
+    "missing-attribute": "Немає в nixpkgs",
+    "unsupported-platform": "Не для цієї платформи",
+    "broken-package": "Позначено як зламаний",
+    "evaluation-rejected": "Nix відхилив пакет",
+    "inspection-unavailable": "Не перевірено",
+  };
+  compatibilityBadge.className = `compatibility-badge ${compatibility.status}${compatibility.unfree ? " unfree" : ""}`;
+  compatibilityBadge.textContent = compatibility.unfree
+    ? "Невільна ліцензія"
+    : compatibility.status === "compatible"
+      ? "Сумісний"
+      : (compatibilityCopy[compatibility.reason] || "Не перевірено");
+  compatibilityBadge.title = compatibility.unfree && compatibility.license
+    ? `Ліцензія: ${compatibility.license}`
+    : compatibilityBadge.textContent;
+  copy.append(name, packageName, description, compatibilityBadge);
 
   const toggle = document.createElement("button");
   toggle.type = "button";
@@ -316,6 +358,10 @@ function appCard(app) {
   toggle.textContent = "✓";
   toggle.setAttribute("aria-label", `${selected ? "Вилучити" : "Додати"} ${app.name}`);
   toggle.setAttribute("aria-pressed", String(selected));
+  if (!selected && compatibility.status === "incompatible") {
+    toggle.disabled = true;
+    toggle.title = `${compatibilityBadge.textContent}. Додавання вимкнено для поточної цілі.`;
+  }
   toggle.addEventListener("click", () => {
     if (model.selected.has(app.attribute)) model.selected.delete(app.attribute);
     else model.selected.add(app.attribute);
@@ -351,6 +397,7 @@ function countLabel(count, one, few, many) {
 function presetCard(preset) {
   const card = document.createElement("article");
   const delta = NcmCatalog.presetDelta(preset, currentState());
+  const compatibility = NcmCatalog.presetCompatibility(preset, model.catalogCompatibility);
   card.className = `preset-card${delta === 0 ? " complete" : ""}`;
 
   const symbol = document.createElement("span");
@@ -372,8 +419,13 @@ function presetCard(preset) {
 
   const button = document.createElement("button");
   button.type = "button";
-  button.disabled = delta === 0;
-  button.textContent = delta === 0 ? "Додано" : "Додати набір";
+  button.disabled = delta === 0 || !compatibility.compatible;
+  button.textContent = delta === 0
+    ? "Додано"
+    : compatibility.compatible ? "Додати набір" : "Є несумісні пакунки";
+  if (!compatibility.compatible) {
+    button.title = `Недоступні для поточної цілі: ${compatibility.incompatible.join(", ")}`;
+  }
   button.addEventListener("click", () => {
     const result = NcmCatalog.applyPreset(preset, currentState());
     model.selected = new Set(result.state.packages);
@@ -392,6 +444,60 @@ function presetCard(preset) {
 
 function renderPresets() {
   ui.presetCatalog.replaceChildren(...model.presets.map(presetCard));
+}
+
+function renderCatalogCompatibility() {
+  const report = model.catalogCompatibility;
+  const packages = report.packages || [];
+  const compatible = packages.filter((item) => item.status === "compatible").length;
+  const incompatible = packages.filter((item) => item.status === "incompatible").length;
+  const unfree = packages.filter((item) => item.unfree).length;
+  ui.catalogCompatibility.className = "catalog-compatibility-status";
+  ui.refreshCatalogCompatibility.disabled = report.status === "loading";
+  if (report.status === "loading") {
+    ui.catalogCompatibility.classList.add("loading");
+    ui.catalogCompatibilityIcon.textContent = "◎";
+    ui.catalogCompatibilityTitle.textContent = "Перевіряємо сумісність каталогу…";
+    ui.catalogCompatibilityDetail.textContent = "Nix evaluator лише читає пакунки поточної конфігурації.";
+    return;
+  }
+  if (report.status === "passed") {
+    ui.catalogCompatibility.classList.add(incompatible ? "attention" : "passed");
+    ui.catalogCompatibilityIcon.textContent = incompatible ? "!" : "✓";
+    ui.catalogCompatibilityTitle.textContent = `Перевірено для ${report.system || "поточної платформи"}`;
+    ui.catalogCompatibilityDetail.textContent = `${compatible} сумісних · ${incompatible} недоступних · ${unfree} з невільною ліцензією · ${report.durationMs || 0} мс`;
+    return;
+  }
+  ui.catalogCompatibility.classList.add("attention");
+  ui.catalogCompatibilityIcon.textContent = "?";
+  ui.catalogCompatibilityTitle.textContent = "Сумісність не перевірено";
+  ui.catalogCompatibilityDetail.textContent = report.warnings?.[0]
+    || "Каталог залишається доступним; остаточну перевірку виконає build-preview.";
+}
+
+async function refreshCatalogCompatibility() {
+  model.catalogCompatibility = { status: "loading", packages: [], warnings: [] };
+  renderCatalogCompatibility();
+  try {
+    model.catalogCompatibility = NcmCatalog.normalizeCompatibilityReport(
+      await api("/api/catalog-compatibility"),
+    );
+  } catch (error) {
+    model.catalogCompatibility = {
+      status: "failed",
+      packages: [],
+      warnings: [error.message],
+    };
+  }
+  if (!["Усі", "Популярні", ...new Set(systemCatalog().map((app) => app.category))].includes(model.category)
+      && model.catalogCompatibility.status !== "passed") {
+    model.category = "Усі";
+  }
+  renderCatalogCompatibility();
+  buildFilters();
+  renderPresets();
+  renderCatalog();
+  updateChangeState();
 }
 
 function exportProfile() {
@@ -445,6 +551,7 @@ async function importProfileFile() {
     buildSettingsFilters();
     renderPresets();
     renderCatalog();
+    renderCatalogCompatibility();
     renderSettings();
     updateChangeState();
     showToast(`Профіль імпортовано: ${state.packages.length} пакунків, ${Object.keys(state.options).length} опцій.`);
@@ -2516,12 +2623,14 @@ async function initialize() {
     renderGenerations();
     updateChangeState();
     void refreshEffectiveSettings();
+    void refreshCatalogCompatibility();
   } catch (error) {
     showToast(`Не вдалося завантажити стан: ${error.message}`, true);
   }
 }
 
 ui.search.addEventListener("input", renderCatalog);
+ui.refreshCatalogCompatibility.addEventListener("click", refreshCatalogCompatibility);
 ui.importProfileButton.addEventListener("click", () => ui.profileFileInput.click());
 ui.exportProfileButton.addEventListener("click", exportProfile);
 ui.profileFileInput.addEventListener("change", importProfileFile);

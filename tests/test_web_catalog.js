@@ -61,4 +61,40 @@ assert.throws(
   /Невідомі поля/,
 );
 
+const compatibility = catalog.normalizeCompatibilityReport({
+  schemaVersion: 1,
+  status: "passed",
+  readOnly: true,
+  configurationMode: "flake",
+  flakeTarget: "desktop",
+  system: "x86_64-linux",
+  durationMs: 17,
+  warnings: [],
+  packages: [
+    { attribute: "firefox", status: "compatible", reason: "available", unfree: false, license: "MPL-2.0" },
+    { attribute: "vscode", status: "incompatible", reason: "evaluation-rejected", unfree: true, license: "unfree" },
+  ],
+});
+assert.equal(catalog.packageCompatibility(compatibility, "firefox").status, "compatible");
+assert.equal(catalog.packageCompatibility(compatibility, "unknown-package").status, "unknown");
+assert.deepEqual(
+  catalog.selectionCompatibilityIssues(["firefox", "vscode"], compatibility).map((item) => item.attribute),
+  ["vscode"],
+);
+assert.deepEqual(catalog.presetCompatibility({ packages: ["vscode"] }, compatibility), {
+  compatible: false,
+  incompatible: ["vscode"],
+});
+assert.deepEqual(catalog.selectionCompatibilityIssues(["vscode"], { status: "failed" }), []);
+assert.throws(
+  () => catalog.normalizeCompatibilityReport({ schemaVersion: 1, status: "passed", readOnly: true, packages: [
+    { attribute: "bad;name", status: "unknown", reason: "inspection-unavailable", unfree: false, license: "" },
+  ] }),
+  /атрибут/,
+);
+assert.throws(
+  () => catalog.normalizeCompatibilityReport({ schemaVersion: 1, status: "mystery", readOnly: true, packages: [] }),
+  /загальний статус/,
+);
+
 console.log("web catalog helpers: ok");

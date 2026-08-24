@@ -40,6 +40,10 @@ from .migration import load_migration_preview
 from .managed_plan import managed_plan_identity, plan_managed_state
 from .model import ManagedState
 from .nix_generator import generate_module
+from .package_compatibility import (
+    PackageCompatibilityInspection,
+    inspect_package_compatibility,
+)
 from .preview import build_preview
 from .storage import load_state, save_generated_module, save_state
 from .settings_inspector import EffectiveSettingsInspection, inspect_effective_settings
@@ -88,6 +92,9 @@ class NcmServer(ThreadingHTTPServer):
         settings_inspector: Callable[
             ..., EffectiveSettingsInspection
         ] = inspect_effective_settings,
+        compatibility_inspector: Callable[
+            ..., PackageCompatibilityInspection
+        ] = inspect_package_compatibility,
         home_manager_inspector: Callable[..., HomeManagerInspection] = inspect_home_manager,
         home_manager_planner: Callable[..., Any] = plan_home_manager_adoption,
         home_manager_validator: Callable[..., Any] = validate_home_manager_adoption,
@@ -103,6 +110,7 @@ class NcmServer(ThreadingHTTPServer):
         self.flake_target = flake_target
         self.validation_timeout = validation_timeout
         self.settings_inspector = settings_inspector
+        self.compatibility_inspector = compatibility_inspector
         self.home_manager_inspector = home_manager_inspector
         self.home_manager_planner = home_manager_planner
         self.home_manager_validator = home_manager_validator
@@ -355,6 +363,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(_load_ui_state(self.server.state_path).to_mapping())
             elif path == "/api/catalog":
                 self._json(load_catalog())
+            elif path == "/api/catalog-compatibility":
+                self._json(
+                    self.server.compatibility_inspector(
+                        self.server.config_root,
+                        flake_target=self.server.flake_target,
+                        timeout=self.server.validation_timeout,
+                    ).to_mapping()
+                )
             elif path == "/api/settings-catalog":
                 self._json(load_settings_catalog())
             elif path == "/api/presets":

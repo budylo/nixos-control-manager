@@ -149,6 +149,20 @@
 - GitHub prerelease publication gated behind Python/web, static Nix, and all
   booted NixOS VM jobs.
 
+## Milestone 7 — Smart catalog and target compatibility
+
+- evaluate every curated package against the selected NixOS configuration's
+  actual `pkgs`, host platform, metadata, and package policy (implemented);
+- surface compatible, unfree, unavailable, broken, evaluator-rejected, and
+  unknown states with concise explanations and smart filters (implemented);
+- prevent only a definitively unavailable new selection, preserve removal of an
+  existing selection, and fail open when inspection itself is unavailable
+  (implemented);
+- prove the inspection is read-only in the booted NixOS UI VM workflow
+  (implemented);
+- add curated package relationships, alternatives, desktop-environment fit,
+  hardware hints, and profile-level cross-host adaptation (future work).
+
 ## Later
 
 - safe flake input management;

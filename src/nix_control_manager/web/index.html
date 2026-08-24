@@ -95,6 +95,15 @@
           <div id="presetCatalog" class="preset-catalog" aria-live="polite"></div>
         </section>
 
+        <section id="catalogCompatibility" class="catalog-compatibility-status loading" aria-live="polite">
+          <span id="catalogCompatibilityIcon" class="catalog-compatibility-icon" aria-hidden="true">◎</span>
+          <div>
+            <strong id="catalogCompatibilityTitle">Перевіряємо сумісність каталогу…</strong>
+            <small id="catalogCompatibilityDetail">Nix evaluator лише читає пакунки поточної конфігурації.</small>
+          </div>
+          <button id="refreshCatalogCompatibility" class="profile-button" type="button" disabled>Перевірити ще раз</button>
+        </section>
+
         <section class="controls" aria-label="Пошук і фільтри">
           <label class="search">
             <span aria-hidden="true">⌕</span>

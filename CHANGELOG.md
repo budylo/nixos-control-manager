@@ -3,6 +3,17 @@
 All notable user-visible changes are documented here. Versions use the public
 release name; Python packaging may normalize prereleases to PEP 440 spelling.
 
+## Unreleased
+
+### Added
+
+- read-only package compatibility inspection against the `pkgs` instance of the
+  selected NixOS configuration;
+- per-package explanations for missing attributes, unsupported platforms,
+  broken packages, evaluator rejection, and unfree licenses;
+- compatibility summary and smart filters in the graphical catalog, with
+  fail-open behavior when the target cannot be inspected.
+
 ## [0.1.0-alpha.1] - 2026-08-21
 
 First public alpha release.

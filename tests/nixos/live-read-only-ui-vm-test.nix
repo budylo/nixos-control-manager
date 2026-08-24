@@ -224,6 +224,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"startHomeBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"cancelHomeBuildPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"runActivationPreviewButton\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"catalogCompatibility\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -276,6 +277,24 @@ pkgs.testers.runNixOSTest {
 
     original_hashes = machine.succeed(
         "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"
+    )
+    compatibility = json.loads(machine.succeed(
+        "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
+        timeout=long_timeout,
+    ))
+    if compatibility["status"] != "passed":
+        print("catalog compatibility response:", json.dumps(compatibility, indent=2))
+    t.assertEqual(compatibility["status"], "passed")
+    t.assertTrue(compatibility["readOnly"])
+    t.assertEqual(compatibility["system"], "x86_64-linux")
+    t.assertGreaterEqual(len(compatibility["packages"]), 130)
+    t.assertGreaterEqual(compatibility["summary"]["compatible"], 100)
+    t.assertEqual(compatibility["summary"]["unknown"], 0)
+    t.assertEqual(
+        machine.succeed(
+            "find /etc/nixos -type f -print0 | sort -z | xargs -0 sha256sum"
+        ),
+        original_hashes,
     )
     token = machine.succeed(
         "${curl} -fsS " + base_url + "/api/config | ${jq} -r .token"

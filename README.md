@@ -407,6 +407,13 @@ module, Home Manager, or both; names, descriptions, and Ukrainian search tags
 make the catalog usable without knowing the exact nixpkgs attribute. A separate
 flake check verifies every advertised attribute against the pinned nixpkgs.
 
+The system catalog also runs a fixed read-only Nix expression against the
+selected host's actual `pkgs`. Cards distinguish compatible, unavailable,
+platform-restricted, broken, evaluator-rejected, unfree, and not-yet-checked
+packages. Definitively unavailable packages cannot be newly selected, while an
+existing selection remains removable. If inspection itself is unavailable, the
+catalog stays usable and the normal build-preview remains the final authority.
+
 Eight reusable presets merge coherent package and typed-option selections into
 the current draft. They never remove manually selected items and they do not
 save, build, or activate anything automatically. The same draft can be exported

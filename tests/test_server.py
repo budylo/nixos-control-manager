@@ -21,6 +21,10 @@ from nix_control_manager.home_manager_inspector import (
 )
 from nix_control_manager.managed_plan import managed_plan_identity, plan_managed_state
 from nix_control_manager.model import ManagedState
+from nix_control_manager.package_compatibility import (
+    PackageAssessment,
+    PackageCompatibilityInspection,
+)
 from nix_control_manager.settings_inspector import (
     EffectiveDefinition,
     EffectiveSetting,
@@ -277,6 +281,28 @@ class ServerTests(unittest.TestCase):
                 ),
                 duration_ms=42,
             ),
+            compatibility_inspector=lambda *args, **kwargs: PackageCompatibilityInspection(
+                status="passed",
+                configuration_mode="channels",
+                flake_target=None,
+                system="x86_64-linux",
+                packages=(
+                    PackageAssessment(
+                        attribute="firefox",
+                        status="compatible",
+                        reason="available",
+                        license_name="MPL-2.0",
+                    ),
+                    PackageAssessment(
+                        attribute="vscode",
+                        status="incompatible",
+                        reason="evaluation-rejected",
+                        unfree=True,
+                        license_name="unfree",
+                    ),
+                ),
+                duration_ms=37,
+            ),
             home_manager_inspector=lambda *args, **kwargs: HomeManagerInspection(
                 status="detected",
                 integrations=("nixos-module",),
@@ -330,6 +356,7 @@ class ServerTests(unittest.TestCase):
 
     def test_catalog_and_empty_state_are_available(self) -> None:
         catalog = self.request_json("/api/catalog")
+        compatibility = self.request_json("/api/catalog-compatibility")
         presets = self.request_json("/api/presets")
         settings_catalog = self.request_json("/api/settings-catalog")
         state = self.request_json("/api/state")
@@ -339,6 +366,12 @@ class ServerTests(unittest.TestCase):
         effective = self.request_json("/api/effective-settings")
         home_manager = self.request_json("/api/home-manager")
         self.assertGreaterEqual(len(catalog), 130)
+        self.assertEqual(compatibility["status"], "passed")
+        self.assertTrue(compatibility["readOnly"])
+        self.assertEqual(compatibility["system"], "x86_64-linux")
+        self.assertEqual(compatibility["summary"]["compatible"], 1)
+        self.assertEqual(compatibility["summary"]["incompatible"], 1)
+        self.assertEqual(compatibility["packages"][1]["reason"], "evaluation-rejected")
         self.assertGreaterEqual(len(presets), 8)
         self.assertIn("gaming-ready", {item["id"] for item in presets})
         self.assertGreaterEqual(len(settings_catalog), 30)
