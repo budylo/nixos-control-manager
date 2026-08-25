@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -16,6 +16,7 @@ from .helper_service import HelperDispatcher, HelperTarget
 from .helper_transport import UnixJsonHelperServer
 from .live_read_only_backend import LiveReadOnlyHelperBackend, RoutingHelperBackend
 from .managed_helper_backend import LiveManagedHelperBackend
+from .flake_lock_helper_backend import LiveFlakeLockHelperBackend
 from .polkit_authorizer import PolkitAuthorizer
 from .transaction import require_transaction_fixture
 
@@ -494,6 +495,44 @@ def _target_v6(raw: Any) -> HelperTarget:
         raise HelperConfigurationError(str(error)) from error
 
 
+def _target_v7(raw: Any) -> HelperTarget:
+    mapping = _mapping(raw, "helper target")
+    expected = {
+        "targetId",
+        "mode",
+        "configurationRoot",
+        "journalRoot",
+        "testJournalRoot",
+        "testTimeoutSeconds",
+        "homeManagerRoot",
+        "homeManagerJournalRoot",
+        "managedJournalRoot",
+        "flakeLockJournalRoot",
+        "allowedRelativePaths",
+        "flakeTarget",
+    }
+    _exact_keys(mapping, expected, "helper target")
+    legacy = {key: value for key, value in mapping.items() if key != "flakeLockJournalRoot"}
+    base = _target_v6(legacy)
+    if mapping.get("mode") != "live-control":
+        if mapping["flakeLockJournalRoot"] is not None:
+            raise HelperConfigurationError(
+                "Only live-control may configure flakeLockJournalRoot"
+            )
+        return base
+    if mapping["flakeLockJournalRoot"] is None:
+        return base
+    journal = _absolute_path(mapping["flakeLockJournalRoot"], "flakeLockJournalRoot")
+    try:
+        return replace(
+            base,
+            flake_lock_write_enabled=True,
+            flake_lock_journal_root=journal,
+        )
+    except (TypeError, ValueError) as error:
+        raise HelperConfigurationError(str(error)) from error
+
+
 @dataclass(frozen=True, slots=True)
 class HelperDaemonConfig:
     socket_path: Path
@@ -520,9 +559,9 @@ class HelperDaemonConfig:
             "helper configuration",
         )
         schema_version = mapping["schemaVersion"]
-        if schema_version not in {1, 2, 3, 4, 5, 6}:
+        if schema_version not in {1, 2, 3, 4, 5, 6, 7}:
             raise HelperConfigurationError(
-                "Only helper configuration schemaVersion 1 through 6 are supported"
+                "Only helper configuration schemaVersion 1 through 7 are supported"
             )
         timeout = mapping["validationTimeout"]
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 900:
@@ -537,6 +576,7 @@ class HelperDaemonConfig:
             4: _target_v4,
             5: _target_v5,
             6: _target_v6,
+            7: _target_v7,
         }[schema_version]
         targets = tuple(target_loader(item) for item in targets_raw)
         if len({target.target_id for target in targets}) != len(targets):
@@ -566,6 +606,9 @@ def run_daemon(config_path: Path) -> None:
                 timeout=config.validation_timeout
             ),
             managed_backend=LiveManagedHelperBackend(
+                timeout=config.validation_timeout
+            ),
+            flake_lock_backend=LiveFlakeLockHelperBackend(
                 timeout=config.validation_timeout
             ),
         ),

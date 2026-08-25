@@ -719,11 +719,13 @@ class LiveReadOnlyHelperBackend:
 
 class RoutingHelperBackend:
     def __init__(
-        self, *, fixture_backend: Any, live_backend: Any, managed_backend: Any | None = None
+        self, *, fixture_backend: Any, live_backend: Any, managed_backend: Any | None = None,
+        flake_lock_backend: Any | None = None,
     ) -> None:
         self.fixture_backend = fixture_backend
         self.live_backend = live_backend
         self.managed_backend = managed_backend or live_backend
+        self.flake_lock_backend = flake_lock_backend or live_backend
 
     def _backend(self, target: HelperTarget) -> Any:
         return self.fixture_backend if target.fixture_only else self.live_backend
@@ -797,6 +799,23 @@ class RoutingHelperBackend:
             target, transaction_id, peer_uid
         )
 
+    def validate_flake_lock_update(self, target, plan, peer_uid: int):
+        return self.flake_lock_backend.validate_flake_lock_update(
+            target, plan, peer_uid
+        )
+
+    def apply_validated_flake_lock_update(self, target, plan, peer_uid: int):
+        return self.flake_lock_backend.apply_validated_flake_lock_update(
+            target, plan, peer_uid
+        )
+
+    def recover_flake_lock_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ):
+        return self.flake_lock_backend.recover_flake_lock_transaction(
+            target, transaction_id, peer_uid
+        )
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ):
@@ -857,6 +876,13 @@ class RoutingHelperBackend:
     ) -> None:
         discard = getattr(
             self.managed_backend, "discard_validated_managed_plan", None
+        )
+        if discard is not None:
+            discard(target, plan, peer_uid)
+
+    def discard_validated_flake_lock_update(self, target, plan, peer_uid: int) -> None:
+        discard = getattr(
+            self.flake_lock_backend, "discard_validated_flake_lock_update", None
         )
         if discard is not None:
             discard(target, plan, peer_uid)

@@ -34,7 +34,7 @@ _ACTIVE_STATUSES = {
     "cancelling",
     "cleaning",
 }
-_TERMINAL_STATUSES = {"passed", "failed", "cancelled", "blocked", "unavailable"}
+_TERMINAL_STATUSES = {"passed", "failed", "cancelled", "blocked", "unavailable", "stale"}
 _FLAKE_TARGET = re.compile(r"^[A-Za-z0-9_-]+$")
 _JOB_ID = re.compile(r"^[0-9a-f]{24}$")
 _STORE_PATH = re.compile(r"^/nix/store/[0-9a-z]{32}-[^\s]+$")
@@ -166,6 +166,7 @@ class CandidateBuildManager:
         self._job_order: deque[str] = deque()
         self._active_job_id: str | None = None
         self._closed = False
+        self._source_epoch = 0
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -206,6 +207,7 @@ class CandidateBuildManager:
                 "nextSequence": 1,
                 "cancelEvent": threading.Event(),
                 "thread": None,
+                "sourceEpoch": self._source_epoch,
             }
             self._jobs[job_id] = job
             self._job_order.append(job_id)
@@ -224,6 +226,21 @@ class CandidateBuildManager:
             job["thread"] = thread
             thread.start()
             return self._snapshot(job, after=0)
+
+    def invalidate(self, reason: str) -> None:
+        """Revoke every old build result after a configuration-source write."""
+        with self._lock:
+            self._source_epoch += 1
+            for job in self._jobs.values():
+                if job["sourceEpoch"] == self._source_epoch:
+                    continue
+                if job["status"] in _ACTIVE_STATUSES:
+                    job["cancelRequested"] = True
+                    job["cancelEvent"].set()
+                job["status"] = "stale"
+                job["outputPaths"] = []
+                job["error"] = {"code": "source-changed", "message": reason}
+                self._event(job, "error", reason)
 
     def latest(self, *, after: int = 0) -> dict[str, Any]:
         with self._lock:
@@ -555,7 +572,14 @@ class CandidateBuildManager:
                     job["workingCopyRemoved"] = not candidate_root.exists()
                 job["finishedAt"] = time.time()
                 job["durationMs"] = round((time.monotonic() - started) * 1000)
-                if job["status"] in _ACTIVE_STATUSES:
+                if job["sourceEpoch"] != self._source_epoch:
+                    job["status"] = "stale"
+                    job["outputPaths"] = []
+                    job["error"] = {
+                        "code": "source-changed",
+                        "message": "Configuration source changed; a new build is required",
+                    }
+                elif job["status"] in _ACTIVE_STATUSES:
                     if job["cancelEvent"].is_set():
                         job["status"] = "cancelled"
                         self._event(job, "status", "Build preview cancelled")
@@ -600,6 +624,8 @@ class CandidateBuildManager:
             "logsTruncated": bool(events and after < first_sequence - 1),
             "effectiveUid": job["effectiveUid"],
             "privileged": job["privileged"],
+            "sourceEpoch": job["sourceEpoch"],
+            "stale": job["status"] == "stale",
             "configurationWriteEnabled": False,
             "nixStoreWriteExpected": True,
             "activationEnabled": False,
@@ -614,8 +640,7 @@ class CandidateBuildManager:
             "impactReportIncomplete": True,
         }
 
-    @staticmethod
-    def _idle_snapshot() -> dict[str, Any]:
+    def _idle_snapshot(self) -> dict[str, Any]:
         return {
             "jobId": None,
             "status": "idle",
@@ -624,6 +649,8 @@ class CandidateBuildManager:
             "logsTruncated": False,
             "cancellable": False,
             "privileged": False,
+            "sourceEpoch": self._source_epoch,
+            "stale": False,
             "configurationWriteEnabled": False,
             "nixStoreWriteExpected": True,
             "activationEnabled": False,

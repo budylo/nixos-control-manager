@@ -28,6 +28,7 @@ let
   isLiveControl = cfg.mode == "live-control";
   hasTestActivation = isLiveTest || isLiveControl;
   hasManagedWrite = isLiveManaged || isLiveControl;
+  hasFlakeLockWrite = isLiveControl && cfg.flakeLockWriteEnable;
   configurationRoot = if isFixture then cfg.fixtureRoot else "/etc/nixos";
   transactionJournal = if isFixture then cfg.journalRoot else null;
   testJournal = if hasTestActivation then cfg.testJournalRoot else null;
@@ -35,6 +36,7 @@ let
   homeManagerJournalRoot =
     if isLiveHomeManager then cfg.homeManagerJournalRoot else null;
   managedJournalRoot = if hasManagedWrite then cfg.managedJournalRoot else null;
+  flakeLockJournalRoot = if hasFlakeLockWrite then cfg.flakeLockJournalRoot else null;
   effectiveAllowedPaths = if hasManagedWrite then [
     "ncm/state.json"
     "ncm/packages.nix"
@@ -45,7 +47,7 @@ let
     && all (part: part != "" && part != "." && part != "..")
       (splitString "/" path);
   helperConfig = (pkgs.formats.json { }).generate "ncm-helper.json" {
-    schemaVersion = 6;
+    schemaVersion = 7;
     inherit socketPath;
     polkitExecutable = "${pkgs.polkit}/bin/pkcheck";
     validationTimeout = cfg.validationTimeout;
@@ -59,6 +61,7 @@ let
         testTimeoutSeconds = cfg.testActivationTimeout;
         inherit homeManagerRoot homeManagerJournalRoot;
         inherit managedJournalRoot;
+        inherit flakeLockJournalRoot;
         allowedRelativePaths = effectiveAllowedPaths;
         flakeTarget = cfg.flakeTarget;
       }
@@ -200,7 +203,8 @@ in
         edits configuration.nix, mutates flake inputs, or activates a system.
         live-control is the combined, higher-trust opt-in mode: it preserves
         the exact managed two-file boundary, requires a successful timed test
-        activation, and only then permits a Polkit-authorized switch to that
+        activation, may persist only an exact previewed flake.lock through its
+        own journal, and only then permits a Polkit-authorized switch to that
         exact closure plus rollback to the journaled previous closure.
       '';
     };
@@ -260,6 +264,14 @@ in
       default = "/var/lib/nix-control-manager/managed-transactions";
       description = "Root-only journal for bounded NCM-owned source transactions.";
     };
+
+    flakeLockJournalRoot = mkOption {
+      type = types.str;
+      default = "/var/lib/nix-control-manager/flake-lock-transactions";
+      description = "Root-only journal for exact preview-bound flake.lock transactions.";
+    };
+
+    flakeLockWriteEnable = mkEnableOption "exact preview-bound flake.lock persistence in live-control mode";
 
     targetId = mkOption {
       type = types.strMatching "[a-z][a-z0-9-]{0,31}";
@@ -364,6 +376,17 @@ in
         message = "live-control requires separate test and managed journals.";
       }
       {
+        assertion = !hasFlakeLockWrite || (
+          cfg.flakeTarget != null
+          && hasPrefix "/" cfg.flakeLockJournalRoot
+          && cfg.flakeLockJournalRoot != "/etc/nixos"
+          && !(hasPrefix "/etc/nixos/" cfg.flakeLockJournalRoot)
+          && cfg.flakeLockJournalRoot != cfg.testJournalRoot
+          && cfg.flakeLockJournalRoot != cfg.managedJournalRoot
+        );
+        message = "live-control flake.lock writes require flakeTarget and a separate external journal.";
+      }
+      {
         assertion = !isLiveHomeManager || (
           hasPrefix "/" cfg.homeManagerJournalRoot
           && cfg.homeManagerJournalRoot != cfg.homeManagerRoot
@@ -403,6 +426,9 @@ in
       ]
       ++ optionals hasManagedWrite [
         "d ${cfg.managedJournalRoot} 0700 root root -"
+      ]
+      ++ optionals hasFlakeLockWrite [
+        "d ${cfg.flakeLockJournalRoot} 0700 root root -"
       ];
 
     systemd.sockets.${serviceName} = {
@@ -511,6 +537,9 @@ in
           "/etc/nixos/ncm"
           cfg.managedJournalRoot
           cfg.testJournalRoot
+        ] ++ optionals hasFlakeLockWrite [
+          "/etc/nixos/flake.lock"
+          cfg.flakeLockJournalRoot
         ];
       };
     };

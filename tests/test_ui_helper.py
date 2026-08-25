@@ -45,6 +45,12 @@ class SequenceSender:
                 "planFingerprint"
             ]
         if (
+            request["operation"] == "validate-flake-lock-update"
+            and isinstance(response.get("result"), dict)
+        ):
+            response["result"]["planFingerprint"] = request["payload"]["planFingerprint"]
+            response["result"]["inputName"] = request["payload"]["inputName"]
+        if (
             request["operation"] == "preview-activation"
             and isinstance(response.get("result"), dict)
         ):
@@ -201,6 +207,72 @@ def permanent_capabilities() -> dict:
         ]
     )
     return result
+
+
+def flake_lock_capabilities() -> dict:
+    result = permanent_capabilities()
+    target = result["result"]["targets"][0]
+    target["flakeLockWriteEnabled"] = True
+    target["flakeLockRecoveryEnabled"] = True
+    result["result"]["operations"].extend(
+        [
+            "validate-flake-lock-update",
+            "apply-validated-flake-lock-update",
+            "recover-flake-lock-transaction",
+        ]
+    )
+    return result
+
+
+def flake_lock_validation() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "flake-validation",
+        "status": "ok",
+        "result": {
+            "validationReceipt": "F" * 43,
+            "expiresInSeconds": 300,
+            "targetId": "live",
+            "planFingerprint": "a" * 64,
+            "inputName": "nixpkgs",
+            "fixtureOnly": False,
+            "flakeLockWriteEnabled": True,
+            "activationEnabled": False,
+            "validation": {
+                "status": "passed",
+                "checks": [{"name": "Evaluate exact lock", "status": "passed"}],
+                "warnings": [],
+                "workingCopyRemoved": True,
+                "writeScope": ["flake.lock"],
+            },
+        },
+        "error": None,
+    }
+
+
+def flake_lock_apply_result() -> dict:
+    return {
+        "schemaVersion": 1,
+        "requestId": "flake-apply",
+        "status": "ok",
+        "result": {
+            "state": "committed",
+            "fixtureOnly": False,
+            "flakeLockWriteEnabled": True,
+            "activationEnabled": False,
+            "buildRequired": True,
+            "switchEnabled": False,
+            "filesWritten": 1,
+            "transaction": {
+                "transactionId": "f" * 24,
+                "state": "committed",
+                "changedFiles": ["flake.lock"],
+                "fixtureOnly": False,
+                "activationEnabled": False,
+            },
+        },
+        "error": None,
+    }
 
 
 def permanent_result(status: str) -> dict:
@@ -445,6 +517,34 @@ class HelperUiAdapterTests(unittest.TestCase):
         self.assertEqual(applied["state"], "committed")
         self.assertTrue(applied["authorizedByPolkit"])
         self.assertFalse(applied["switchEnabled"])
+
+    def test_flake_lock_validation_and_apply_keep_exact_one_file_scope(self) -> None:
+        sender = SequenceSender(
+            flake_lock_capabilities(),
+            flake_lock_validation(),
+            flake_lock_capabilities(),
+            flake_lock_apply_result(),
+        )
+        adapter = self.adapter(sender)
+        candidate = {
+            "inputName": "nixpkgs",
+            "sourceFingerprint": "1" * 64,
+            "beforeLockSha256": "2" * 64,
+            "candidateLockSha256": "3" * 64,
+            "planFingerprint": "4" * 64,
+            "candidateLock": "{}\n",
+        }
+        validated = adapter.validate_flake_lock_update(candidate)
+        request = sender.requests[1][1]
+        self.assertEqual(request["operation"], "validate-flake-lock-update")
+        self.assertEqual([item["relativePath"] for item in request["payload"]["changes"]], ["flake.lock"])
+        self.assertEqual(validated["writeScope"], ["flake.lock"])
+        applied = adapter.apply_flake_lock_update(
+            plan_fingerprint=validated["planFingerprint"],
+            validation_receipt=validated["validationReceipt"],
+        )
+        self.assertEqual(applied["filesWritten"], 1)
+        self.assertTrue(applied["buildRequired"])
 
     def test_unavailable_socket_is_reported_without_raising(self) -> None:
         status = self.adapter(SequenceSender(FileNotFoundError("missing socket"))).status()

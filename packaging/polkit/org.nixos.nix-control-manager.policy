@@ -65,6 +65,26 @@
     </defaults>
   </action>
 
+  <action id="org.nixos.nix-control-manager.apply-validated-flake-lock-update">
+    <description>Persist one exact validated flake.lock update</description>
+    <message>Authentication is required to write only the exact flake.lock update shown in Nix Control Manager</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.nixos.nix-control-manager.recover-flake-lock-transaction">
+    <description>Recover an incomplete flake.lock transaction</description>
+    <message>Authentication is required to restore the previous exact flake.lock</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.nixos.nix-control-manager.preview-activation">
     <description>Preview activation of an exact NixOS candidate</description>
     <message>Authentication is required to inspect system-level activation impact</message>

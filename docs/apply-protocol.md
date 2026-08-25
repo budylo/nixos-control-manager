@@ -11,6 +11,12 @@ local build-preview API can build the
 same candidate as an unprivileged user into `/nix/store`, with no output link;
 it grants no write or activation authority to this protocol.
 
+The optional `live-control` flake-lock transaction is another distinct journal
+kind. It can modify only an existing regular `flake.lock`, requires the exact
+source fingerprint and candidate digest shown by the unprivileged preview,
+performs NixOS evaluation before and after the provisional replacement, and
+rolls back before reporting any failed verification.
+
 ## Implemented transaction core
 
 The test-only engine currently provides:

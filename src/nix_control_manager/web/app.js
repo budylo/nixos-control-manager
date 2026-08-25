@@ -147,6 +147,13 @@ const ui = {
   flakeUpdateAfter: document.querySelector("#flakeUpdateAfter"),
   flakeUpdateChangedNodes: document.querySelector("#flakeUpdateChangedNodes"),
   flakeUpdateDiff: document.querySelector("#flakeUpdateDiff code"),
+  flakeLockApplyFlow: document.querySelector("#flakeLockApplyFlow"),
+  flakeLockApplyTitle: document.querySelector("#flakeLockApplyTitle"),
+  flakeLockApplyDetail: document.querySelector("#flakeLockApplyDetail"),
+  prepareFlakeLockApply: document.querySelector("#prepareFlakeLockApply"),
+  commitFlakeLockApply: document.querySelector("#commitFlakeLockApply"),
+  flakeLockConfirmationWrap: document.querySelector("#flakeLockConfirmationWrap"),
+  flakeLockConfirmation: document.querySelector("#flakeLockConfirmation"),
   topActions: document.querySelector(".top-actions"),
   homeManagerNav: document.querySelector("#homeManagerNav"),
   homeManagerPage: document.querySelector("#homeManagerPage"),
@@ -269,6 +276,7 @@ const model = {
   flakeUpdatePreview: null,
   flakeUpdateStarting: null,
   flakeUpdatePollingJobId: null,
+  flakeLockApplyIntent: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -2006,6 +2014,81 @@ function renderFlakeUpdatePreview() {
   ui.flakeUpdateDiff.textContent = preview.lockDiff
     || (preview.status === "no-change" ? "Змін немає — flake.lock уже актуальний."
       : (active ? "Обчислюємо точну різницю…" : "Diff відсутній."));
+  const helperAllowsWrite = model.helper?.flakeLockWriteEnabled === true;
+  const intent = model.flakeLockApplyIntent;
+  ui.flakeLockApplyFlow.hidden = !preview.readyForApply && !preview.applied;
+  if (preview.applied) {
+    ui.flakeLockApplyTitle.textContent = "Точний flake.lock записано";
+    ui.flakeLockApplyDetail.textContent = "Попередній build відкликано. Наступний обов’язковий крок — нова перевірка та build у розділі змін.";
+    ui.prepareFlakeLockApply.hidden = true;
+    ui.flakeLockConfirmationWrap.hidden = true;
+    ui.commitFlakeLockApply.hidden = true;
+  } else {
+    ui.flakeLockApplyTitle.textContent = intent ? "Перевірка пройдена — потрібне явне підтвердження" : "Записати саме цей lock";
+    ui.flakeLockApplyDetail.textContent = !helperAllowsWrite
+      ? "Потрібен helper у режимі live-control з окремим журналом flake.lock."
+      : (intent
+        ? `Одноразове підтвердження діє до ${new Date(intent.expiresAt).toLocaleTimeString("uk-UA")}. Після запису потрібен новий build.`
+        : "Helper перевірить точний fingerprint, один input і NixOS evaluation до та після атомарного запису.");
+    ui.prepareFlakeLockApply.hidden = Boolean(intent);
+    ui.prepareFlakeLockApply.disabled = !helperAllowsWrite || !preview.readyForApply;
+    ui.flakeLockConfirmationWrap.hidden = !intent;
+    ui.commitFlakeLockApply.hidden = !intent;
+    ui.commitFlakeLockApply.disabled = !intent || !ui.flakeLockConfirmation.checked;
+  }
+}
+
+async function prepareFlakeLockApply() {
+  const preview = model.flakeUpdatePreview;
+  if (!preview?.readyForApply || !preview.planFingerprint) return;
+  ui.prepareFlakeLockApply.disabled = true;
+  try {
+    const result = await api("/api/flakes/update-validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: preview.jobId, planFingerprint: preview.planFingerprint }),
+    });
+    model.flakeLockApplyIntent = {
+      ...result,
+      expiresAt: Date.now() + (result.expiresInSeconds || 300) * 1000,
+    };
+    ui.flakeLockConfirmation.checked = false;
+    renderFlakeUpdatePreview();
+    showToast("Точний flake.lock перевірено. Для запису підтвердьте показаний diff.");
+  } catch (error) {
+    showToast(`Не вдалося підготувати запис flake.lock: ${error.message}`, true);
+    renderFlakeUpdatePreview();
+  }
+}
+
+async function commitFlakeLockApply() {
+  const preview = model.flakeUpdatePreview;
+  const intent = model.flakeLockApplyIntent;
+  if (!preview?.readyForApply || !intent || !ui.flakeLockConfirmation.checked) return;
+  ui.commitFlakeLockApply.disabled = true;
+  try {
+    await api("/api/flakes/update-apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intentId: intent.intentId,
+        jobId: preview.jobId,
+        planFingerprint: preview.planFingerprint,
+        confirmed: true,
+      }),
+    });
+    model.flakeLockApplyIntent = null;
+    model.buildPreview = { jobId: null, status: "idle", nextCursor: 0, events: [] };
+    model.activationPreview = null;
+    model.testActivation = null;
+    await Promise.all([refreshFlakeUpdatePreview(), refreshFlakes()]);
+    showToast("flake.lock записано й перевірено. Тепер виконайте новий build перед test/switch.");
+  } catch (error) {
+    model.flakeLockApplyIntent = null;
+    ui.flakeLockConfirmation.checked = false;
+    showToast(`Не вдалося записати flake.lock: ${error.message}`, true);
+    renderFlakeUpdatePreview();
+  }
 }
 
 async function pollFlakeUpdatePreview(jobId) {
@@ -2032,6 +2115,7 @@ async function pollFlakeUpdatePreview(jobId) {
 async function startFlakeUpdatePreview(inputName) {
   if (model.flakeUpdateStarting || activeBuildStatuses.has(model.flakeUpdatePreview?.status)) return;
   model.flakeUpdateStarting = inputName;
+  model.flakeLockApplyIntent = null;
   renderFlakes();
   try {
     const result = NcmFlakes.normalizeFlakeUpdatePreview(await api("/api/flakes/update-preview", {
@@ -2235,8 +2319,13 @@ function renderFlakes() {
   } else {
     ui.flakeWarnings.replaceChildren();
   }
-  ui.flakeBoundaryTitle.textContent = "Застосування оновлень вимкнено";
-  ui.flakeBoundaryDetail.textContent = "Preview може змінити лише тимчасовий lock; оригінальний flake.lock, конфігурація та активна система недоторканні.";
+  if (model.helper?.flakeLockWriteEnabled) {
+    ui.flakeBoundaryTitle.textContent = "Запис — лише після точного preview і повторної перевірки";
+    ui.flakeBoundaryDetail.textContent = "Дозволений тільки flake.lock для одного показаного input. Після запису старий build відкликається; test і switch потребують нового build.";
+  } else {
+    ui.flakeBoundaryTitle.textContent = "Застосування оновлень вимкнено";
+    ui.flakeBoundaryDetail.textContent = "Preview може змінити лише тимчасовий lock; без окремого live-control helper оригінальний flake.lock недоторканний.";
+  }
   renderFlakeUpdatePreview();
 }
 
@@ -3714,6 +3803,9 @@ ui.generationsNav.addEventListener("click", () => showPage("generations"));
 ui.refreshGenerations.addEventListener("click", refreshGenerations);
 ui.refreshFlakes.addEventListener("click", refreshFlakes);
 ui.cancelFlakeUpdatePreview.addEventListener("click", cancelFlakeUpdatePreview);
+ui.prepareFlakeLockApply.addEventListener("click", prepareFlakeLockApply);
+ui.commitFlakeLockApply.addEventListener("click", commitFlakeLockApply);
+ui.flakeLockConfirmation.addEventListener("change", renderFlakeUpdatePreview);
 ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
 ui.homeManagerAdoptionButton.addEventListener("click", openHomeAdoption);
 ui.closeHomePreview.addEventListener("click", closeHomePreview);

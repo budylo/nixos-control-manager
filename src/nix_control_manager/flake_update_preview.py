@@ -17,6 +17,11 @@ from typing import Any, Callable, Sequence
 from .candidate_build import execute_build_process
 from .errors import NcmError
 from .flake_inspector import FlakeInput, parse_flake_lock
+from .flake_lock_update import (
+    MAX_LOCK_UPDATE_BYTES,
+    flake_lock_plan_fingerprint,
+    source_manifest,
+)
 
 
 _ACTIVE_STATUSES = {
@@ -39,8 +44,6 @@ _INPUT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _JOB_ID = re.compile(r"^[0-9a-f]{24}$")
 _MAX_EVENTS = 256
 _MAX_EVENT_CHARS = 1_000
-_MAX_FILES = 8_192
-_MAX_SOURCE_BYTES = 128 * 1024 * 1024
 _MAX_LOCK_BYTES = 4_000_000
 _MAX_DIFF_CHARS = 128_000
 _UNSUPPORTED_TYPES = {"follows", "indirect", "path", "unknown"}
@@ -71,61 +74,8 @@ def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
 
 
 def _manifest(root: Path, *, exclude_lock: bool = False) -> tuple[str, int, int]:
-    """Hash one bounded source tree without following symbolic links."""
-    if not root.is_dir() or root.is_symlink():
-        raise ValueError("The Flake configuration root must be a real directory")
-    records: list[tuple[str, str, str]] = []
-    file_count = 0
-    total_bytes = 0
-    for current, directory_names, file_names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        kept_directories: list[str] = []
-        for name in sorted(directory_names):
-            if _ignored_name(name):
-                continue
-            path = current_path / name
-            relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
-                target = os.readlink(path)
-                records.append(("link", relative, target))
-                file_count += 1
-                total_bytes += len(target.encode("utf-8", errors="replace"))
-            else:
-                kept_directories.append(name)
-        directory_names[:] = kept_directories
-        for name in sorted(file_names):
-            if _ignored_name(name):
-                continue
-            path = current_path / name
-            relative = path.relative_to(root).as_posix()
-            if exclude_lock and relative == "flake.lock":
-                continue
-            if path.is_symlink():
-                target = os.readlink(path)
-                records.append(("link", relative, target))
-                size = len(target.encode("utf-8", errors="replace"))
-            elif path.is_file():
-                digest = hashlib.sha256()
-                size = 0
-                with path.open("rb") as stream:
-                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                        size += len(chunk)
-                        if total_bytes + size > _MAX_SOURCE_BYTES:
-                            raise ValueError("The Flake source exceeds the preview size limit")
-                        digest.update(chunk)
-                records.append(("file", relative, digest.hexdigest()))
-            else:
-                raise ValueError(f"Unsupported special file in Flake source: {relative}")
-            file_count += 1
-            total_bytes += size
-            if file_count > _MAX_FILES:
-                raise ValueError("The Flake source contains too many files for preview")
-            if total_bytes > _MAX_SOURCE_BYTES:
-                raise ValueError("The Flake source exceeds the preview size limit")
-    encoded = json.dumps(records, ensure_ascii=False, separators=(",", ":")).encode(
-        "utf-8"
-    )
-    return hashlib.sha256(encoded).hexdigest(), file_count, total_bytes
+    """Use the exact source identity algorithm shared with the root helper."""
+    return source_manifest(root, exclude_lock=exclude_lock)
 
 
 def _read_lock(path: Path) -> tuple[str, dict[str, Any]]:
@@ -133,7 +83,7 @@ def _read_lock(path: Path) -> tuple[str, dict[str, Any]]:
         raise ValueError("flake.lock must be a regular file")
     if path.stat().st_size > _MAX_LOCK_BYTES:
         raise ValueError("flake.lock exceeds the preview size limit")
-    text = path.read_text(encoding="utf-8")
+    text = path.read_bytes().decode("utf-8")
     value = json.loads(text)
     if not isinstance(value, dict) or not isinstance(value.get("nodes"), dict):
         raise ValueError("flake.lock has an invalid node table")
@@ -223,6 +173,12 @@ class FlakeUpdatePreviewManager:
                 "changedNodes": [],
                 "changedNodeCount": 0,
                 "lockDiff": "",
+                "beforeLockSha256": None,
+                "candidateLockSha256": None,
+                "planFingerprint": None,
+                "privateCandidateLock": None,
+                "applied": False,
+                "transactionId": None,
                 "sourceFingerprint": None,
                 "sourceUnchanged": False,
                 "candidateOnlyChanges": False,
@@ -286,6 +242,62 @@ class FlakeUpdatePreviewManager:
             job["status"] = "cancelling"
             self._event(job, "status", "Flake update preview cancellation requested")
             return self._snapshot(job, after=0)
+
+    def candidate_for_apply(
+        self, job_id: str, *, plan_fingerprint: str
+    ) -> dict[str, Any]:
+        """Return the exact private candidate only after matching the displayed preview."""
+        if not _JOB_ID.fullmatch(job_id):
+            raise FlakeUpdatePreviewError("Invalid Flake update-preview job identifier")
+        if not re.fullmatch(r"[0-9a-f]{64}", plan_fingerprint):
+            raise FlakeUpdatePreviewError("Invalid Flake update plan fingerprint")
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise FlakeUpdatePreviewError("Unknown Flake update-preview job")
+            if (
+                job["status"] != "passed"
+                or not job["sourceUnchanged"]
+                or not job["candidateOnlyChanges"]
+                or not job["temporaryCopyRemoved"]
+                or job["planFingerprint"] != plan_fingerprint
+                or not isinstance(job["privateCandidateLock"], str)
+                or job["applied"]
+            ):
+                raise FlakeUpdatePreviewError(
+                    "The exact displayed Flake update is no longer ready for confirmation"
+                )
+            current_fingerprint, _, _ = _manifest(self.config_root)
+            if current_fingerprint != job["sourceFingerprint"]:
+                raise FlakeUpdatePreviewError(
+                    "The Flake source changed after the displayed preview"
+                )
+            return {
+                "jobId": job_id,
+                "inputName": job["inputName"],
+                "sourceFingerprint": job["sourceFingerprint"],
+                "beforeLockSha256": job["beforeLockSha256"],
+                "candidateLockSha256": job["candidateLockSha256"],
+                "planFingerprint": job["planFingerprint"],
+                "candidateLock": job["privateCandidateLock"],
+                "changedNodes": list(job["changedNodes"]),
+            }
+
+    def mark_applied(
+        self, job_id: str, *, plan_fingerprint: str, transaction_id: str
+    ) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if (
+                job is None
+                or job["planFingerprint"] != plan_fingerprint
+                or not re.fullmatch(r"[0-9a-f]{24}", transaction_id)
+            ):
+                raise FlakeUpdatePreviewError("Applied Flake update does not match the preview")
+            job["applied"] = True
+            job["transactionId"] = transaction_id
+            job["privateCandidateLock"] = None
+            self._event(job, "status", "Exact previewed flake.lock was committed")
 
     def close(self) -> None:
         thread: threading.Thread | None = None
@@ -596,6 +608,22 @@ class FlakeUpdatePreviewManager:
                     job["changedNodes"] = changed_nodes
                     job["changedNodeCount"] = len(changed_nodes)
                     job["lockDiff"] = _lock_diff(before_text, after_text)
+                    job["beforeLockSha256"] = hashlib.sha256(
+                        before_text.encode("utf-8")
+                    ).hexdigest()
+                    job["candidateLockSha256"] = hashlib.sha256(
+                        after_text.encode("utf-8")
+                    ).hexdigest()
+                    if before_text != after_text and len(after_text.encode("utf-8")) <= MAX_LOCK_UPDATE_BYTES:
+                        job["planFingerprint"] = flake_lock_plan_fingerprint(
+                            root=root,
+                            input_name=job["inputName"],
+                            source_fingerprint=source_fingerprint,
+                            previous_sha256=job["beforeLockSha256"],
+                            candidate_sha256=job["candidateLockSha256"],
+                            changed_nodes=tuple(changed_nodes),
+                        )
+                        job["privateCandidateLock"] = after_text
                     terminal_status = "no-change" if before_text == after_text else "passed"
                     terminal_message = (
                         "The selected input is already current"
@@ -665,6 +693,11 @@ class FlakeUpdatePreviewManager:
             "changedNodes": list(job["changedNodes"]),
             "changedNodeCount": job["changedNodeCount"],
             "lockDiff": job["lockDiff"],
+            "beforeLockSha256": job["beforeLockSha256"],
+            "candidateLockSha256": job["candidateLockSha256"],
+            "planFingerprint": job["planFingerprint"],
+            "applied": job["applied"],
+            "transactionId": job["transactionId"],
             "sourceFingerprint": job["sourceFingerprint"],
             "sourceUnchanged": job["sourceUnchanged"],
             "candidateOnlyChanges": job["candidateOnlyChanges"],
@@ -674,6 +707,14 @@ class FlakeUpdatePreviewManager:
             "cancellable": status in _ACTIVE_STATUSES,
             "effectiveUid": job["effectiveUid"],
             "privileged": job["privileged"],
+            "readyForApply": (
+                job["status"] == "passed"
+                and isinstance(job["planFingerprint"], str)
+                and job["temporaryCopyRemoved"]
+                and job["sourceUnchanged"]
+                and job["candidateOnlyChanges"]
+                and not job["applied"]
+            ),
             "error": dict(job["error"]) if job["error"] else None,
             "events": selected,
             "nextCursor": events[-1]["sequence"] if events else after,
@@ -704,6 +745,11 @@ class FlakeUpdatePreviewManager:
             "changedNodes": [],
             "changedNodeCount": 0,
             "lockDiff": "",
+            "beforeLockSha256": None,
+            "candidateLockSha256": None,
+            "planFingerprint": None,
+            "applied": False,
+            "transactionId": None,
             "sourceFingerprint": None,
             "sourceUnchanged": True,
             "candidateOnlyChanges": True,
@@ -713,6 +759,7 @@ class FlakeUpdatePreviewManager:
             "cancellable": False,
             "effectiveUid": None,
             "privileged": False,
+            "readyForApply": False,
             "error": None,
             "events": [],
             "nextCursor": 0,

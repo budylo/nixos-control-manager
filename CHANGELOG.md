@@ -16,10 +16,12 @@ release name; Python packaging may normalize prereleases to PEP 440 spelling.
   copy, with source fingerprint/race checks, fixed no-shell Nix arguments,
   cancellation and timeout, strict candidate scope validation, changed-node
   reporting, and an exact before/after `flake.lock` diff;
-- preview-only Flake GUI boundary: the network and Nix store are used only on
-  request, while the original configuration, real lock file, system profile,
-  and active system remain unchanged and no raw resolver output reaches the
-  browser;
+- opt-in `live-control` persistence for exactly the previewed `flake.lock`,
+  bound to the source fingerprint and one selected direct input, with a hidden
+  UID-bound receipt, explicit GUI confirmation, dedicated Polkit actions and
+  transaction journal, pre/post NixOS evaluation, and automatic rollback;
+- every accepted lock write invalidates older build outputs, so dry preview,
+  `test`, and `switch` remain unavailable until a fresh build passes;
 - read-only package compatibility inspection against the `pkgs` instance of the
   selected NixOS configuration;
 - per-package explanations for missing attributes, unsupported platforms,
@@ -75,7 +77,7 @@ First public alpha release.
 - automatic PRIME/hybrid-GPU setup, legacy GPU branch selection, Plasma
   Manager, and multi-host adaptation are not implemented;
 - Home Manager activation remains intentionally unavailable;
-- the Flakes page can inspect and preview one direct input update, but confirmed
-  writes to the real lock file are not implemented yet;
+- confirmed writes from the Flakes page require the separately enabled
+  `live-control` flake-lock capability and a configured host target;
 - release updates, when implemented, will be explicit flake-input updates and
   will never run in the background.

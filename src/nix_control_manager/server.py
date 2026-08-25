@@ -165,6 +165,8 @@ class NcmServer(ThreadingHTTPServer):
         self.home_manager_apply_intents_lock = threading.Lock()
         self.managed_apply_intents: dict[str, dict[str, Any]] = {}
         self.managed_apply_intents_lock = threading.Lock()
+        self.flake_lock_apply_intents: dict[str, dict[str, Any]] = {}
+        self.flake_lock_apply_intents_lock = threading.Lock()
 
     def create_home_manager_apply_intent(
         self, result: dict[str, Any]
@@ -240,6 +242,41 @@ class NcmServer(ThreadingHTTPServer):
             raise ValidationError("Managed confirmation expired; validate the state again")
         if not secrets.compare_digest(intent["planFingerprint"], plan_fingerprint):
             raise ValidationError("Managed confirmation does not match the plan")
+        return intent
+
+    def create_flake_lock_apply_intent(
+        self, result: dict[str, Any], *, job_id: str
+    ) -> tuple[str, int]:
+        raw_ttl = result.get("expiresInSeconds")
+        ttl = raw_ttl if isinstance(raw_ttl, int) and 1 <= raw_ttl <= 3600 else 300
+        now = time.monotonic()
+        intent_id = secrets.token_urlsafe(24)
+        with self.flake_lock_apply_intents_lock:
+            self.flake_lock_apply_intents = {
+                key: value
+                for key, value in self.flake_lock_apply_intents.items()
+                if value["expiresAt"] > now
+            }
+            self.flake_lock_apply_intents[intent_id] = {
+                "expiresAt": now + ttl,
+                "jobId": job_id,
+                "planFingerprint": result["planFingerprint"],
+                "validationReceipt": result["validationReceipt"],
+            }
+        return intent_id, ttl
+
+    def consume_flake_lock_apply_intent(
+        self, intent_id: str, *, job_id: str, plan_fingerprint: str
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self.flake_lock_apply_intents_lock:
+            intent = self.flake_lock_apply_intents.pop(intent_id, None)
+        if intent is None or intent["expiresAt"] <= now:
+            raise ValidationError("Flake lock confirmation expired; validate the preview again")
+        if intent["jobId"] != job_id or not secrets.compare_digest(
+            intent["planFingerprint"], plan_fingerprint
+        ):
+            raise ValidationError("Flake lock confirmation does not match the preview")
         return intent
 
     def server_close(self) -> None:
@@ -551,6 +588,70 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.server.flake_update_preview_manager.start(payload["input"]),
                     HTTPStatus.ACCEPTED,
                 )
+                return
+            if path == "/api/flakes/update-validate":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if (
+                    set(payload) != {"jobId", "planFingerprint"}
+                    or not isinstance(payload.get("jobId"), str)
+                    or not isinstance(payload.get("planFingerprint"), str)
+                ):
+                    raise ValidationError("Exact preview jobId and planFingerprint are required")
+                candidate = self.server.flake_update_preview_manager.candidate_for_apply(
+                    payload["jobId"], plan_fingerprint=payload["planFingerprint"]
+                )
+                result = self.server.helper_adapter.validate_flake_lock_update(candidate)
+                intent_id, ttl = self.server.create_flake_lock_apply_intent(
+                    result, job_id=payload["jobId"]
+                )
+                public = {key: value for key, value in result.items() if key != "validationReceipt"}
+                public.update(
+                    {
+                        "intentId": intent_id,
+                        "expiresInSeconds": ttl,
+                        "jobId": payload["jobId"],
+                        "confirmationRequired": True,
+                    }
+                )
+                self._json(public)
+                return
+            if path == "/api/flakes/update-apply":
+                if self.server.helper_adapter is None:
+                    raise HelperUiError("System helper is not configured")
+                payload = self._read_json_object()
+                if (
+                    set(payload) != {"intentId", "jobId", "planFingerprint", "confirmed"}
+                    or payload.get("confirmed") is not True
+                    or not all(
+                        isinstance(payload.get(key), str)
+                        for key in ("intentId", "jobId", "planFingerprint")
+                    )
+                ):
+                    raise ValidationError("Exact explicitly confirmed flake.lock preview is required")
+                self.server.flake_update_preview_manager.candidate_for_apply(
+                    payload["jobId"], plan_fingerprint=payload["planFingerprint"]
+                )
+                intent = self.server.consume_flake_lock_apply_intent(
+                    payload["intentId"],
+                    job_id=payload["jobId"],
+                    plan_fingerprint=payload["planFingerprint"],
+                )
+                result = self.server.helper_adapter.apply_flake_lock_update(
+                    plan_fingerprint=payload["planFingerprint"],
+                    validation_receipt=intent["validationReceipt"],
+                )
+                transaction = result.get("transaction") or {}
+                self.server.flake_update_preview_manager.mark_applied(
+                    payload["jobId"],
+                    plan_fingerprint=payload["planFingerprint"],
+                    transaction_id=transaction.get("transactionId", ""),
+                )
+                self.server.build_manager.invalidate(
+                    "flake.lock changed; validation and a new build are required"
+                )
+                self._json(result)
                 return
             if path == "/api/home-manager/preview":
                 inspection, state, username, integration, _ = self._home_candidate()

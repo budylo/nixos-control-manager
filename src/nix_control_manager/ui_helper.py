@@ -87,6 +87,8 @@ class HelperUiAdapter:
             "homeManagerLiveWriteEnabled": False,
             "managedWriteEnabled": False,
             "managedRecoveryEnabled": False,
+            "flakeLockWriteEnabled": False,
+            "flakeLockRecoveryEnabled": False,
         }
         try:
             response = self._send(self._request("capabilities", {}))
@@ -185,6 +187,18 @@ class HelperUiAdapter:
                     and target.get("managedRecoveryEnabled") is True
                     and "recover-managed-transaction"
                     in (result.get("operations") or [])
+                ),
+                "flakeLockWriteEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("flakeLockWriteEnabled") is True
+                    and target.get("flakeLockRecoveryEnabled") is True
+                    and "validate-flake-lock-update" in operations
+                    and "apply-validated-flake-lock-update" in operations
+                ),
+                "flakeLockRecoveryEnabled": (
+                    target.get("fixtureOnly") is False
+                    and target.get("flakeLockRecoveryEnabled") is True
+                    and "recover-flake-lock-transaction" in operations
                 ),
                 "reason": None,
             }
@@ -423,6 +437,115 @@ class HelperUiAdapter:
             "source": "system-helper",
             "authorizedByPolkit": True,
             "switchEnabled": False,
+        }
+
+    def validate_flake_lock_update(self, candidate: Mapping[str, Any]) -> dict[str, Any]:
+        status = self.status()
+        if status.get("flakeLockWriteEnabled") is not True:
+            raise HelperUiError("System helper does not permit exact flake.lock writes")
+        required = {
+            "inputName", "sourceFingerprint", "beforeLockSha256",
+            "candidateLockSha256", "planFingerprint", "candidateLock",
+        }
+        if not required.issubset(candidate):
+            raise HelperUiError("The displayed flake.lock candidate is incomplete")
+        request = self._request(
+            "validate-flake-lock-update",
+            {
+                "targetId": self.target_id,
+                "planFingerprint": candidate["planFingerprint"],
+                "inputName": candidate["inputName"],
+                "sourceFingerprint": candidate["sourceFingerprint"],
+                "changes": [
+                    {
+                        "relativePath": "flake.lock",
+                        "action": "modify",
+                        "previousSha256": candidate["beforeLockSha256"],
+                        "candidateSha256": candidate["candidateLockSha256"],
+                        "candidate": candidate["candidateLock"],
+                    }
+                ],
+            },
+        )
+        try:
+            response = self._send(request)
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Flake lock validation failed"))
+        result = _mapping(response.get("result"), "flake.lock validation result")
+        validation = _mapping(result.get("validation"), "flake.lock validation details")
+        receipt = result.get("validationReceipt")
+        if (
+            result.get("planFingerprint") != candidate["planFingerprint"]
+            or result.get("inputName") != candidate["inputName"]
+            or result.get("fixtureOnly") is not False
+            or result.get("flakeLockWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or validation.get("status") != "passed"
+            or validation.get("workingCopyRemoved") is not True
+            or validation.get("writeScope") != ["flake.lock"]
+            or not isinstance(receipt, str)
+            or len(receipt) < 32
+        ):
+            raise HelperUiError("Flake lock validation crossed its one-file boundary")
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": self.target_id,
+            "inputName": candidate["inputName"],
+            "planFingerprint": candidate["planFingerprint"],
+            "validationReceipt": receipt,
+            "expiresInSeconds": result.get("expiresInSeconds"),
+            "checks": list(validation.get("checks") or []),
+            "warnings": list(validation.get("warnings") or []),
+            "workingCopyRemoved": True,
+            "writeScope": ["flake.lock"],
+            "activationEnabled": False,
+            "buildRequired": True,
+        }
+
+    def apply_flake_lock_update(
+        self, *, plan_fingerprint: str, validation_receipt: str
+    ) -> dict[str, Any]:
+        if self.status().get("flakeLockWriteEnabled") is not True:
+            raise HelperUiError("System helper does not permit exact flake.lock writes")
+        try:
+            response = self._send(
+                self._request(
+                    "apply-validated-flake-lock-update",
+                    {
+                        "targetId": self.target_id,
+                        "planFingerprint": plan_fingerprint,
+                        "validationReceipt": validation_receipt,
+                    },
+                )
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise HelperUiError(str(error)) from error
+        if response.get("status") != "ok":
+            error = _mapping(response.get("error"), "error")
+            raise HelperUiError(str(error.get("message") or "Flake lock persistence failed"))
+        result = _mapping(response.get("result"), "flake.lock apply result")
+        transaction = _mapping(result.get("transaction"), "flake.lock transaction")
+        if (
+            result.get("state") != "committed"
+            or result.get("filesWritten") != 1
+            or result.get("fixtureOnly") is not False
+            or result.get("flakeLockWriteEnabled") is not True
+            or result.get("activationEnabled") is not False
+            or result.get("buildRequired") is not True
+            or result.get("switchEnabled") is not False
+            or transaction.get("state") != "committed"
+            or transaction.get("changedFiles") != ["flake.lock"]
+        ):
+            raise HelperUiError("Flake lock apply crossed its one-file boundary")
+        return {
+            **dict(result),
+            "transaction": dict(transaction),
+            "source": "system-helper",
+            "authorizedByPolkit": True,
         }
 
     def apply_home_manager(

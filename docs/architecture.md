@@ -268,6 +268,12 @@ fingerprinted before and after execution; only a cleaned-up, strictly parsed
 before/after lock diff reaches the token-bound local API. There is no source
 write, apply, build, test, switch, or helper capability in this phase.
 
+The separately enabled `live-control` continuation retains the exact candidate
+server-side, sends it only to the Unix-socket helper, and binds it to the shown
+source fingerprint and one direct input. Its one-file transaction has dedicated
+receipts, Polkit actions, and a journal. Pre/post NixOS evaluation and rollback
+complete before the server invalidates all earlier build outputs.
+
 The transaction workflow does not weaken that public contract. Fixture
 writes require the exact transaction marker and reject `/etc/nixos`,
 `/etc/home-manager`, and the resolved default `~/.config/home-manager`. The

@@ -51,6 +51,8 @@ class FakeHelperAdapter:
             "managedRecoveryEnabled": True,
             "permanentSwitchEnabled": True,
             "rollbackGenerationEnabled": True,
+            "flakeLockWriteEnabled": True,
+            "flakeLockRecoveryEnabled": True,
         }
 
     def validate_adoption(self):
@@ -228,6 +230,46 @@ class FakeHelperAdapter:
                 "fixtureOnly": False,
                 "activationEnabled": False,
                 "changedFiles": ["ncm/state.json", "ncm/packages.nix"],
+            },
+        }
+
+    def validate_flake_lock_update(self, candidate):
+        self.flake_candidate = candidate
+        return {
+            "source": "system-helper",
+            "status": "passed",
+            "targetId": "live",
+            "inputName": candidate["inputName"],
+            "planFingerprint": candidate["planFingerprint"],
+            "validationReceipt": "F" * 43,
+            "expiresInSeconds": 300,
+            "checks": [],
+            "warnings": [],
+            "workingCopyRemoved": True,
+            "writeScope": ["flake.lock"],
+            "activationEnabled": False,
+            "buildRequired": True,
+        }
+
+    def apply_flake_lock_update(self, *, plan_fingerprint, validation_receipt):
+        if validation_receipt != "F" * 43:
+            raise ValueError("bad flake lock receipt")
+        return {
+            "source": "system-helper",
+            "state": "committed",
+            "fixtureOnly": False,
+            "flakeLockWriteEnabled": True,
+            "activationEnabled": False,
+            "buildRequired": True,
+            "switchEnabled": False,
+            "authorizedByPolkit": True,
+            "filesWritten": 1,
+            "transaction": {
+                "transactionId": "f" * 24,
+                "state": "committed",
+                "fixtureOnly": False,
+                "activationEnabled": False,
+                "changedFiles": ["flake.lock"],
             },
         }
 
@@ -446,6 +488,8 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="flakesNav"', html)
             self.assertIn('id="flakeUpdatePreview"', html)
             self.assertIn('id="cancelFlakeUpdatePreview"', html)
+            self.assertIn('id="prepareFlakeLockApply"', html)
+            self.assertIn('id="flakeLockConfirmation"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
     def test_flake_update_preview_api_is_token_bound_and_never_applies(self) -> None:
@@ -612,6 +656,74 @@ class ServerTests(unittest.TestCase):
             )
         self.assertEqual(context.exception.code, 400)
         context.exception.close()
+
+    def test_flake_lock_write_hides_receipt_requires_exact_confirmation_and_invalidates_build(self) -> None:
+        fingerprint = "1" * 64
+        job_id = "2" * 24
+        candidate = {
+            "jobId": job_id,
+            "inputName": "nixpkgs",
+            "sourceFingerprint": "3" * 64,
+            "beforeLockSha256": "4" * 64,
+            "candidateLockSha256": "5" * 64,
+            "planFingerprint": fingerprint,
+            "candidateLock": "{}\n",
+            "changedNodes": ["nixpkgs"],
+        }
+        marked = []
+        invalidated = []
+        self.server.flake_update_preview_manager.candidate_for_apply = (
+            lambda requested_job, *, plan_fingerprint: (
+                candidate
+                if requested_job == job_id and plan_fingerprint == fingerprint
+                else (_ for _ in ()).throw(ValueError("mismatch"))
+            )
+        )
+        self.server.flake_update_preview_manager.mark_applied = (
+            lambda requested_job, *, plan_fingerprint, transaction_id: marked.append(
+                (requested_job, plan_fingerprint, transaction_id)
+            )
+        )
+        self.server.build_manager.invalidate = lambda reason: invalidated.append(reason)
+
+        prepared = self.request_json(
+            "/api/flakes/update-validate",
+            method="POST",
+            body={"jobId": job_id, "planFingerprint": fingerprint},
+            token=self.server.token,
+        )
+        self.assertNotIn("validationReceipt", prepared)
+        self.assertTrue(prepared["confirmationRequired"])
+
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/flakes/update-apply",
+                method="POST",
+                body={
+                    "intentId": prepared["intentId"],
+                    "jobId": job_id,
+                    "planFingerprint": fingerprint,
+                    "confirmed": False,
+                },
+                token=self.server.token,
+            )
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
+
+        applied = self.request_json(
+            "/api/flakes/update-apply",
+            method="POST",
+            body={
+                "intentId": prepared["intentId"],
+                "jobId": job_id,
+                "planFingerprint": fingerprint,
+                "confirmed": True,
+            },
+            token=self.server.token,
+        )
+        self.assertEqual(applied["filesWritten"], 1)
+        self.assertEqual(marked, [(job_id, fingerprint, "f" * 24)])
+        self.assertEqual(len(invalidated), 1)
 
     def test_home_manager_adoption_plan_and_validation_are_read_only(self) -> None:
         root = self.server.config_root

@@ -467,6 +467,20 @@
               </div>
               <pre id="flakeUpdateDiff"><code>Завантаження…</code></pre>
             </div>
+            <div id="flakeLockApplyFlow" class="flake-lock-apply-flow" hidden>
+              <div>
+                <strong id="flakeLockApplyTitle">Записати саме цей lock</strong>
+                <small id="flakeLockApplyDetail">Спочатку helper повторно перевірить точний fingerprint і NixOS evaluation.</small>
+              </div>
+              <div class="flake-lock-apply-actions">
+                <button id="prepareFlakeLockApply" class="button secondary" type="button">Перевірити перед записом</button>
+                <label id="flakeLockConfirmationWrap" class="managed-apply-confirmation" hidden>
+                  <input id="flakeLockConfirmation" type="checkbox">
+                  <span>Я підтверджую запис лише показаного flake.lock</span>
+                </label>
+                <button id="commitFlakeLockApply" class="button primary" type="button" hidden disabled>Записати flake.lock</button>
+              </div>
+            </div>
           </section>
 
           <section id="flakeWarnings" class="flake-warnings" hidden aria-live="polite"></section>

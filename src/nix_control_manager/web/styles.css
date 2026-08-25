@@ -404,6 +404,12 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .flake-update-diff-wrap strong { font-size: 10px; }
 .flake-update-diff-wrap small { color: #718299; font-size: 8px; }
 .flake-update-diff-wrap pre { max-height: 430px; padding: 17px 20px; overflow: auto; border-top: 1px solid rgba(255,255,255,.04); background: #080c12; font-size: 9px; line-height: 1.55; }
+.flake-lock-apply-flow { padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid rgba(116,228,177,.18); background: rgba(116,228,177,.035); }
+.flake-lock-apply-flow strong, .flake-lock-apply-flow small { display: block; }
+.flake-lock-apply-flow strong { font-size: 10px; }
+.flake-lock-apply-flow small { margin-top: 4px; max-width: 520px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.flake-lock-apply-actions { display: grid; justify-items: end; gap: 8px; }
+.flake-lock-apply-actions .managed-apply-confirmation { max-width: 330px; }
 .flake-warnings { margin: 18px clamp(28px, 4vw, 58px) 0; padding: 14px 16px; border: 1px solid rgba(255,184,108,.25); border-radius: 13px; color: #d7b985; background: rgba(255,184,108,.04); }
 .flake-warnings strong { font-size: 10px; }
 .flake-warnings ul { margin: 8px 0 0; padding-left: 17px; }

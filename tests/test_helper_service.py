@@ -6,6 +6,8 @@ import unittest
 from nix_control_manager.helper_service import (
     APPLY_ACTION_ID,
     COMMIT_TESTED_SYSTEM_ACTION_ID,
+    FLAKE_LOCK_APPLY_ACTION_ID,
+    FLAKE_LOCK_RECOVER_ACTION_ID,
     HOME_MANAGER_APPLY_ACTION_ID,
     MANAGED_APPLY_ACTION_ID,
     PREVIEW_ACTIVATION_ACTION_ID,
@@ -162,6 +164,81 @@ class HelperServiceTests(unittest.TestCase):
             peer_uid=1000,
         )
         self.assertEqual(escaped["error"]["code"], "path-not-allowed")
+
+    def test_flake_lock_receipt_is_uid_bound_single_use_and_separately_authorized(self) -> None:
+        target = HelperTarget(
+            target_id="flakes",
+            configuration_root=self.mock_root,
+            allowed_relative_paths=frozenset(
+                {"ncm/state.json", "ncm/packages.nix"}
+            ),
+            fixture_only=False,
+            apply_enabled=False,
+            flake_target="workstation",
+            test_activation_enabled=True,
+            test_journal_root=Path(self.temporary.name) / "test-journal",
+            managed_write_enabled=True,
+            managed_journal_root=Path(self.temporary.name) / "managed-journal",
+            permanent_switch_enabled=True,
+            flake_lock_write_enabled=True,
+            flake_lock_journal_root=Path(self.temporary.name) / "flake-journal",
+        )
+        dispatcher = HelperDispatcher(
+            targets=(target,), authorizer=self.authorizer, backend=self.backend
+        )
+        candidate = "{}\n"
+        fingerprint = "2" * 64
+        validation = dispatcher.handle(
+            self.request(
+                "validate-flake-lock-update",
+                {
+                    "targetId": "flakes",
+                    "planFingerprint": fingerprint,
+                    "inputName": "nixpkgs",
+                    "sourceFingerprint": "3" * 64,
+                    "changes": [self.change("flake.lock", candidate)],
+                },
+                "flake-validate1",
+            ),
+            peer_uid=1000,
+        )
+        self.assertEqual(validation["status"], "ok")
+        receipt = validation["result"]["validationReceipt"]
+        request = self.request(
+            "apply-validated-flake-lock-update",
+            {
+                "targetId": "flakes",
+                "planFingerprint": fingerprint,
+                "validationReceipt": receipt,
+            },
+            "flake-apply001",
+        )
+
+        wrong_uid = dispatcher.handle(request, peer_uid=1001)
+        self.assertEqual(wrong_uid["error"]["code"], "invalid-receipt")
+        self.assertEqual(self.authorizer.calls, [])
+        denied = dispatcher.handle(request, peer_uid=1000)
+        self.assertEqual(denied["status"], "denied")
+        self.assertEqual(self.backend.flake_lock_apply_calls, [])
+
+        self.authorizer.allowed.add((1000, FLAKE_LOCK_APPLY_ACTION_ID))
+        applied = dispatcher.handle(request, peer_uid=1000)
+        self.assertEqual(applied["result"]["state"], "committed")
+        self.assertEqual(applied["result"]["filesWritten"], 1)
+        replay = dispatcher.handle(request, peer_uid=1000)
+        self.assertEqual(replay["error"]["code"], "invalid-receipt")
+        self.assertEqual(len(self.backend.flake_lock_apply_calls), 1)
+
+        recovery = self.request(
+            "recover-flake-lock-transaction",
+            {"targetId": "flakes", "transactionId": "a" * 24},
+            "flake-recover1",
+        )
+        self.assertEqual(dispatcher.handle(recovery, peer_uid=1000)["status"], "denied")
+        self.authorizer.allowed.add((1000, FLAKE_LOCK_RECOVER_ACTION_ID))
+        recovered = dispatcher.handle(recovery, peer_uid=1000)
+        self.assertEqual(recovered["result"]["state"], "rolled-back")
+        self.assertEqual(self.authorizer.calls[-1][0], FLAKE_LOCK_RECOVER_ACTION_ID)
 
     def test_permanent_transition_is_exact_session_bound_and_separately_authorized(self) -> None:
         control = HelperTarget(

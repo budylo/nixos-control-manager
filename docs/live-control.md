@@ -7,6 +7,11 @@ replace the closure recorded by the helper.
 
 ## Required sequence
 
+An optional lock update adds a source phase before this activation sequence:
+preview one direct input, validate the exact candidate through the helper,
+explicitly confirm the one-file write, and complete post-write NixOS evaluation.
+That write invalidates every previous build result.
+
 1. NCM validates the current `/etc/nixos` source in a disposable copy.
 2. The unprivileged build produces one exact system closure.
 3. The helper independently re-evaluates the source and requires that exact
@@ -45,8 +50,16 @@ services.nix-control-manager-helper = {
   targetId = "control";
   allowedUsers = [ "alice" ];
   testActivationTimeout = 300;
+  flakeTarget = "my-host";
+  flakeLockWriteEnable = true;
 };
 ```
+
+`flakeLockWriteEnable` is off by default. When enabled, the helper receives an
+additional external root-only journal at
+`/var/lib/nix-control-manager/flake-lock-transactions` and write access to only
+`/etc/nixos/flake.lock`; `flake.nix`, imports, NCM modules, profiles, and the
+active system are outside that transaction.
 
 Keep console access and a known-good boot generation. Automatic test recovery
 is runtime-only and cannot protect against power loss, kernel failure, or a

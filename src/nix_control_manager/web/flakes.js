@@ -28,10 +28,12 @@
   ]);
   const previewKeys = [
     "activationEnabled", "after", "applyEnabled", "before", "candidateOnlyChanges",
+    "applied", "beforeLockSha256", "candidateLockSha256",
     "cancelRequested", "cancellable", "changedNodeCount", "changedNodes", "command",
     "createdAt", "durationMs", "effectiveUid", "error", "events", "exitCode",
     "finishedAt", "inputName", "jobId", "lockDiff", "logsTruncated", "networkRequired",
     "nextCursor", "nixStoreWriteExpected", "privileged", "schemaVersion", "sourceFingerprint",
+    "planFingerprint", "readyForApply", "transactionId",
     "sourceUnchanged", "sourceWriteEnabled", "startedAt", "status", "temporaryCopyRemoved",
     "temporaryLockWriteEnabled", "timedOut",
   ];
@@ -156,6 +158,7 @@
     for (const key of [
       "sourceUnchanged", "candidateOnlyChanges", "temporaryCopyRemoved", "cancelRequested",
       "timedOut", "cancellable", "privileged", "logsTruncated",
+      "applied", "readyForApply",
     ]) {
       if (typeof value[key] !== "boolean") throw new Error(`Некоректне поле ${key} у preview Flakes`);
     }
@@ -202,6 +205,15 @@
     const sourceFingerprint = string(value.sourceFingerprint, { nullable: true, max: 64 });
     if (sourceFingerprint !== null && !/^[0-9a-f]{64}$/.test(sourceFingerprint)) {
       throw new Error("Некоректний fingerprint update-preview Flakes");
+    }
+    for (const key of ["beforeLockSha256", "candidateLockSha256", "planFingerprint"]) {
+      const digest = string(value[key], { nullable: true, max: 64 });
+      if (digest !== null && !/^[0-9a-f]{64}$/.test(digest)) throw new Error(`Некоректний ${key}`);
+    }
+    const transactionId = string(value.transactionId, { nullable: true, max: 24 });
+    if (transactionId !== null && !/^[0-9a-f]{24}$/.test(transactionId)) throw new Error("Некоректна транзакція flake.lock");
+    if (value.readyForApply && (value.status !== "passed" || !value.planFingerprint || value.applied)) {
+      throw new Error("Некоректна готовність flake.lock до запису");
     }
     if (["passed", "no-change"].includes(value.status)
       && (!before || !after || value.exitCode !== 0 || value.sourceUnchanged !== true

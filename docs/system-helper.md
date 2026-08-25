@@ -174,6 +174,8 @@ services.nix-control-manager-helper = {
   targetId = "live";
   allowedUsers = [ "alice" ];
   testActivationTimeout = 300;
+  flakeTarget = "my-host";
+  flakeLockWriteEnable = true;
 };
 ```
 
@@ -232,7 +234,9 @@ the empty capability bounding set.
 `live-managed` exposes only `/etc/nixos/ncm` and its managed transaction journal
 through `ReadWritePaths`; its capability bounding set is also empty.
 `live-control` exposes the same exact NCM directory plus separate managed and
-activation journals; it does not make the main configuration writable.
+activation journals. Its optional flake-lock capability additionally exposes
+only `/etc/nixos/flake.lock` and a third external journal; it does not make
+`flake.nix` or the rest of the main configuration writable.
 `/proc` remains visible because safe Polkit process subjects require
 the client start time and real UID.
 

@@ -7,8 +7,15 @@ The Flakes page can now perform the first, non-mutating part of that review for
 any supported direct input. **Check for update** is an explicit network action:
 NCM resolves only the selected input in a disposable configuration copy, may
 populate `/nix/store`, and displays the exact proposed `flake.lock` diff after
-the copy has been removed. It does not save that diff to the real lock file and
-does not build or activate the system.
+the copy has been removed. Preview alone does not save or activate anything.
+With the separately enabled `live-control` flake-lock capability, the user may
+then request helper validation and explicitly confirm that exact one-file
+candidate. The helper evaluates before and after the atomic write and rolls
+back on failure. NCM then revokes every older build result.
+
+The GUI continuation is deliberately progressive: run a new build, inspect the
+dry activation report, use the time-limited `test`, and only then confirm the
+existing exact-output `switch` operation.
 
 The commands below remain the manual path for actually accepting an update.
 

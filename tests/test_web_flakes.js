@@ -54,6 +54,12 @@ function previewFixture() {
     changedNodeCount: 1,
     lockDiff: "--- flake.lock (current)\n+++ flake.lock (preview)\n",
     sourceFingerprint: "d".repeat(64),
+    beforeLockSha256: "e".repeat(64),
+    candidateLockSha256: "f".repeat(64),
+    planFingerprint: "1".repeat(64),
+    readyForApply: true,
+    applied: false,
+    transactionId: null,
     sourceUnchanged: true,
     candidateOnlyChanges: true,
     temporaryCopyRemoved: true,
@@ -125,6 +131,7 @@ function previewFixture() {
 {
   const noChange = previewFixture();
   noChange.status = "no-change";
+  noChange.readyForApply = false;
   assert.throws(() => Flakes.normalizeFlakeUpdatePreview(noChange), /неочікуваний diff/);
 }
 

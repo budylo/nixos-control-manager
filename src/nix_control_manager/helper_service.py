@@ -10,6 +10,7 @@ from typing import Any, Mapping, Protocol
 from .helper_protocol import (
     ApplyValidatedHomeManagerPlanPayload,
     ApplyValidatedManagedPlanPayload,
+    ApplyValidatedFlakeLockUpdatePayload,
     ApplyValidatedPlanPayload,
     ActivationSessionPayload,
     CommitTestedSystemPayload,
@@ -18,11 +19,13 @@ from .helper_protocol import (
     PreviewActivationPayload,
     RecoverHomeManagerTransactionPayload,
     RecoverManagedTransactionPayload,
+    RecoverFlakeLockTransactionPayload,
     RecoverTestActivationPayload,
     RecoverTransactionPayload,
     SUPPORTED_OPERATIONS,
     ValidateHomeManagerPlanPayload,
     ValidatePlanPayload,
+    ValidateFlakeLockUpdatePayload,
     TestActivationPayload,
     response_mapping,
     validate_empty_payload,
@@ -39,6 +42,8 @@ HOME_MANAGER_RECOVER_ACTION_ID = (
 )
 MANAGED_APPLY_ACTION_ID = "org.nixos.nix-control-manager.apply-validated-managed-plan"
 MANAGED_RECOVER_ACTION_ID = "org.nixos.nix-control-manager.recover-managed-transaction"
+FLAKE_LOCK_APPLY_ACTION_ID = "org.nixos.nix-control-manager.apply-validated-flake-lock-update"
+FLAKE_LOCK_RECOVER_ACTION_ID = "org.nixos.nix-control-manager.recover-flake-lock-transaction"
 PREVIEW_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.preview-activation"
 TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.test-activation"
 RECOVER_TEST_ACTIVATION_ACTION_ID = "org.nixos.nix-control-manager.recover-test-activation"
@@ -65,6 +70,8 @@ class HelperTarget:
     managed_write_enabled: bool = False
     managed_journal_root: Path | None = None
     permanent_switch_enabled: bool = False
+    flake_lock_write_enabled: bool = False
+    flake_lock_journal_root: Path | None = None
 
     def __post_init__(self) -> None:
         if not _TARGET_ID.fullmatch(self.target_id):
@@ -103,6 +110,14 @@ class HelperTarget:
                 self,
                 "managed_journal_root",
                 self.managed_journal_root.expanduser().resolve(),
+            )
+        if self.flake_lock_journal_root is not None:
+            if self.flake_lock_journal_root.expanduser().is_symlink():
+                raise ValueError("The flake lock journal cannot be a symbolic link")
+            object.__setattr__(
+                self,
+                "flake_lock_journal_root",
+                self.flake_lock_journal_root.expanduser().resolve(),
             )
         if not self.allowed_relative_paths:
             raise ValueError("A helper target requires at least one allowed path")
@@ -169,6 +184,27 @@ class HelperTarget:
             raise ValueError(
                 "Permanent switching requires the combined managed/test live target"
             )
+        if self.flake_lock_write_enabled:
+            if (
+                not self.permanent_switch_enabled
+                or self.flake_target is None
+                or self.flake_lock_journal_root is None
+            ):
+                raise ValueError(
+                    "Flake lock writes require live-control, a target, and a separate journal"
+                )
+            journals = {
+                self.flake_lock_journal_root,
+                self.managed_journal_root,
+                self.test_journal_root,
+            }
+            if len(journals) != 3 or (
+                self.flake_lock_journal_root == self.configuration_root
+                or self.flake_lock_journal_root.is_relative_to(self.configuration_root)
+            ):
+                raise ValueError("Flake lock journal must be separate and outside the source")
+        elif self.flake_lock_journal_root is not None:
+            raise ValueError("A flake lock journal is valid only when writes are enabled")
         if not 30 <= self.test_timeout_seconds <= 1800:
             raise ValueError("test_timeout_seconds must be between 30 and 1800")
         for label in self.allowed_relative_paths:
@@ -205,6 +241,15 @@ class PendingValidatedManagedPlan:
     receipt: str
     peer_uid: int
     payload: ValidatePlanPayload
+    expires_at: float
+    validation_result: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class PendingValidatedFlakeLockUpdate:
+    receipt: str
+    peer_uid: int
+    payload: ValidateFlakeLockUpdatePayload
     expires_at: float
     validation_result: Mapping[str, Any]
 
@@ -288,6 +333,24 @@ class HelperBackend(Protocol):
         self, target: HelperTarget, transaction_id: str, peer_uid: int
     ) -> Mapping[str, Any]: ...
 
+    def validate_flake_lock_update(
+        self,
+        target: HelperTarget,
+        plan: ValidateFlakeLockUpdatePayload,
+        peer_uid: int,
+    ) -> Mapping[str, Any]: ...
+
+    def apply_validated_flake_lock_update(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedFlakeLockUpdate,
+        peer_uid: int,
+    ) -> Mapping[str, Any]: ...
+
+    def recover_flake_lock_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]: ...
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]: ...
@@ -337,6 +400,9 @@ class RecordingMockBackend:
     managed_validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
     managed_apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
     managed_recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    flake_lock_validate_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    flake_lock_apply_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    flake_lock_recover_calls: list[tuple[str, str, int]] = field(default_factory=list)
     preview_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     test_activation_calls: list[tuple[str, str, str, int]] = field(default_factory=list)
     recover_test_activation_calls: list[tuple[str, str, int]] = field(default_factory=list)
@@ -477,6 +543,64 @@ class RecordingMockBackend:
             "activationEnabled": False,
         }
 
+    def validate_flake_lock_update(
+        self,
+        target: HelperTarget,
+        plan: ValidateFlakeLockUpdatePayload,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        self.flake_lock_validate_calls.append(
+            (target.target_id, plan.plan_fingerprint, peer_uid)
+        )
+        return {
+            "status": self.validation_status,
+            "planFingerprint": plan.plan_fingerprint,
+            "workingCopyRemoved": True,
+            "writeScope": ["flake.lock"],
+            "activationEnabled": False,
+        }
+
+    def apply_validated_flake_lock_update(
+        self,
+        target: HelperTarget,
+        plan: PendingValidatedFlakeLockUpdate,
+        peer_uid: int,
+    ) -> Mapping[str, Any]:
+        self.flake_lock_apply_calls.append(
+            (target.target_id, plan.payload.plan_fingerprint, peer_uid)
+        )
+        transaction_id = secrets.token_hex(12)
+        return {
+            "state": "committed",
+            "transaction": {
+                "transactionId": transaction_id,
+                "state": "committed",
+                "changedFiles": ["flake.lock"],
+                "fixtureOnly": False,
+            },
+            "filesWritten": 1,
+            "fixtureOnly": False,
+            "flakeLockWriteEnabled": True,
+            "activationEnabled": False,
+            "buildRequired": True,
+            "switchEnabled": False,
+        }
+
+    def recover_flake_lock_transaction(
+        self, target: HelperTarget, transaction_id: str, peer_uid: int
+    ) -> Mapping[str, Any]:
+        self.flake_lock_recover_calls.append(
+            (target.target_id, transaction_id, peer_uid)
+        )
+        return {
+            "state": "rolled-back",
+            "transactionId": transaction_id,
+            "filesWritten": 1,
+            "fixtureOnly": False,
+            "flakeLockWriteEnabled": True,
+            "activationEnabled": False,
+        }
+
     def preview_activation(
         self, target: HelperTarget, payload: PreviewActivationPayload, peer_uid: int
     ) -> Mapping[str, Any]:
@@ -599,6 +723,7 @@ class HelperDispatcher:
         self._pending: dict[str, PendingValidatedPlan] = {}
         self._pending_home_manager: dict[str, PendingValidatedHomeManagerPlan] = {}
         self._pending_managed: dict[str, PendingValidatedManagedPlan] = {}
+        self._pending_flake_lock: dict[str, PendingValidatedFlakeLockUpdate] = {}
         self._pending_tests: dict[str, PendingTestActivation] = {}
 
     @staticmethod
@@ -638,6 +763,15 @@ class HelperDispatcher:
                 del self._pending_managed[receipt]
                 target = self.targets.get(pending.payload.target_id)
                 discard = getattr(self.backend, "discard_validated_managed_plan", None)
+                if target is not None and discard is not None:
+                    discard(target, pending.payload, pending.peer_uid)
+        for receipt, pending in tuple(self._pending_flake_lock.items()):
+            if pending.expires_at <= now:
+                del self._pending_flake_lock[receipt]
+                target = self.targets.get(pending.payload.target_id)
+                discard = getattr(
+                    self.backend, "discard_validated_flake_lock_update", None
+                )
                 if target is not None and discard is not None:
                     discard(target, pending.payload, pending.peer_uid)
         for receipt, pending in tuple(self._pending_tests.items()):
@@ -697,6 +831,8 @@ class HelperDispatcher:
                                 ),
                                 "managedWriteEnabled": target.managed_write_enabled,
                                 "managedRecoveryEnabled": target.managed_write_enabled,
+                                "flakeLockWriteEnabled": target.flake_lock_write_enabled,
+                                "flakeLockRecoveryEnabled": target.flake_lock_write_enabled,
                                 "dryActivatePreviewEnabled": (
                                     not target.fixture_only
                                     and not target.home_manager_apply_enabled
@@ -722,6 +858,8 @@ class HelperDispatcher:
                             ),
                             "apply-validated-managed-plan": MANAGED_APPLY_ACTION_ID,
                             "recover-managed-transaction": MANAGED_RECOVER_ACTION_ID,
+                            "apply-validated-flake-lock-update": FLAKE_LOCK_APPLY_ACTION_ID,
+                            "recover-flake-lock-transaction": FLAKE_LOCK_RECOVER_ACTION_ID,
                             "preview-activation": PREVIEW_ACTIVATION_ACTION_ID,
                             "test-activation": TEST_ACTIVATION_ACTION_ID,
                             "recover-test-activation": RECOVER_TEST_ACTIVATION_ACTION_ID,
@@ -740,6 +878,8 @@ class HelperDispatcher:
                 )
             if request.operation == "validate-managed-plan":
                 return self._validate_managed(request_id, request.payload, peer.uid)
+            if request.operation == "validate-flake-lock-update":
+                return self._validate_flake_lock(request_id, request.payload, peer.uid)
             if request.operation == "preview-activation":
                 return self._preview_activation(request_id, request.payload, peer)
             if request.operation == "test-activation":
@@ -760,6 +900,8 @@ class HelperDispatcher:
                 )
             if request.operation == "apply-validated-managed-plan":
                 return self._apply_managed(request_id, request.payload, peer)
+            if request.operation == "apply-validated-flake-lock-update":
+                return self._apply_flake_lock(request_id, request.payload, peer)
             if request.operation == "recover-transaction":
                 return self._recover(request_id, request.payload, peer)
             if request.operation == "recover-home-manager-transaction":
@@ -768,6 +910,8 @@ class HelperDispatcher:
                 )
             if request.operation == "recover-managed-transaction":
                 return self._recover_managed(request_id, request.payload, peer)
+            if request.operation == "recover-flake-lock-transaction":
+                return self._recover_flake_lock(request_id, request.payload, peer)
             raise AssertionError(f"Unhandled helper operation: {request.operation}")
         except HelperProtocolError as error:
             return response_mapping(
@@ -1071,6 +1215,88 @@ class HelperDispatcher:
         result = self.backend.apply_validated_managed_plan(target, pending, peer.uid)
         return response_mapping(request_id, status="ok", result=result)
 
+    def _validate_flake_lock(
+        self, request_id: str, raw: Any, peer_uid: int
+    ) -> dict[str, Any]:
+        payload = ValidateFlakeLockUpdatePayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.flake_lock_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit flake.lock writes"
+            )
+        validation = dict(
+            self.backend.validate_flake_lock_update(target, payload, peer_uid)
+        )
+        if validation.get("status") != "passed":
+            return response_mapping(
+                request_id,
+                status="error",
+                error_code="validation-failed",
+                error_message="The helper did not validate the exact flake.lock update",
+                result=validation,
+            )
+        receipt = secrets.token_urlsafe(32)
+        self._pending_flake_lock[receipt] = PendingValidatedFlakeLockUpdate(
+            receipt=receipt,
+            peer_uid=peer_uid,
+            payload=payload,
+            expires_at=time.monotonic() + self.receipt_ttl_seconds,
+            validation_result=validation,
+        )
+        return response_mapping(
+            request_id,
+            status="ok",
+            result={
+                "validationReceipt": receipt,
+                "expiresInSeconds": self.receipt_ttl_seconds,
+                "targetId": payload.target_id,
+                "planFingerprint": payload.plan_fingerprint,
+                "inputName": payload.input_name,
+                "validation": validation,
+                "fixtureOnly": False,
+                "flakeLockWriteEnabled": True,
+                "activationEnabled": False,
+            },
+        )
+
+    def _apply_flake_lock(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = ApplyValidatedFlakeLockUpdatePayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.flake_lock_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit flake.lock writes"
+            )
+        pending = self._pending_flake_lock.get(payload.validation_receipt)
+        if (
+            pending is None
+            or pending.peer_uid != peer.uid
+            or pending.payload.target_id != payload.target_id
+            or pending.payload.plan_fingerprint != payload.plan_fingerprint
+        ):
+            raise HelperProtocolError(
+                "invalid-receipt", "The flake.lock validation receipt does not match"
+            )
+        details = {
+            "targetId": payload.target_id,
+            "planFingerprint": payload.plan_fingerprint,
+            "inputName": pending.payload.input_name,
+            "writeScope": "flake.lock",
+        }
+        if not self.authorizer.authorize(FLAKE_LOCK_APPLY_ACTION_ID, peer, details):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        del self._pending_flake_lock[payload.validation_receipt]
+        result = self.backend.apply_validated_flake_lock_update(
+            target, pending, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
     def _preview_activation(
         self, request_id: str, raw: Any, peer: PeerIdentity
     ) -> dict[str, Any]:
@@ -1322,6 +1548,28 @@ class HelperDispatcher:
                 error_message="Polkit authorization was not granted",
             )
         result = self.backend.recover_managed_transaction(
+            target, payload.transaction_id, peer.uid
+        )
+        return response_mapping(request_id, status="ok", result=result)
+
+    def _recover_flake_lock(
+        self, request_id: str, raw: Any, peer: PeerIdentity
+    ) -> dict[str, Any]:
+        payload = RecoverFlakeLockTransactionPayload.from_mapping(raw)
+        target = self._target(payload.target_id)
+        if not target.flake_lock_write_enabled:
+            raise HelperProtocolError(
+                "operation-disabled", "The target does not permit flake.lock recovery"
+            )
+        details = {"targetId": payload.target_id, "transactionId": payload.transaction_id}
+        if not self.authorizer.authorize(FLAKE_LOCK_RECOVER_ACTION_ID, peer, details):
+            return response_mapping(
+                request_id,
+                status="denied",
+                error_code="authorization-denied",
+                error_message="Polkit authorization was not granted",
+            )
+        result = self.backend.recover_flake_lock_transaction(
             target, payload.transaction_id, peer.uid
         )
         return response_mapping(request_id, status="ok", result=result)

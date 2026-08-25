@@ -128,6 +128,31 @@ class CandidateBuildManagerTests(unittest.TestCase):
             ".#nixosConfigurations.desktop.config.system.build.toplevel", command
         )
 
+    def test_source_write_invalidates_a_completed_build_output(self) -> None:
+        self.create_connected_legacy_configuration()
+
+        def executor(command, cwd, cancel_event, line_sink):
+            output = "/nix/store/" + "a" * 32 + "-nixos-system-preview"
+            return 0, (output,)
+
+        manager = CandidateBuildManager(
+            config_root=self.root,
+            executor=executor,
+            which=self.fake_which,
+            path_is_dir=lambda _path: True,
+        )
+        started = manager.start()
+        built = self.wait_for_terminal(manager, started["jobId"])
+        self.assertEqual(built["status"], "passed")
+        manager.invalidate("flake.lock changed; a new build is required")
+        stale = manager.poll(started["jobId"])
+        manager.close()
+
+        self.assertEqual(stale["status"], "stale")
+        self.assertTrue(stale["stale"])
+        self.assertEqual(stale["outputPaths"], [])
+        self.assertFalse(stale["activationPreviewReady"])
+
     def test_successful_build_adds_fixed_unprivileged_closure_diff(self) -> None:
         self.create_connected_legacy_configuration()
         current_system = Path(self.temporary.name) / "current-system"

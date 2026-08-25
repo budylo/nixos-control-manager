@@ -199,13 +199,13 @@
   network input at a time, using a disposable source copy and explicit network
   action; the original source remains fingerprint-verified and unchanged);
 - permit a confirmed lock-file update only through a new narrow helper scope,
-  followed by validation, build, test, switch, and rollback gates (future work;
-  no original-lock mutation endpoint or UI control exists in the preview
-  phase).
+  followed by validation, build, test, switch, and rollback gates (implemented
+  as an off-by-default `live-control` capability with a one-file journal,
+  pre/post evaluation, explicit GUI confirmation, automatic rollback, and
+  mandatory invalidation of older build results).
 
 ## Later
 
-- confirmed Flake input updates after the disposable preview phase;
 - Plasma Manager;
 - native desktop shell;
 - multi-host configuration and hardware-aware profile adaptation.

@@ -30,6 +30,9 @@ SUPPORTED_OPERATIONS = frozenset(
         "validate-managed-plan",
         "apply-validated-managed-plan",
         "recover-managed-transaction",
+        "validate-flake-lock-update",
+        "apply-validated-flake-lock-update",
+        "recover-flake-lock-transaction",
     }
 )
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -268,7 +271,6 @@ class ValidateHomeManagerPlanPayload:
             packages.append(package)
         if len(packages) != len(set(packages)):
             raise HelperProtocolError("invalid-request", "Duplicate packages are not allowed")
-
         validated = ValidatePlanPayload.from_mapping(
             {
                 "targetId": mapping["targetId"],
@@ -286,6 +288,41 @@ class ValidateHomeManagerPlanPayload:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ValidateFlakeLockUpdatePayload:
+    target_id: str
+    plan_fingerprint: str
+    input_name: str
+    source_fingerprint: str
+    changes: tuple[CandidateFile, ...]
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ValidateFlakeLockUpdatePayload":
+        mapping = _mapping(raw, "validate-flake-lock-update payload")
+        _exact_keys(
+            mapping,
+            {"targetId", "planFingerprint", "inputName", "sourceFingerprint", "changes"},
+            "validate-flake-lock-update payload",
+        )
+        validated = ValidatePlanPayload.from_mapping(
+            {
+                "targetId": mapping["targetId"],
+                "planFingerprint": mapping["planFingerprint"],
+                "changes": mapping["changes"],
+            }
+        )
+        input_name = _string(mapping["inputName"], "inputName")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", input_name):
+            raise HelperProtocolError("invalid-request", "inputName has an invalid format")
+        if len(validated.changes) != 1 or validated.changes[0].relative_path != "flake.lock":
+            raise HelperProtocolError("path-not-allowed", "Only flake.lock may be submitted")
+        return cls(
+            target_id=validated.target_id,
+            plan_fingerprint=validated.plan_fingerprint,
+            input_name=input_name,
+            source_fingerprint=_sha256(mapping["sourceFingerprint"], "sourceFingerprint"),
+            changes=validated.changes,
+        )
 @dataclass(frozen=True, slots=True)
 class PreviewActivationPayload:
     target_id: str
@@ -497,6 +534,22 @@ class ApplyValidatedManagedPlanPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyValidatedFlakeLockUpdatePayload:
+    target_id: str
+    plan_fingerprint: str
+    validation_receipt: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ApplyValidatedFlakeLockUpdatePayload":
+        validated = ApplyValidatedPlanPayload.from_mapping(raw)
+        return cls(
+            target_id=validated.target_id,
+            plan_fingerprint=validated.plan_fingerprint,
+            validation_receipt=validated.validation_receipt,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RecoverTransactionPayload:
     target_id: str
     transaction_id: str
@@ -539,6 +592,20 @@ class RecoverManagedTransactionPayload:
 
     @classmethod
     def from_mapping(cls, raw: Any) -> "RecoverManagedTransactionPayload":
+        validated = RecoverTransactionPayload.from_mapping(raw)
+        return cls(
+            target_id=validated.target_id,
+            transaction_id=validated.transaction_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverFlakeLockTransactionPayload:
+    target_id: str
+    transaction_id: str
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "RecoverFlakeLockTransactionPayload":
         validated = RecoverTransactionPayload.from_mapping(raw)
         return cls(
             target_id=validated.target_id,

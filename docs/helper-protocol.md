@@ -1,7 +1,7 @@
 # Privileged helper protocol
 
 Protocol version 1 is implemented with recording, fixture-workflow, and
-live backends. The daemon configuration schema is version 5; this is
+live backends. The daemon configuration schema is version 7; this is
 separate from the stable wire-protocol version. The service remains opt-in.
 
 ## Transport and identity
@@ -38,6 +38,10 @@ systemd-owned socket descriptor; its socket is `0660` and group-restricted.
   short-lived managed validation receipt;
 - `recover-managed-transaction` — recovers one exact transaction ID only when
   its journal kind is `managed-state`;
+- `validate-flake-lock-update`, `apply-validated-flake-lock-update`, and
+  `recover-flake-lock-transaction` — explicit `live-control` capability only;
+  bind one direct input, the complete source fingerprint, one exact
+  `flake.lock` candidate, and the dedicated `flake-lock-update` journal;
 - `preview-activation` — live modes only; accepts the same exact typed
   candidate set plus one top-level Nix store path, requires its own Polkit
   action, independently resolves the validated derivation output, and invokes
@@ -93,6 +97,8 @@ A denied Polkit prompt does not consume it, allowing an intentional retry.
 - `org.nixos.nix-control-manager.recover-home-manager-transaction`;
 - `org.nixos.nix-control-manager.apply-validated-managed-plan`;
 - `org.nixos.nix-control-manager.recover-managed-transaction`;
+- `org.nixos.nix-control-manager.apply-validated-flake-lock-update`;
+- `org.nixos.nix-control-manager.recover-flake-lock-transaction`;
 - `org.nixos.nix-control-manager.preview-activation`;
 - `org.nixos.nix-control-manager.test-activation`;
 - `org.nixos.nix-control-manager.recover-test-activation`.
@@ -234,6 +240,10 @@ Helper configuration schema 6 adds the explicit `mode: "live-control"`. It
 retains the exact live-test gates and adds three typed operations:
 `commit-tested-system`, `activation-session-status`, and
 `rollback-committed-system`.
+
+Schema 7 adds an off-by-default flake-lock sub-capability to `live-control`.
+It has separate apply/recovery Polkit actions and a third journal, never extends
+the generic managed allow-list, and requires a configured `flakeTarget`.
 
 Commit accepts only a target ID, the exact validated system path and
 fingerprint, and the 24-hex session ID created by the preceding test. The

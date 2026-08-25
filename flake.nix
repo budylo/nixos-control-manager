@@ -159,6 +159,8 @@
                   mode = "live-control";
                   targetId = "control";
                   allowedUsers = [ "live-control-user" ];
+                  flakeTarget = "live-control";
+                  flakeLockWriteEnable = true;
                 };
                 programs.nix-control-manager.enable = true;
               })
@@ -429,6 +431,8 @@
               "/etc/nixos/ncm"
               "/var/lib/nix-control-manager/managed-transactions"
               "/var/lib/nix-control-manager/test-activations"
+              "/etc/nixos/flake.lock"
+              "/var/lib/nix-control-manager/flake-lock-transactions"
             ];
             assert liveControlService.serviceConfig.CapabilityBoundingSet == "";
             assert !(builtins.hasAttr "StateDirectory" liveControlService.serviceConfig);
@@ -466,6 +470,8 @@
               grep -F 'ReadWritePaths=/etc/nixos/ncm' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/managed-transactions' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -F 'ReadWritePaths=/var/lib/nix-control-manager/test-activations' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/etc/nixos/flake.lock' ${liveControlServiceUnit}/nix-control-manager-helper.service
+              grep -F 'ReadWritePaths=/var/lib/nix-control-manager/flake-lock-transactions' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -x 'CapabilityBoundingSet=' ${liveControlServiceUnit}/nix-control-manager-helper.service
               grep -F 'Wants=polkit.service' ${liveControlServiceUnit}/nix-control-manager-helper.service
               if grep -F 'Requires=polkit.service' ${liveControlServiceUnit}/nix-control-manager-helper.service; then

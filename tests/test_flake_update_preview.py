@@ -130,6 +130,21 @@ class FlakeUpdatePreviewManagerTests(unittest.TestCase):
         self.assertTrue(result["temporaryCopyRemoved"])
         self.assertFalse(result["sourceWriteEnabled"])
         self.assertFalse(result["applyEnabled"])
+        self.assertTrue(result["readyForApply"])
+        self.assertRegex(result["planFingerprint"], r"^[0-9a-f]{64}$")
+        self.assertNotIn("privateCandidateLock", result)
+        exact = manager.candidate_for_apply(
+            started["jobId"], plan_fingerprint=result["planFingerprint"]
+        )
+        self.assertIn("b" * 40, exact["candidateLock"])
+        manager.mark_applied(
+            started["jobId"],
+            plan_fingerprint=result["planFingerprint"],
+            transaction_id="f" * 24,
+        )
+        applied = manager.poll(started["jobId"])
+        self.assertTrue(applied["applied"])
+        self.assertFalse(applied["readyForApply"])
         self.assertNotIn("secret-bearing", json.dumps(result))
         command, cwd, cancelled = calls[0]
         self.assertFalse(cancelled)

@@ -459,9 +459,18 @@ Only after the copy is removed does the GUI expose the old and proposed
 revision, changed lock nodes, and exact unified diff. Raw Nix output is not sent
 to the browser.
 
-This preview cannot write the original `flake.lock`, add or remove an input,
-build the system, or activate anything. A separately confirmed lock-file
-transaction remains future work.
+The networked preview process never writes the original `flake.lock`, adds or
+removes an input, builds the system, or activates anything. In `live-control`,
+administrators may separately enable `flakeLockWriteEnable`; an explicit second
+step can then apply the reviewed lock. The helper accepts only the
+exact in-memory candidate behind the displayed fingerprint, independently
+checks that exactly the selected direct input changed, evaluates the candidate,
+requests its own Polkit authorization, atomically replaces only `flake.lock`,
+and evaluates the installed source again before committing its external
+journal. A failed verification restores the previous lock. The browser never
+receives the candidate content or helper receipt. A committed lock write marks
+every older build stale; a fresh build, dry preview and `test` are mandatory
+before the existing exact-output `switch` gate can be reached.
 
 ## Application catalog, presets, and profiles
 
@@ -549,8 +558,9 @@ NixOS options continue to live in `state.local.json` and `managed.local.nix`;
 per-user Home Manager packages and options belong to the selected configuration
 root's `ncm/user-state.json` and distinct generated user modules. The opt-in
 helper can commit them atomically through the confirmed live source-writing
-flow. The application still has no Home Manager activation or flake-input
-mutation operation.
+flow. The application still has no Home Manager activation and cannot add,
+remove, or rewrite Flake inputs; its only Flake mutation is the exact reviewed
+single-input lock update described above.
 
 See [docs/architecture.md](docs/architecture.md) and
 [docs/roadmap.md](docs/roadmap.md).
@@ -564,6 +574,7 @@ node --check src/nix_control_manager/web/app.js
 node tests/test_web_settings.js
 node tests/test_web_catalog.js
 node tests/test_web_flakes.js
+PYTHONPATH=src python tests/integration_flake_lock_update_real_nix.py
 ```
 
 On Linux, a manual integration check copies `/etc/nixos` to a temporary fixture,

@@ -180,6 +180,39 @@ class HelperDaemonConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(HelperConfigurationError, "separate"):
             HelperDaemonConfig.load(self.config_path)
 
+    def test_schema_v7_adds_only_an_explicit_separate_flake_lock_journal(self) -> None:
+        live = Path(self.temporary.name) / "etc" / "nixos"
+        live.mkdir(parents=True, exist_ok=True)
+        raw = {
+            **{key: value for key, value in self.raw.items() if key != "targets"},
+            "schemaVersion": 7,
+            "targets": [
+                {
+                    "targetId": "control",
+                    "mode": "live-control",
+                    "configurationRoot": str(live),
+                    "journalRoot": None,
+                    "testJournalRoot": str(Path(self.temporary.name) / "test-journal"),
+                    "testTimeoutSeconds": 300,
+                    "homeManagerRoot": None,
+                    "homeManagerJournalRoot": None,
+                    "managedJournalRoot": str(Path(self.temporary.name) / "managed-journal"),
+                    "flakeLockJournalRoot": str(Path(self.temporary.name) / "flake-journal"),
+                    "allowedRelativePaths": ["ncm/state.json", "ncm/packages.nix"],
+                    "flakeTarget": "desktop",
+                }
+            ],
+        }
+        self.write(raw)
+        target = HelperDaemonConfig.load(self.config_path).targets[0]
+        self.assertTrue(target.flake_lock_write_enabled)
+        self.assertEqual(target.flake_lock_journal_root, Path(self.temporary.name) / "flake-journal")
+
+        raw["targets"][0]["flakeLockJournalRoot"] = raw["targets"][0]["managedJournalRoot"]
+        self.write(raw)
+        with self.assertRaisesRegex(HelperConfigurationError, "separate"):
+            HelperDaemonConfig.load(self.config_path)
+
     def test_schema_v2_rejects_writable_live_target_shapes(self) -> None:
         raw = json.loads(json.dumps(self.raw))
         raw["schemaVersion"] = 2

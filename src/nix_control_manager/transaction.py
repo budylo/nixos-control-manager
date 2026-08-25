@@ -692,6 +692,86 @@ def apply_managed_plan_live(
     )
 
 
+def apply_flake_lock_update_live(
+    change: PlannedFileChange,
+    *,
+    root: Path,
+    plan_fingerprint: str,
+    validation: dict[str, Any],
+    journal_root: Path,
+    fault_after_commits: int | None = None,
+    simulate_crash: bool = False,
+) -> TransactionResult:
+    """Persist one exact prevalidated flake.lock candidate without activation."""
+    root = require_live_managed_root(root)
+    if (
+        change.relative_path != "flake.lock"
+        or change.path != root / "flake.lock"
+        or change.action != "modify"
+        or not re.fullmatch(r"[0-9a-f]{64}", plan_fingerprint)
+        or validation.get("status") != "passed"
+        or validation.get("workingCopyRemoved") is not True
+        or validation.get("planFingerprint") != plan_fingerprint
+        or validation.get("writeScope") != ["flake.lock"]
+    ):
+        raise TransactionError("Flake lock transaction exceeds its exact one-file scope")
+    return _apply_validated_changes(
+        root=root,
+        changes=(change,),
+        fingerprint=plan_fingerprint,
+        journal_root=journal_root,
+        transaction_kind="flake-lock-update",
+        fixture_only=False,
+        fault_after_commits=fault_after_commits,
+        simulate_crash=simulate_crash,
+    )
+
+
+def finalize_flake_lock_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    plan_fingerprint: str,
+    verification: dict[str, Any],
+) -> TransactionResult:
+    transaction_root = require_live_managed_root(root)
+    journal, transaction_dir = _transaction_paths(
+        transaction_root, journal_root, transaction_id
+    )
+    lock_descriptor, lock_path = _acquire_lock(journal)
+    try:
+        manifest_path = transaction_dir / _MANIFEST_NAME
+        manifest = _load_manifest(manifest_path)
+        if (
+            manifest.get("configurationRoot") != str(transaction_root)
+            or manifest.get("fixtureOnly", True) is not False
+            or manifest.get("transactionKind") != "flake-lock-update"
+            or manifest.get("planFingerprint") != plan_fingerprint
+            or manifest.get("state") != "awaiting-verification"
+        ):
+            raise TransactionError("Flake lock transaction cannot be finalized")
+        if (
+            verification.get("status") != "passed"
+            or verification.get("workingCopyRemoved") is not True
+            or verification.get("planFingerprint") != plan_fingerprint
+        ):
+            raise TransactionError("Successful installed flake.lock validation is required")
+        _verify_installed_candidates(transaction_root, manifest)
+        manifest["postVerification"] = verification
+        manifest["state"] = "committed"
+        _atomic_json(manifest_path, manifest)
+        return TransactionResult(
+            transaction_id=transaction_id,
+            state="committed",
+            journal_path=manifest_path,
+            changed_files=("flake.lock",),
+            fixture_only=False,
+        )
+    finally:
+        _release_lock(lock_descriptor, lock_path)
+
+
 def _finalize_validated_transaction(
     root: Path,
     *,
@@ -822,6 +902,8 @@ def _rollback_transaction(
     reason: str,
     verification: CandidateValidation | HomeManagerCandidateValidation | None = None,
     fixture_only: bool,
+    transaction_kind: str | None = None,
+    verification_mapping: dict[str, Any] | None = None,
 ) -> TransactionResult:
     transaction_root = _transaction_root(root, fixture_only=fixture_only)
     journal, transaction_dir = _transaction_paths(
@@ -835,13 +917,22 @@ def _rollback_transaction(
             raise TransactionError("Transaction journal targets a different root")
         if manifest.get("fixtureOnly", True) is not fixture_only:
             raise TransactionError("Transaction journal has a different safety mode")
+        if (
+            transaction_kind is not None
+            and manifest.get("transactionKind", "nixos-adoption") != transaction_kind
+        ):
+            raise TransactionError("Transaction journal belongs to a different workflow")
         if manifest.get("state") in {"committed", "rolled-back", "recovered"}:
             raise TransactionError(
                 f"Transaction cannot be rolled back from state {manifest.get('state')}"
             )
         manifest["state"] = "rolling-back"
         manifest["error"] = reason
-        manifest["postVerification"] = _verification_summary(verification)
+        manifest["postVerification"] = (
+            verification_mapping
+            if verification_mapping is not None
+            else _verification_summary(verification)
+        )
         _atomic_json(manifest_path, manifest)
         try:
             _restore_from_manifest(transaction_root, transaction_dir, manifest)
@@ -898,6 +989,7 @@ def rollback_home_manager_live_transaction(
         reason=reason,
         verification=verification,
         fixture_only=False,
+        transaction_kind="home-manager-adoption",
     )
 
 
@@ -917,6 +1009,27 @@ def rollback_managed_live_transaction(
         reason=reason,
         verification=verification,
         fixture_only=False,
+        transaction_kind="managed-state",
+    )
+
+
+def rollback_flake_lock_live_transaction(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str,
+    reason: str,
+    verification: dict[str, Any] | None = None,
+) -> TransactionResult:
+    require_live_managed_root(root)
+    return _rollback_transaction(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        reason=reason,
+        fixture_only=False,
+        transaction_kind="flake-lock-update",
+        verification_mapping=verification,
     )
 
 
@@ -1038,5 +1151,21 @@ def recover_pending_managed_live_transactions(
         journal_root=journal_root,
         transaction_id=transaction_id,
         transaction_kind="managed-state",
+        fixture_only=False,
+    )
+
+
+def recover_pending_flake_lock_live_transactions(
+    root: Path,
+    *,
+    journal_root: Path,
+    transaction_id: str | None = None,
+) -> tuple[TransactionResult, ...]:
+    require_live_managed_root(root)
+    return _recover_pending_transactions(
+        root,
+        journal_root=journal_root,
+        transaction_id=transaction_id,
+        transaction_kind="flake-lock-update",
         fixture_only=False,
     )
