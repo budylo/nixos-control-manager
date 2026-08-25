@@ -288,7 +288,7 @@
     "category": "Мережа",
     "valueType": "boolean",
     "nixosType": "boolean",
-    "default": false,
+    "default": true,
     "risk": "high",
     "service": {"category": "connectivity", "mode": "background", "exposure": "remote-access", "platforms": ["nixos", "wsl"]}
   },
@@ -333,7 +333,15 @@
     "valueType": "boolean",
     "nixosType": "boolean",
     "default": true,
-    "risk": "medium"
+    "risk": "medium",
+    "requires": [
+      {
+        "path": "hardware.graphics.enable32Bit",
+        "requiredValue": true,
+        "when": "true",
+        "message": "Steam у NixOS потребує 32-бітної частини графічного стека."
+      }
+    ]
   },
   {
     "path": "virtualisation.docker.enable",
@@ -498,6 +506,85 @@
     "default": true,
     "risk": "low",
     "service": {"category": "desktop", "mode": "integration", "exposure": "none", "platforms": ["nixos"]}
+  },
+  {
+    "path": "hardware.graphics.enable",
+    "name": "Графічний стек",
+    "description": "Вмикає підтримку OpenGL/Vulkan та апаратного прискорення через стандартний графічний стек NixOS.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium"
+  },
+  {
+    "path": "hardware.graphics.enable32Bit",
+    "name": "32-бітні графічні бібліотеки",
+    "description": "Додає 32-бітні OpenGL/Vulkan-бібліотеки для Steam, Proton та старих ігор на x86_64.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": true,
+    "risk": "medium",
+    "requires": [
+      {
+        "path": "hardware.graphics.enable",
+        "requiredValue": true,
+        "when": "true",
+        "message": "32-бітні бібліотеки потребують увімкненого основного графічного стека."
+      }
+    ]
+  },
+  {
+    "path": "services.xserver.videoDrivers",
+    "name": "Відеодрайвери Xorg/графічного стека",
+    "description": "Явний список назв відеодрайверів, наприклад modesetting, amdgpu або nvidia.",
+    "category": "Драйвери",
+    "valueType": "string-list",
+    "nixosType": "list of string",
+    "default": [],
+    "suggestions": ["modesetting", "amdgpu", "nvidia"],
+    "risk": "high"
+  },
+  {
+    "path": "hardware.nvidia.modesetting.enable",
+    "name": "NVIDIA DRM modesetting",
+    "description": "Вмикає DRM kernel modesetting для коректнішої роботи Wayland і сучасних графічних сесій NVIDIA.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "hardware.nvidia.open",
+    "name": "Відкритий модуль ядра NVIDIA",
+    "description": "Обирає відкритий модуль ядра NVIDIA замість пропрієтарного для сумісних новіших GPU.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "hardware.nvidia.powerManagement.enable",
+    "name": "Керування живленням NVIDIA",
+    "description": "Зберігає та відновлює відеопам’ять під час сну; може бути важливим для ноутбуків NVIDIA.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "high"
+  },
+  {
+    "path": "hardware.enableRedistributableFirmware",
+    "name": "Поширюване бінарне firmware",
+    "description": "Дозволяє включати firmware з ліцензіями, що дозволяють розповсюдження, для GPU, Wi-Fi та інших пристроїв.",
+    "category": "Драйвери",
+    "valueType": "boolean",
+    "nixosType": "boolean",
+    "default": false,
+    "risk": "medium"
   },
   {
     "path": "programs.nix-ld.enable",

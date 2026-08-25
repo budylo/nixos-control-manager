@@ -36,6 +36,7 @@ let
       { name = "bluetooth"; path = [ "hardware" "bluetooth" "enable" ]; }
       { name = "libvirtd"; path = [ "virtualisation" "libvirtd" "enable" ]; }
       { name = "pipewire"; path = [ "services" "pipewire" "enable" ]; }
+      { name = "steam"; path = [ "programs" "steam" "enable" ]; }
       { name = "wsl"; path = [ "wsl" "enable" ]; }
     ]);
   inspect = definition:

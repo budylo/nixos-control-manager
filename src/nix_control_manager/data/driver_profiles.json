@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "amd-graphics",
+      "name": "Графіка AMD",
+      "description": "Вмикає стандартний графічний стек NixOS і явно обирає драйвер amdgpu для сучасних відеокарт AMD.",
+      "category": "graphics",
+      "risk": "medium",
+      "guidance": "recommended",
+      "vendors": ["amd"],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": [],
+      "options": {
+        "hardware.graphics.enable": true,
+        "services.xserver.videoDrivers": ["amdgpu"]
+      },
+      "warnings": [
+        "Старі GPU до сімейства GCN можуть потребувати окремих параметрів ядра, яких цей профіль навмисно не вгадує."
+      ]
+    },
+    {
+      "id": "intel-graphics",
+      "name": "Графіка Intel",
+      "description": "Вмикає стандартний графічний стек і універсальний modesetting-драйвер для інтегрованої графіки Intel.",
+      "category": "graphics",
+      "risk": "medium",
+      "guidance": "recommended",
+      "vendors": ["intel"],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": [],
+      "options": {
+        "hardware.graphics.enable": true,
+        "services.xserver.videoDrivers": ["modesetting"]
+      },
+      "warnings": [
+        "Дуже старі покоління Intel можуть потребувати спеціальних параметрів, які слід перевірити окремо."
+      ]
+    },
+    {
+      "id": "nvidia-proprietary",
+      "name": "NVIDIA · пропрієтарний модуль",
+      "description": "Готує стандартний профіль NVIDIA з DRM modesetting і закритим модулем ядра.",
+      "category": "graphics",
+      "risk": "high",
+      "guidance": "manual",
+      "vendors": ["nvidia"],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": [],
+      "options": {
+        "hardware.graphics.enable": true,
+        "services.xserver.videoDrivers": ["nvidia"],
+        "hardware.nvidia.modesetting.enable": true,
+        "hardware.nvidia.open": false
+      },
+      "warnings": [
+        "Пакунок драйвера має невільну ліцензію і повинен бути дозволений політикою nixpkgs.",
+        "Потрібна перевірка покоління GPU: застарілі моделі можуть вимагати legacy-гілку, яку NCM не обирає автоматично."
+      ]
+    },
+    {
+      "id": "nvidia-open",
+      "name": "NVIDIA · відкритий модуль ядра",
+      "description": "Готує NVIDIA DRM modesetting із відкритим модулем ядра для підтримуваних новіших GPU.",
+      "category": "graphics",
+      "risk": "high",
+      "guidance": "manual",
+      "vendors": ["nvidia"],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": [],
+      "options": {
+        "hardware.graphics.enable": true,
+        "services.xserver.videoDrivers": ["nvidia"],
+        "hardware.nvidia.modesetting.enable": true,
+        "hardware.nvidia.open": true
+      },
+      "warnings": [
+        "Відкритий модуль ядра підтримує не всі покоління NVIDIA; перед build потрібно звірити точну модель GPU.",
+        "Користувацькі бібліотеки NVIDIA все одно можуть мати невільну ліцензію."
+      ]
+    },
+    {
+      "id": "gaming-graphics-32bit",
+      "name": "32-бітні графічні бібліотеки для ігор",
+      "description": "Додає 32-бітну частину графічного стека, яку часто потребують Steam, Proton і старі ігри.",
+      "category": "graphics",
+      "risk": "medium",
+      "guidance": "recommended",
+      "vendors": ["amd", "intel", "nvidia"],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": ["steam"],
+      "options": {
+        "hardware.graphics.enable": true,
+        "hardware.graphics.enable32Bit": true
+      },
+      "warnings": [
+        "Це доповнення до основного GPU-профілю, а не вибір конкретного відеодрайвера."
+      ]
+    },
+    {
+      "id": "redistributable-firmware",
+      "name": "Дозволене до розповсюдження firmware",
+      "description": "Дозволяє NixOS включати поширювані бінарні прошивки, потрібні багатьом GPU, Wi-Fi та іншим пристроям.",
+      "category": "firmware",
+      "risk": "medium",
+      "guidance": "manual",
+      "vendors": [],
+      "platforms": ["nixos"],
+      "formFactors": [],
+      "configurationFlags": [],
+      "options": {
+        "hardware.enableRedistributableFirmware": true
+      },
+      "warnings": [
+        "Профіль змінює дозволений набір firmware за ліцензійною ознакою; він не завантажує прошивку на пристрій самостійно."
+      ]
+    }
+  ]
+}

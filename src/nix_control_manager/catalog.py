@@ -19,13 +19,16 @@ DESKTOP_ENVIRONMENTS = frozenset(
 )
 FORM_FACTORS = frozenset({"laptop", "desktop", "unknown"})
 GPU_VENDORS = frozenset({"amd", "intel", "microsoft", "nvidia", "virtio", "other"})
-CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "wsl"})
+CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "steam", "wsl"})
 SERVICE_CATEGORIES = frozenset(
     {"connectivity", "desktop", "hardware", "maintenance", "security", "virtualization"}
 )
 SERVICE_MODES = frozenset({"background", "integration", "scheduled"})
 SERVICE_EXPOSURES = frozenset({"none", "local-network", "remote-access"})
 SERVICE_PLATFORMS = frozenset({"nixos", "wsl"})
+DRIVER_CATEGORIES = frozenset({"firmware", "graphics"})
+DRIVER_GUIDANCE = frozenset({"manual", "recommended"})
+DRIVER_PLATFORMS = frozenset({"nixos"})
 _SETTING_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+$")
 _PACKAGE_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*$")
 _PRESET_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -421,6 +424,112 @@ def validate_setting_value(path: str, value: Any) -> Any:
     if definition is None:
         return value
     return _validate_known_setting(definition, value, label=f"Option {path}")
+
+
+@lru_cache(maxsize=1)
+def _driver_profiles_by_id() -> dict[str, dict[str, Any]]:
+    resource = files("nix_control_manager").joinpath("data/driver_profiles.json")
+    raw = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or set(raw) != {"schemaVersion", "profiles"}:
+        raise RuntimeError("Driver profiles must use the exact top-level schema")
+    if raw["schemaVersion"] != 1 or not isinstance(raw["profiles"], list):
+        raise RuntimeError("Driver profiles schemaVersion must be 1 and profiles an array")
+    settings = _settings_by_path()
+    definitions: dict[str, dict[str, Any]] = {}
+    required = {
+        "id",
+        "name",
+        "description",
+        "category",
+        "risk",
+        "guidance",
+        "vendors",
+        "platforms",
+        "formFactors",
+        "configurationFlags",
+        "options",
+        "warnings",
+    }
+    for index, item in enumerate(raw["profiles"]):
+        label = f"driver profiles[{index}]"
+        if not isinstance(item, dict) or set(item) != required:
+            raise RuntimeError(f"{label} must use the exact schema")
+        profile_id = item["id"]
+        if (
+            not isinstance(profile_id, str)
+            or not _PRESET_ID.fullmatch(profile_id)
+            or profile_id in definitions
+        ):
+            raise RuntimeError(f"{label}.id is invalid or duplicated")
+        for field in ("name", "description"):
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise RuntimeError(f"{profile_id}.{field} must be non-empty")
+        if item["category"] not in DRIVER_CATEGORIES:
+            raise RuntimeError(f"{profile_id}.category is invalid")
+        if item["risk"] not in {"low", "medium", "high"}:
+            raise RuntimeError(f"{profile_id}.risk is invalid")
+        if item["guidance"] not in DRIVER_GUIDANCE:
+            raise RuntimeError(f"{profile_id}.guidance is invalid")
+        _string_array(
+            item["vendors"],
+            label=f"{profile_id}.vendors",
+            allowed=GPU_VENDORS,
+            allow_empty=True,
+        )
+        _string_array(
+            item["platforms"],
+            label=f"{profile_id}.platforms",
+            allowed=DRIVER_PLATFORMS,
+        )
+        _string_array(
+            item["formFactors"],
+            label=f"{profile_id}.formFactors",
+            allowed=FORM_FACTORS,
+            allow_empty=True,
+        )
+        _string_array(
+            item["configurationFlags"],
+            label=f"{profile_id}.configurationFlags",
+            allowed=CONFIGURATION_FLAGS,
+            allow_empty=True,
+        )
+        warnings = item["warnings"]
+        if (
+            not isinstance(warnings, list)
+            or not warnings
+            or any(not isinstance(warning, str) or not warning.strip() for warning in warnings)
+            or len(warnings) != len(set(warnings))
+        ):
+            raise RuntimeError(f"{profile_id}.warnings must be a unique non-empty string array")
+        options = item["options"]
+        if not isinstance(options, dict) or not options:
+            raise RuntimeError(f"{profile_id}.options must be a non-empty object")
+        for path, value in options.items():
+            if path not in settings:
+                raise RuntimeError(f"{profile_id} references unknown setting {path!r}")
+            try:
+                validate_setting_value(path, value)
+            except ValidationError as error:
+                raise RuntimeError(f"Invalid option in driver profile {profile_id}: {error}") from error
+        for path, value in options.items():
+            for rule in settings[path].get("requires", []):
+                if (
+                    _dependency_rule_active(rule["when"], value)
+                    and options.get(rule["path"]) != rule["requiredValue"]
+                ):
+                    raise RuntimeError(
+                        f"Driver profile {profile_id} must explicitly satisfy "
+                        f"{path} dependency {rule['path']}"
+                    )
+        definitions[profile_id] = item
+    return definitions
+
+
+def load_driver_profiles() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "profiles": deepcopy(list(_driver_profiles_by_id().values())),
+    }
 
 
 def _dependency_rule_active(when: str, value: Any) -> bool:

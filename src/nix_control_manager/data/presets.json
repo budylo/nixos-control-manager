@@ -42,7 +42,7 @@
     "category": "Ігри",
     "symbol": "✣",
     "packages": ["prismlauncher", "heroic", "lutris", "mangohud", "protonup-qt"],
-    "options": {"programs.steam.enable": true}
+    "options": {"programs.steam.enable": true, "hardware.graphics.enable": true, "hardware.graphics.enable32Bit": true}
   },
   {
     "id": "laptop-care",

@@ -146,4 +146,87 @@ assert.deepEqual(
   { total: 2, managed: 1, enabled: 1, pending: 1, attention: 1, notRecommended: 1 },
 );
 
+const driverDefinitions = [
+  { path: "hardware.graphics.enable", name: "Graphics", valueType: "boolean" },
+  { path: "services.xserver.videoDrivers", name: "Drivers", valueType: "string-list" },
+];
+const driverDocument = settings.normalizeDriverProfiles({
+  schemaVersion: 1,
+  profiles: [{
+    id: "amd-graphics",
+    name: "AMD",
+    description: "AMD graphics profile",
+    category: "graphics",
+    risk: "medium",
+    guidance: "recommended",
+    vendors: ["amd"],
+    platforms: ["nixos"],
+    formFactors: [],
+    configurationFlags: [],
+    options: {
+      "hardware.graphics.enable": true,
+      "services.xserver.videoDrivers": ["amdgpu"],
+    },
+    warnings: ["Review old GPUs."],
+  }],
+}, driverDefinitions);
+const amdProfile = driverDocument.profiles[0];
+const amdContext = {
+  configurationFlags: [],
+  gpuVendors: ["amd"],
+  videoDrivers: [],
+  formFactor: "desktop",
+  runtimeHardwareInspected: true,
+};
+assert.equal(settings.driverProfileAssessment(amdProfile, amdContext).status, "recommended");
+assert.equal(
+  settings.driverProfileAssessment(
+    amdProfile,
+    { ...amdContext, gpuVendors: ["amd", "intel"] },
+  ).status,
+  "review",
+);
+assert.equal(
+  settings.driverProfileAssessment(
+    amdProfile,
+    { ...amdContext, configurationFlags: ["wsl"] },
+  ).status,
+  "unsupported",
+);
+assert.equal(
+  settings.driverProfileAssessment(
+    amdProfile,
+    { ...amdContext, gpuVendors: ["nvidia"] },
+  ).status,
+  "not-applicable",
+);
+assert.equal(settings.driverProfileDelta(amdProfile, {}), 2);
+const appliedDriver = settings.applyDriverProfile(
+  amdProfile,
+  { schemaVersion: 1, packages: ["git"], options: { "custom.option": true } },
+);
+assert.deepEqual(appliedDriver, {
+  state: {
+    schemaVersion: 1,
+    packages: ["git"],
+    options: {
+      "custom.option": true,
+      "hardware.graphics.enable": true,
+      "services.xserver.videoDrivers": ["amdgpu"],
+    },
+  },
+  changedOptions: 2,
+});
+assert.deepEqual(
+  settings.driverSummary([amdProfile], appliedDriver.state.options, amdContext),
+  { total: 1, recommended: 1, review: 0, configured: 1 },
+);
+assert.throws(
+  () => settings.normalizeDriverProfiles(
+    { schemaVersion: 1, profiles: [{ ...amdProfile, options: { "unknown.option": true } }] },
+    driverDefinitions,
+  ),
+  /невідома опція/,
+);
+
 console.log("web settings helpers: ok");

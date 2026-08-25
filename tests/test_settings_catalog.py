@@ -83,7 +83,7 @@ class SettingsCatalogTests(unittest.TestCase):
             for definition in catalog
             for rule in definition.get("requires", [])
         ]
-        self.assertEqual(len(rules), 7)
+        self.assertEqual(len(rules), 9)
         self.assertEqual(
             {(owner, rule["path"]) for owner, rule in rules},
             {
@@ -103,6 +103,8 @@ class SettingsCatalogTests(unittest.TestCase):
                 ("hardware.bluetooth.powerOnBoot", "hardware.bluetooth.enable"),
                 ("services.blueman.enable", "hardware.bluetooth.enable"),
                 ("zramSwap.memoryPercent", "zramSwap.enable"),
+                ("hardware.graphics.enable32Bit", "hardware.graphics.enable"),
+                ("programs.steam.enable", "hardware.graphics.enable32Bit"),
             },
         )
         self.assertTrue(all(rule["requiredValue"] is True for _, rule in rules))

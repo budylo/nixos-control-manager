@@ -25,7 +25,16 @@ release name; Python packaging may normalize prereleases to PEP 440 spelling.
   provenance;
 - separate managed, effective-enabled, and pending-change service summaries;
   service actions reuse the existing preview, validation, build, and activation
-  safety boundaries instead of mutating the running system directly.
+  safety boundaries instead of mutating the running system directly;
+- dedicated Drivers page with six typed AMD, Intel, NVIDIA, gaming-graphics,
+  and firmware profiles backed by evaluated configuration and read-only PCI
+  context;
+- fail-closed hardware guidance: unknown GPUs block vendor-specific profiles,
+  hybrid GPUs require manual review, and NixOS-WSL blocks every physical driver
+  profile because Windows owns the device driver;
+- exact proposed/current option values, risk notes, profile filtering, and
+  draft-only profile application through the existing build, test, switch, and
+  rollback gates.
 
 ## [0.1.0-alpha.1] - 2026-08-21
 
@@ -50,8 +59,8 @@ First public alpha release.
 
 - only NixOS flake installation on x86_64 is the supported public alpha path;
 - the GUI is a local browser application rather than a native desktop shell;
-- driver workflows, service-focused UI, Plasma Manager and multi-host
-  adaptation are not implemented;
+- automatic PRIME/hybrid-GPU setup, legacy GPU branch selection, Plasma
+  Manager, and multi-host adaptation are not implemented;
 - Home Manager activation remains intentionally unavailable;
 - release updates are explicit flake-input updates and never run in the
   background.

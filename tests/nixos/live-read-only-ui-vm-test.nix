@@ -228,6 +228,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"catalogGuidance\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"servicesPage\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"servicesNav\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"driversPage\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"driversNav\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -293,6 +295,15 @@ pkgs.testers.runNixOSTest {
     services = [definition for definition in settings_catalog if "service" in definition]
     t.assertEqual(len(services), 23)
     t.assertIn("services.openssh.enable", {definition["path"] for definition in services})
+    driver_profiles = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/driver-profiles"
+    ))
+    t.assertEqual(driver_profiles["schemaVersion"], 1)
+    t.assertEqual(len(driver_profiles["profiles"]), 6)
+    nvidia_open = next(
+        profile for profile in driver_profiles["profiles"] if profile["id"] == "nvidia-open"
+    )
+    t.assertTrue(nvidia_open["options"]["hardware.nvidia.open"])
     compatibility = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
         timeout=long_timeout,

@@ -255,6 +255,49 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .service-badge.target-warning { color: #ffbd82; border-color: rgba(255,151,112,.28); background: rgba(255,151,112,.07); }
 .service-badge.target-ok { color: #93dbbd; border-color: rgba(116,228,177,.2); background: rgba(116,228,177,.05); }
 
+.drivers-hero { min-height: 230px; }
+.driver-orbit .snowflake { color: #c7afff; }
+.driver-overview { border-color: rgba(174,137,255,.2); background: linear-gradient(145deg, rgba(27,29,48,.86), rgba(14,22,34,.9)); }
+.service-summary-card.driver-total strong { color: #c7afff; }
+.driver-safety-note { margin: 12px clamp(28px, 4vw, 58px) 0; padding: 13px 14px; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: center; border: 1px solid rgba(116,228,177,.18); border-radius: 12px; color: #cce5da; background: rgba(116,228,177,.035); }
+.driver-safety-note.attention { border-color: rgba(255,184,108,.24); color: #eed3a8; background: rgba(255,184,108,.045); }
+.driver-safety-note > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #9ee8c7; background: rgba(116,228,177,.08); }
+.driver-safety-note.attention > span { color: #ffd18a; background: rgba(255,184,108,.08); }
+.driver-safety-note strong, .driver-safety-note small { display: block; }
+.driver-safety-note strong { font-size: 10px; }
+.driver-safety-note small { margin-top: 3px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.driver-catalog-heading { margin-bottom: 12px; }
+.driver-filters { margin: 0 clamp(28px, 4vw, 58px) 16px; }
+.driver-catalog { margin: 0 clamp(28px, 4vw, 58px) 30px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.driver-card { min-width: 0; padding: 17px; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, rgba(20,29,43,.94), rgba(12,18,28,.96)); }
+.driver-card.recommended { border-color: rgba(116,228,177,.25); box-shadow: inset 3px 0 rgba(116,228,177,.72); }
+.driver-card.review { border-color: rgba(255,184,108,.24); box-shadow: inset 3px 0 rgba(255,184,108,.62); }
+.driver-card.unsupported, .driver-card.not-applicable, .driver-card.unknown { opacity: .74; }
+.driver-card.configured { border-color: rgba(94,215,255,.32); box-shadow: inset 3px 0 rgba(94,215,255,.78); }
+.driver-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.driver-card h3 { margin: 5px 0 0; font-size: 14px; line-height: 1.3; }
+.driver-card > p { margin: 0; min-height: 40px; color: #8c9bae; font-size: 9px; line-height: 1.55; }
+.driver-category { color: #aa96df; font-size: 7px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.driver-status { flex: 0 0 auto; max-width: 145px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 99px; color: #8998aa; background: rgba(255,255,255,.025); font-size: 7px; font-weight: 800; line-height: 1.25; text-align: center; }
+.driver-status.recommended { border-color: rgba(116,228,177,.23); color: #9ee8c7; background: rgba(116,228,177,.06); }
+.driver-status.review { border-color: rgba(255,184,108,.25); color: #ffd18a; background: rgba(255,184,108,.06); }
+.driver-status.unsupported, .driver-status.not-applicable { border-color: rgba(255,116,116,.2); color: #df9d9d; background: rgba(255,116,116,.04); }
+.driver-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.driver-meta span { padding: 4px 7px; border: 1px solid rgba(132,164,194,.14); border-radius: 99px; color: #8293a7; background: rgba(255,255,255,.025); font-size: 7px; font-weight: 760; }
+.driver-options, .driver-warnings { margin: 0; padding: 0; list-style: none; }
+.driver-options { display: grid; gap: 5px; }
+.driver-options li { padding: 8px 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; border: 1px solid rgba(255,255,255,.055); border-radius: 8px; background: rgba(4,9,15,.3); }
+.driver-options code { overflow-wrap: anywhere; color: #aebed0; font: 8px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.driver-options span { color: #728297; font-size: 7px; line-height: 1.4; text-align: right; }
+.driver-warnings { display: grid; gap: 5px; }
+.driver-warnings li { position: relative; padding-left: 13px; color: #bd9f72; font-size: 8px; line-height: 1.45; }
+.driver-warnings li::before { content: "!"; position: absolute; left: 0; color: #ffd18a; font-weight: 850; }
+.driver-card > footer { margin-top: auto; padding-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid rgba(255,255,255,.055); }
+.driver-card > footer small { max-width: 65%; color: #78899d; font-size: 8px; line-height: 1.5; }
+.driver-card > footer button { min-height: 35px; padding: 0 12px; border: 1px solid rgba(94,215,255,.27); border-radius: 9px; color: #bcefff; background: rgba(94,215,255,.075); font-size: 8px; font-weight: 780; cursor: pointer; }
+.driver-card.recommended > footer button { border-color: rgba(116,228,177,.25); color: #a9edcf; background: rgba(116,228,177,.065); }
+.driver-card > footer button:disabled { opacity: .48; cursor: not-allowed; }
+
 .home-manager-hero { min-height: 230px; }
 .home-manager-status { margin: 18px clamp(28px, 4vw, 58px) 0; padding: 14px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 11px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.025); }
 .home-manager-status.detected { border-color: rgba(116,228,177,.22); background: rgba(116,228,177,.04); }
@@ -385,6 +428,7 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .catalog { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
   .settings-catalog { grid-template-columns: 1fr; }
   .service-summary-cards { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .driver-catalog { grid-template-columns: 1fr; }
   .hero-orbit { right: -5%; opacity: .45; }
   .controls { align-items: stretch; flex-direction: column; }
   .search { flex-basis: 46px; }
@@ -397,7 +441,7 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .topbar { padding: 18px 20px; align-items: flex-start; }
   .top-actions { flex-wrap: wrap; justify-content: end; }
   .change-count { width: 100%; margin: 0; text-align: right; }
-  .hero, .preset-section, .catalog-compatibility-status, .catalog-guidance, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note, .effective-settings-status, .service-overview, .home-manager-status, .home-manager-grid, .home-manager-state, .home-package-toolbar, .generation-status, .generation-list, .generation-boundary { margin-left: 20px; margin-right: 20px; }
+  .hero, .preset-section, .catalog-compatibility-status, .catalog-guidance, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note, .effective-settings-status, .service-overview, .driver-safety-note, .driver-filters, .driver-catalog, .home-manager-status, .home-manager-grid, .home-manager-state, .home-package-toolbar, .generation-status, .generation-list, .generation-boundary { margin-left: 20px; margin-right: 20px; }
   .adoption-banner { margin-left: 20px; margin-right: 20px; }
   .hero { min-height: 245px; padding: 27px; }
   .hero-orbit { display: none; }
@@ -405,6 +449,12 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .service-overview-heading { align-items: flex-start; flex-direction: column; }
   .service-overview-heading > p { text-align: left; }
   .service-summary-cards { grid-template-columns: 1fr 1fr; }
+  .driver-card > header, .driver-card > footer { flex-direction: column; }
+  .driver-card > footer { align-items: stretch; }
+  .driver-card > footer small { max-width: none; }
+  .driver-card > footer button { width: 100%; }
+  .driver-options li { grid-template-columns: 1fr; }
+  .driver-options span { text-align: left; }
   .preset-heading { align-items: start; flex-direction: column; gap: 7px; }
   .preset-heading > p { text-align: left; }
   .preset-catalog { grid-template-columns: 1fr; }

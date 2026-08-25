@@ -18,6 +18,7 @@ import webbrowser
 from .catalog import (
     load_catalog,
     load_catalog_guidance,
+    load_driver_profiles,
     load_presets,
     load_settings_catalog,
 )
@@ -380,6 +381,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/settings-catalog":
                 self._json(load_settings_catalog())
+            elif path == "/api/driver-profiles":
+                self._json(load_driver_profiles())
             elif path == "/api/presets":
                 self._json(load_presets())
             elif path == "/api/effective-settings":

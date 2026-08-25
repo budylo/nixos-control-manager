@@ -24,7 +24,7 @@
           <button id="programsNav" class="nav-item active" type="button"><span>▦</span> Програми</button>
           <button id="settingsNav" class="nav-item" type="button"><span>◇</span> Налаштування</button>
           <button id="servicesNav" class="nav-item" type="button"><span>◎</span> Служби</button>
-          <button class="nav-item" type="button" disabled><span>⌁</span> Драйвери <small>згодом</small></button>
+          <button id="driversNav" class="nav-item" type="button"><span>⌁</span> Драйвери</button>
           <p class="nav-label">Конфігурація</p>
           <button id="homeManagerNav" class="nav-item" type="button"><span>⌂</span> Home Manager</button>
           <button class="nav-item" type="button" disabled><span>❄</span> Flakes <small>згодом</small></button>
@@ -248,6 +248,64 @@
             <span>⌕</span>
             <h3>Служб не знайдено</h3>
             <p>Спробуйте іншу назву або групу.</p>
+          </div>
+        </div>
+
+        <div id="driversPage" class="page-panel" hidden>
+          <section class="hero drivers-hero">
+            <div>
+              <span class="hero-tag">Обладнання без небезпечних здогадок</span>
+              <h2>Драйвери для вашої системи.<br><em>Спочатку докази, потім зміни.</em></h2>
+              <p>NCM читає виробника GPU та активний відеодрайвер без запису до системи. Профіль лише готує перевірені NixOS-опції; build, test і постійна активація залишаються окремими кроками.</p>
+            </div>
+            <div class="hero-orbit driver-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">⌁</span>
+            </div>
+          </section>
+
+          <section id="driverOverview" class="service-overview driver-overview" aria-labelledby="driverOverviewTitle">
+            <div class="service-overview-heading">
+              <div>
+                <p class="section-kicker">Апаратний контекст</p>
+                <h2 id="driverOverviewTitle">Що NCM бачить у цій системі</h2>
+              </div>
+              <p id="driverContextNote">Очікуємо завершення read-only перевірки обладнання.</p>
+            </div>
+            <div id="driverSummaryCards" class="service-summary-cards driver-summary-cards" aria-live="polite"></div>
+          </section>
+
+          <section id="driverHardwareStatus" class="effective-settings-status" aria-live="polite">
+            <span id="driverHardwareIcon" class="effective-settings-icon" aria-hidden="true">⌁</span>
+            <div>
+              <strong id="driverHardwareTitle">Обладнання ще не перевірено</strong>
+              <small id="driverHardwareDetail">Перевірка читає лише обмежені дані /sys та оцінену конфігурацію NixOS.</small>
+            </div>
+            <button id="refreshDrivers" type="button">Оновити дані</button>
+          </section>
+
+          <section id="driverSafetyNote" class="driver-safety-note" aria-live="polite">
+            <span aria-hidden="true">◇</span>
+            <div>
+              <strong id="driverSafetyTitle">Профіль не застосовується автоматично</strong>
+              <p id="driverSafetyDetail">Навіть рекомендований варіант потребує явного вибору, preview і успішного build.</p>
+            </div>
+          </section>
+
+          <section class="catalog-heading driver-catalog-heading">
+            <div>
+              <p class="section-kicker">Керовані профілі</p>
+              <h2 id="driversTitle">Рекомендації для обладнання</h2>
+            </div>
+            <p id="driversCount" class="result-count"></p>
+          </section>
+          <div id="driversFilters" class="filters driver-filters" aria-label="Фільтр драйверних профілів"></div>
+          <section id="driversCatalog" class="driver-catalog" aria-live="polite"></section>
+          <div id="driversEmptyState" class="empty-state" hidden>
+            <span>⌁</span>
+            <h3>Профілів у цій групі немає</h3>
+            <p>Оберіть інший фільтр або оновіть дані обладнання.</p>
           </div>
         </div>
 

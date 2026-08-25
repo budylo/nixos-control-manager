@@ -369,6 +369,7 @@ class ServerTests(unittest.TestCase):
         compatibility = self.request_json("/api/catalog-compatibility")
         presets = self.request_json("/api/presets")
         settings_catalog = self.request_json("/api/settings-catalog")
+        driver_profiles = self.request_json("/api/driver-profiles")
         state = self.request_json("/api/state")
         system = self.request_json("/api/system")
         adoption = self.request_json("/api/adoption")
@@ -388,7 +389,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(compatibility["context"]["formFactor"], "laptop")
         self.assertGreaterEqual(len(presets), 8)
         self.assertIn("gaming-ready", {item["id"] for item in presets})
-        self.assertGreaterEqual(len(settings_catalog), 40)
+        self.assertGreaterEqual(len(settings_catalog), 48)
         self.assertIn("boolean", {item["valueType"] for item in settings_catalog})
         self.assertIn("enum", {item["valueType"] for item in settings_catalog})
         self.assertIn(
@@ -398,6 +399,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(len(services), 23)
         self.assertIn(
             "services.openssh.enable", {item["path"] for item in services}
+        )
+        self.assertEqual(driver_profiles["schemaVersion"], 1)
+        self.assertEqual(len(driver_profiles["profiles"]), 6)
+        self.assertIn(
+            "nvidia-open", {item["id"] for item in driver_profiles["profiles"]}
         )
         self.assertEqual(state["packages"], [])
         self.assertEqual(system["configuration"]["mode"], "missing")
@@ -422,6 +428,8 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="commitHomeApplyButton"', html)
             self.assertIn('id="servicesPage"', html)
             self.assertIn('id="servicesNav"', html)
+            self.assertIn('id="driversPage"', html)
+            self.assertIn('id="driversNav"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
     def test_managed_save_hides_receipt_and_requires_exact_confirmation(self) -> None:

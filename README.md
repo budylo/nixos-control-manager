@@ -416,6 +416,24 @@ only the draft; the existing Nix preview, dependency checks, persistence,
 build-preview, dry analysis, test activation, and exact-output switch gates
 remain unchanged.
 
+### Hardware-aware driver profiles
+
+The Drivers page is the first hardware-focused layer over that same typed
+option model. It combines the evaluated NixOS configuration with read-only PCI
+and form-factor hints, then assesses six curated profiles for AMD, Intel,
+proprietary NVIDIA, NVIDIA's open kernel module, 32-bit gaming graphics, and
+redistributable firmware. Cards show the exact options and current effective
+values before a profile can be added to the draft.
+
+Recommendations are deliberately conservative. Unknown hardware blocks
+vendor-specific profiles, NVIDIA choices require a generation check, and
+multi-GPU systems are downgraded to manual review instead of inventing PRIME
+bus IDs or an offload mode. On NixOS-WSL every physical driver profile is
+blocked because the Windows host owns the GPU driver. Choosing an available
+profile still performs no write or activation: it only updates the ordinary
+draft and must pass the existing preview, dependency, build, test, and switch
+boundaries.
+
 ## Application catalog, presets, and profiles
 
 The graphical catalog contains more than 130 curated package-only entries in

@@ -31,7 +31,7 @@ _MAX_DIAGNOSTIC_CHARS = 8_000
 _DESKTOP_ENVIRONMENTS = frozenset(
     {"plasma", "gnome", "xfce", "cinnamon", "mate", "hyprland", "sway"}
 )
-_CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "wsl"})
+_CONFIGURATION_FLAGS = frozenset({"bluetooth", "libvirtd", "pipewire", "steam", "wsl"})
 _GPU_VENDOR_IDS = {
     "0x1002": "amd",
     "0x10de": "nvidia",

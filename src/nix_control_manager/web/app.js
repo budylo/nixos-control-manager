@@ -77,9 +77,11 @@ const ui = {
   programsNav: document.querySelector("#programsNav"),
   settingsNav: document.querySelector("#settingsNav"),
   servicesNav: document.querySelector("#servicesNav"),
+  driversNav: document.querySelector("#driversNav"),
   programsPage: document.querySelector("#programsPage"),
   settingsPage: document.querySelector("#settingsPage"),
   servicesPage: document.querySelector("#servicesPage"),
+  driversPage: document.querySelector("#driversPage"),
   pageTitle: document.querySelector("#pageTitle"),
   settingsCatalog: document.querySelector("#settingsCatalog"),
   settingsEmptyState: document.querySelector("#settingsEmptyState"),
@@ -103,6 +105,21 @@ const ui = {
   servicesCount: document.querySelector("#servicesCount"),
   servicesCatalog: document.querySelector("#servicesCatalog"),
   servicesEmptyState: document.querySelector("#servicesEmptyState"),
+  driverSummaryCards: document.querySelector("#driverSummaryCards"),
+  driverContextNote: document.querySelector("#driverContextNote"),
+  driverHardwareStatus: document.querySelector("#driverHardwareStatus"),
+  driverHardwareIcon: document.querySelector("#driverHardwareIcon"),
+  driverHardwareTitle: document.querySelector("#driverHardwareTitle"),
+  driverHardwareDetail: document.querySelector("#driverHardwareDetail"),
+  refreshDrivers: document.querySelector("#refreshDrivers"),
+  driverSafetyNote: document.querySelector("#driverSafetyNote"),
+  driverSafetyTitle: document.querySelector("#driverSafetyTitle"),
+  driverSafetyDetail: document.querySelector("#driverSafetyDetail"),
+  driversTitle: document.querySelector("#driversTitle"),
+  driversCount: document.querySelector("#driversCount"),
+  driversFilters: document.querySelector("#driversFilters"),
+  driversCatalog: document.querySelector("#driversCatalog"),
+  driversEmptyState: document.querySelector("#driversEmptyState"),
   topActions: document.querySelector(".top-actions"),
   homeManagerNav: document.querySelector("#homeManagerNav"),
   homeManagerPage: document.querySelector("#homeManagerPage"),
@@ -177,6 +194,7 @@ const model = {
   catalogCompatibility: { status: "loading", packages: [], warnings: [] },
   catalogGuidance: { schemaVersion: 1, alternativeGroups: [], companions: [], contextRecommendations: [] },
   presets: [],
+  driverProfiles: { schemaVersion: 1, profiles: [] },
   settingsCatalog: [],
   state: { schemaVersion: 1, packages: [], options: {} },
   savedPackages: new Set(),
@@ -187,6 +205,7 @@ const model = {
   dependencyIssues: [],
   settingsCategory: "Усі",
   servicesCategory: "Усі",
+  driversCategory: "Усі",
   page: "programs",
   category: "Усі",
   preview: { diff: "", generated: "" },
@@ -297,6 +316,7 @@ function updateChangeState() {
   if (ui.presetCatalog) renderPresets();
   if (ui.catalogGuidance) renderCatalogGuidance();
   if (ui.serviceSummaryCards) renderServiceOverview();
+  if (ui.driverSummaryCards) renderDriverOverview();
 }
 
 function systemCatalog() {
@@ -578,6 +598,7 @@ function presetCard(preset) {
     renderCatalog();
     renderSettings();
     renderServices();
+    renderDrivers();
     updateChangeState();
     const changes = result.addedPackages + result.changedOptions;
     showToast(`${preset.name}: додано або оновлено ${countLabel(changes, "елемент", "елементи", "елементів")}.`);
@@ -644,6 +665,8 @@ async function refreshCatalogCompatibility() {
   renderCatalogGuidance();
   buildServicesFilters();
   renderServices();
+  buildDriversFilters();
+  renderDrivers();
   updateChangeState();
 }
 
@@ -1072,6 +1095,7 @@ async function refreshEffectiveSettings() {
   renderEffectiveSettingsStatus();
   renderSettings();
   renderServices();
+  renderDrivers();
   try {
     model.effectiveSettings = await api("/api/effective-settings");
   } catch (error) {
@@ -1080,6 +1104,7 @@ async function refreshEffectiveSettings() {
   renderEffectiveSettingsStatus();
   renderSettings();
   renderServices();
+  renderDrivers();
 }
 
 function settingControl(definition, managed, card, surface = "settings") {
@@ -1365,6 +1390,245 @@ function renderServices() {
   renderServiceOverview();
 }
 
+const driverCategoryLabels = {
+  firmware: "Firmware",
+  graphics: "Графіка",
+};
+
+const driverVendorLabels = {
+  amd: "AMD",
+  intel: "Intel",
+  microsoft: "Microsoft",
+  nvidia: "NVIDIA",
+  other: "інший виробник",
+  virtio: "VirtIO",
+};
+
+function driverContext() {
+  return model.catalogCompatibility?.context || {};
+}
+
+function driverProfiles() {
+  return model.driverProfiles?.profiles || [];
+}
+
+function driverAssessment(profile) {
+  return NcmSettings.driverProfileAssessment(profile, driverContext());
+}
+
+function buildDriversFilters() {
+  const categories = ["Усі", "Рекомендовані", "Потребують огляду", "graphics", "firmware"];
+  ui.driversFilters.replaceChildren(...categories.map((category) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `filter${category === model.driversCategory ? " active" : ""}`;
+    button.textContent = driverCategoryLabels[category] || category;
+    button.addEventListener("click", () => {
+      model.driversCategory = category;
+      buildDriversFilters();
+      renderDrivers();
+    });
+    return button;
+  }));
+}
+
+function driverMatches(profile) {
+  const status = driverAssessment(profile).status;
+  return model.driversCategory === "Усі"
+    || (model.driversCategory === "Рекомендовані" && status === "recommended")
+    || (model.driversCategory === "Потребують огляду" && ["review", "unknown"].includes(status))
+    || profile.category === model.driversCategory;
+}
+
+function driverOptionRow(path, desired) {
+  const row = document.createElement("li");
+  const definition = model.settingsCatalog.find((item) => item.path === path);
+  const key = document.createElement("code");
+  key.textContent = path;
+  const values = document.createElement("span");
+  const wanted = definition ? actualValueText(definition, desired) : JSON.stringify(desired);
+  const actual = effectiveSetting(path);
+  const actualText = actual?.available && definition
+    ? actualValueText(definition, actual.value)
+    : "не прочитано";
+  values.textContent = `буде: ${wanted} · зараз: ${actualText}`;
+  row.append(key, values);
+  return row;
+}
+
+function driverProfileCard(profile) {
+  const assessment = driverAssessment(profile);
+  const delta = NcmSettings.driverProfileDelta(profile, model.options);
+  const card = document.createElement("article");
+  card.className = `driver-card ${assessment.status}${delta === 0 ? " configured" : ""}`;
+
+  const header = document.createElement("header");
+  const heading = document.createElement("div");
+  const category = document.createElement("span");
+  category.className = "driver-category";
+  category.textContent = driverCategoryLabels[profile.category] || profile.category;
+  const title = document.createElement("h3");
+  title.textContent = profile.name;
+  heading.append(category, title);
+  const status = document.createElement("span");
+  status.className = `driver-status ${assessment.status}`;
+  const statusLabels = {
+    recommended: "відповідає обладнанню",
+    review: "потрібен ручний огляд",
+    "not-applicable": "не для цієї системи",
+    unsupported: "недоступно для WSL",
+    unknown: "обладнання не визначено",
+  };
+  status.textContent = delta === 0 ? "профіль підготовлено" : statusLabels[assessment.status];
+  header.append(heading, status);
+
+  const description = document.createElement("p");
+  description.textContent = profile.description;
+  const metadata = document.createElement("div");
+  metadata.className = "driver-meta";
+  const riskLabels = { low: "низький ризик", medium: "помірний ризик", high: "високий ризик" };
+  const facts = [riskLabels[profile.risk], `${Object.keys(profile.options).length} NixOS-опції`];
+  if (profile.vendors.length) {
+    facts.unshift(profile.vendors.map((vendor) => driverVendorLabels[vendor] || vendor).join(" / "));
+  }
+  for (const text of facts) {
+    const badge = document.createElement("span");
+    badge.textContent = text;
+    metadata.append(badge);
+  }
+
+  const options = document.createElement("ul");
+  options.className = "driver-options";
+  options.append(...Object.entries(profile.options).map(([path, desired]) => (
+    driverOptionRow(path, desired)
+  )));
+
+  const warnings = document.createElement("ul");
+  warnings.className = "driver-warnings";
+  for (const warning of profile.warnings) {
+    const item = document.createElement("li");
+    item.textContent = warning;
+    warnings.append(item);
+  }
+
+  const footer = document.createElement("footer");
+  const explanation = document.createElement("small");
+  const reasonLabels = {
+    "hardware-match": "Виробник GPU збігається з профілем; зміна все одно потребує build.",
+    "hybrid-gpu": "Виявлено кілька GPU. NCM не вгадує PRIME bus IDs або режим offload.",
+    "manual-review": "Точне покоління пристрою неможливо безпечно визначити лише за виробником.",
+    "hardware-unknown": "Read-only перевірка не дала достатньо даних для рекомендації.",
+    "vendor-mismatch": "Виявлений виробник GPU не відповідає цьому профілю.",
+    "feature-mismatch": "Потрібна функція, наприклад Steam, у поточній конфігурації не виявлена.",
+    wsl: "Драйвером GPU керує Windows-хост; Linux-профіль тут не застосовується.",
+  };
+  explanation.textContent = reasonLabels[assessment.reason] || "Потрібна перевірка сумісності.";
+  const button = document.createElement("button");
+  button.type = "button";
+  const blocked = ["unsupported", "not-applicable", "unknown"].includes(assessment.status);
+  button.disabled = blocked || delta === 0;
+  button.textContent = delta === 0
+    ? "Підготовлено"
+    : assessment.status === "recommended" ? "Підготувати профіль" : "Підготувати після огляду";
+  button.addEventListener("click", () => {
+    const result = NcmSettings.applyDriverProfile(profile, currentState());
+    model.options = NcmSettings.normalizeOptions(result.state.options);
+    for (const path of Object.keys(profile.options)) model.settingErrors.delete(path);
+    renderSettings();
+    renderServices();
+    renderDrivers();
+    updateChangeState();
+    showToast(`${profile.name}: підготовлено ${countLabel(
+      result.changedOptions, "опцію", "опції", "опцій",
+    )}. Жодних змін ще не застосовано.`);
+  });
+  footer.append(explanation, button);
+  card.append(header, description, metadata, options, warnings, footer);
+  return card;
+}
+
+function renderDriverOverview() {
+  const profiles = driverProfiles();
+  const summary = NcmSettings.driverSummary(profiles, model.options, driverContext());
+  const facts = NcmSettings.driverTargetFacts(driverContext());
+  const cards = [
+    [String(summary.total), "перевірених профілів", "driver-total"],
+    [String(summary.recommended), "відповідають обладнанню", summary.recommended ? "enabled" : "stable"],
+    [String(summary.review), "потребують огляду", summary.review ? "pending" : "stable"],
+    [String(summary.configured), "підготовлено повністю", summary.configured ? "managed" : "stable"],
+  ].map(([value, label, className]) => {
+    const card = document.createElement("article");
+    card.className = `service-summary-card ${className}`;
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    const small = document.createElement("small");
+    small.textContent = label;
+    card.append(strong, small);
+    return card;
+  });
+  ui.driverSummaryCards.replaceChildren(...cards);
+  const vendors = facts.vendors.map((vendor) => driverVendorLabels[vendor] || vendor);
+  const drivers = facts.configuredDrivers.length ? facts.configuredDrivers.join(", ") : "не задано явно";
+  ui.driverContextNote.textContent = facts.target === "wsl"
+    ? "Ціль: NixOS-WSL · драйвер GPU належить Windows-хосту."
+    : `GPU: ${vendors.length ? vendors.join(" + ") : "не визначено"} · поточний videoDrivers: ${drivers}.`;
+}
+
+function renderDriverHardwareStatus() {
+  const report = model.catalogCompatibility;
+  const facts = NcmSettings.driverTargetFacts(driverContext());
+  ui.refreshDrivers.disabled = report.status === "loading";
+  ui.driverHardwareStatus.classList.toggle("passed", report.status === "passed" && facts.hardwareInspected);
+  ui.driverHardwareStatus.classList.toggle("attention", report.status !== "loading" && (
+    facts.target === "wsl" || !facts.hardwareInspected || facts.hybrid
+  ));
+  if (report.status === "loading") {
+    ui.driverHardwareIcon.textContent = "◎";
+    ui.driverHardwareTitle.textContent = "Читаємо апаратний контекст…";
+    ui.driverHardwareDetail.textContent = "Лише обмежені дані /sys та оцінена конфігурація NixOS.";
+  } else if (facts.target === "wsl") {
+    ui.driverHardwareIcon.textContent = "◇";
+    ui.driverHardwareTitle.textContent = "NixOS-WSL не керує драйвером GPU";
+    ui.driverHardwareDetail.textContent = "Графічний пристрій і драйвер надає Windows-хост; профілі фізичної NixOS заблоковано.";
+  } else if (!facts.hardwareInspected || facts.vendors.length === 0) {
+    ui.driverHardwareIcon.textContent = "?";
+    ui.driverHardwareTitle.textContent = "GPU не вдалося визначити надійно";
+    ui.driverHardwareDetail.textContent = "Vendor-specific профілі залишаються заблокованими; generic firmware доступний лише для ручного огляду.";
+  } else {
+    ui.driverHardwareIcon.textContent = facts.hybrid ? "!" : "✓";
+    ui.driverHardwareTitle.textContent = facts.hybrid
+      ? "Виявлено гібридну або multi-GPU систему"
+      : `Виявлено GPU: ${facts.vendors.map((vendor) => driverVendorLabels[vendor] || vendor).join(" + ")}`;
+    ui.driverHardwareDetail.textContent = facts.hybrid
+      ? "Профілі показані лише як кандидати: PRIME bus IDs і режим offload NCM не вгадує."
+      : "Виробника прочитано з PCI sysfs; точне покоління та підтримка перевіряються build-preview.";
+  }
+  ui.driverSafetyNote.classList.toggle("attention", facts.target === "wsl" || facts.hybrid || !facts.hardwareInspected);
+  ui.driverSafetyTitle.textContent = facts.hybrid
+    ? "Multi-GPU потребує окремого ручного плану"
+    : facts.target === "wsl"
+      ? "Linux-драйвери для цієї WSL-цілі не застосовуються"
+      : "Профіль не застосовується автоматично";
+  ui.driverSafetyDetail.textContent = facts.hybrid
+    ? "Поточний етап не генерує PRIME bus IDs, offload або reverse-sync — помилковий здогад тут небезпечний."
+    : facts.target === "wsl"
+      ? "NCM показує контекст, але не пропонує змін для драйверів фізичної NixOS."
+      : "Навіть рекомендований варіант лише змінює чернетку й потребує preview, build та окремої активації.";
+}
+
+function renderDrivers() {
+  const profiles = driverProfiles();
+  const visible = profiles.filter(driverMatches);
+  ui.driversCatalog.replaceChildren(...visible.map(driverProfileCard));
+  ui.driversEmptyState.hidden = visible.length > 0;
+  ui.driversCount.textContent = `${visible.length} із ${profiles.length}`;
+  ui.driversTitle.textContent = model.driversCategory === "Усі"
+    ? "Рекомендації для обладнання"
+    : (driverCategoryLabels[model.driversCategory] || model.driversCategory);
+  renderDriverOverview();
+  renderDriverHardwareStatus();
+}
+
 function homeUserKey(user) {
   return `${user.integration}\u0000${user.name}`;
 }
@@ -1554,17 +1818,20 @@ function showPage(page) {
   model.page = page;
   const settings = page === "settings";
   const services = page === "services";
+  const drivers = page === "drivers";
   const homeManager = page === "home-manager";
   const generations = page === "generations";
-  const programs = !settings && !services && !homeManager && !generations;
+  const programs = !settings && !services && !drivers && !homeManager && !generations;
   ui.programsPage.hidden = !programs;
   ui.settingsPage.hidden = !settings;
   ui.servicesPage.hidden = !services;
+  ui.driversPage.hidden = !drivers;
   ui.homeManagerPage.hidden = !homeManager;
   ui.generationsPage.hidden = !generations;
   ui.programsNav.classList.toggle("active", programs);
   ui.settingsNav.classList.toggle("active", settings);
   ui.servicesNav.classList.toggle("active", services);
+  ui.driversNav.classList.toggle("active", drivers);
   ui.homeManagerNav.classList.toggle("active", homeManager);
   ui.generationsNav.classList.toggle("active", generations);
   ui.topActions.hidden = homeManager || generations;
@@ -1574,9 +1841,12 @@ function showPage(page) {
     ? "Home Manager"
     : services
     ? "Служби"
+    : drivers
+    ? "Драйвери"
     : (settings ? "Налаштування" : "Програми");
   if (settings) renderSettings();
   if (services) renderServices();
+  if (drivers) renderDrivers();
   if (homeManager) renderHomeManager();
   if (generations) renderGenerations();
 }
@@ -2901,11 +3171,12 @@ async function initialize() {
       ui.saveButton.title = "Локальне збереження вимкнено в режимі лише читання";
       ui.drawerSaveButton.title = "Локальне збереження вимкнено в режимі лише читання";
     }
-    const [catalog, guidance, presets, settingsCatalog, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
+    const [catalog, guidance, presets, settingsCatalog, driverProfilesRaw, state, system, adoption, helper, buildPreview, homeManager, homeBuildPreview, generations] = await Promise.all([
       api("/api/catalog"),
       api("/api/catalog-guidance"),
       api("/api/presets"),
       api("/api/settings-catalog"),
+      api("/api/driver-profiles"),
       api("/api/state"),
       api("/api/system"),
       api("/api/adoption"),
@@ -2919,6 +3190,10 @@ async function initialize() {
     model.catalogGuidance = NcmCatalog.normalizeCatalogGuidance(guidance);
     model.presets = presets;
     model.settingsCatalog = settingsCatalog;
+    model.driverProfiles = NcmSettings.normalizeDriverProfiles(
+      driverProfilesRaw,
+      settingsCatalog,
+    );
     model.state = state;
     model.options = NcmSettings.normalizeOptions(JSON.parse(JSON.stringify(state.options || {})));
     model.savedOptions = JSON.parse(JSON.stringify(model.options));
@@ -2952,10 +3227,12 @@ async function initialize() {
     buildFilters();
     buildSettingsFilters();
     buildServicesFilters();
+    buildDriversFilters();
     renderPresets();
     renderCatalog();
     renderSettings();
     renderServices();
+    renderDrivers();
     renderHomeManager();
     renderGenerations();
     updateChangeState();
@@ -2977,6 +3254,7 @@ ui.homeManagerPackageSearch.addEventListener("input", renderHomeManagerPackages)
 ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.servicesNav.addEventListener("click", () => showPage("services"));
+ui.driversNav.addEventListener("click", () => showPage("drivers"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.generationsNav.addEventListener("click", () => showPage("generations"));
 ui.refreshGenerations.addEventListener("click", refreshGenerations);
@@ -2998,6 +3276,9 @@ ui.commitHomeApplyButton.addEventListener("click", commitHomeApply);
 ui.homeApplyConfirmation.addEventListener("change", updateHomeApplyControls);
 ui.refreshEffectiveSettings.addEventListener("click", refreshEffectiveSettings);
 ui.refreshServices.addEventListener("click", refreshEffectiveSettings);
+ui.refreshDrivers.addEventListener("click", () => {
+  void Promise.all([refreshCatalogCompatibility(), refreshEffectiveSettings()]);
+});
 ui.previewButton.addEventListener("click", openPreview);
 ui.closePreview.addEventListener("click", closePreview);
 ui.backdrop.addEventListener("click", closePreview);
@@ -3025,7 +3306,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.homePreviewDrawer.classList.contains("open")) closeHomePreview();
   if (event.key === "Escape" && ui.homeAdoptionDrawer.classList.contains("open")) closeHomeAdoption();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
-  const activeSearch = model.page === "generations"
+  const activeSearch = ["drivers", "generations"].includes(model.page)
     ? null
     : model.page === "settings"
     ? ui.settingsSearch

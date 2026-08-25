@@ -172,6 +172,169 @@
     return { total: services.length, managed, enabled, pending, attention, notRecommended };
   }
 
+  function normalizeDriverProfiles(document, definitions) {
+    if (!document || typeof document !== "object" || Array.isArray(document)) {
+      throw new Error("Каталог драйверів має бути об’єктом.");
+    }
+    if (document.schemaVersion !== 1 || !Array.isArray(document.profiles)) {
+      throw new Error("Непідтримувана версія каталогу драйверів.");
+    }
+    const known = new Map((definitions || []).map((definition) => [definition.path, definition]));
+    const ids = new Set();
+    const categories = new Set(["firmware", "graphics"]);
+    const guidance = new Set(["manual", "recommended"]);
+    const risks = new Set(["low", "medium", "high"]);
+    const vendors = new Set(["amd", "intel", "microsoft", "nvidia", "virtio", "other"]);
+    const factors = new Set(["laptop", "desktop", "unknown"]);
+    const flags = new Set(["bluetooth", "libvirtd", "pipewire", "steam", "wsl"]);
+    const expected = [
+      "category", "configurationFlags", "description", "formFactors", "guidance",
+      "id", "name", "options", "platforms", "risk", "vendors", "warnings",
+    ];
+    const stringArray = (value, allowed, label, allowEmpty = true) => {
+      if (
+        !Array.isArray(value)
+        || (!allowEmpty && value.length === 0)
+        || value.some((item) => typeof item !== "string" || !item || !allowed.has(item))
+        || new Set(value).size !== value.length
+      ) throw new Error(`${label}: некоректний список.`);
+      return [...value];
+    };
+    const profiles = document.profiles.map((raw, index) => {
+      if (
+        !raw
+        || typeof raw !== "object"
+        || Array.isArray(raw)
+        || JSON.stringify(Object.keys(raw).sort()) !== JSON.stringify(expected)
+      ) throw new Error(`Профіль драйвера ${index}: некоректна схема.`);
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(raw.id) || ids.has(raw.id)) {
+        throw new Error(`Профіль драйвера ${index}: некоректний або повторний id.`);
+      }
+      ids.add(raw.id);
+      if (
+        typeof raw.name !== "string" || !raw.name.trim()
+        || typeof raw.description !== "string" || !raw.description.trim()
+        || !categories.has(raw.category)
+        || !guidance.has(raw.guidance)
+        || !risks.has(raw.risk)
+      ) throw new Error(`${raw.id}: некоректні метадані.`);
+      if (!raw.options || typeof raw.options !== "object" || Array.isArray(raw.options)) {
+        throw new Error(`${raw.id}: опції мають бути об’єктом.`);
+      }
+      const normalizedOptions = {};
+      for (const [path, value] of Object.entries(raw.options)) {
+        const definition = known.get(path);
+        if (!definition) throw new Error(`${raw.id}: невідома опція ${path}.`);
+        const normalized = parseEditorValue(definition, formatEditorValue(definition, value));
+        if (JSON.stringify(normalized) !== JSON.stringify(value)) {
+          throw new Error(`${raw.id}: некоректне значення ${path}.`);
+        }
+        normalizedOptions[path] = normalized;
+      }
+      if (Object.keys(normalizedOptions).length === 0) {
+        throw new Error(`${raw.id}: профіль не містить опцій.`);
+      }
+      if (!Array.isArray(raw.warnings) || raw.warnings.length === 0
+        || raw.warnings.some((warning) => typeof warning !== "string" || !warning.trim())) {
+        throw new Error(`${raw.id}: потрібне хоча б одне застереження.`);
+      }
+      return {
+        ...raw,
+        vendors: stringArray(raw.vendors, vendors, `${raw.id}.vendors`),
+        platforms: stringArray(raw.platforms, new Set(["nixos"]), `${raw.id}.platforms`, false),
+        formFactors: stringArray(raw.formFactors, factors, `${raw.id}.formFactors`),
+        configurationFlags: stringArray(
+          raw.configurationFlags, flags, `${raw.id}.configurationFlags`,
+        ),
+        options: normalizedOptions,
+        warnings: [...raw.warnings],
+      };
+    });
+    return { schemaVersion: 1, profiles };
+  }
+
+  function driverTargetFacts(context) {
+    const flags = Array.isArray(context?.configurationFlags)
+      ? context.configurationFlags : [];
+    const vendors = Array.isArray(context?.gpuVendors) ? unique(context.gpuVendors) : [];
+    return {
+      target: flags.includes("wsl") ? "wsl" : "nixos",
+      vendors,
+      configuredDrivers: Array.isArray(context?.videoDrivers)
+        ? unique(context.videoDrivers) : [],
+      formFactor: context?.formFactor || "unknown",
+      hardwareInspected: context?.runtimeHardwareInspected === true,
+      hybrid: vendors.length > 1,
+      configurationFlags: flags,
+    };
+  }
+
+  function driverProfileAssessment(profile, context) {
+    const facts = driverTargetFacts(context);
+    if (facts.target !== "nixos" || !(profile?.platforms || []).includes("nixos")) {
+      return { status: "unsupported", reason: "wsl", facts };
+    }
+    const requiredVendors = profile?.vendors || [];
+    if (requiredVendors.length) {
+      if (!facts.hardwareInspected || facts.vendors.length === 0) {
+        return { status: "unknown", reason: "hardware-unknown", facts };
+      }
+      if (!requiredVendors.some((vendor) => facts.vendors.includes(vendor))) {
+        return { status: "not-applicable", reason: "vendor-mismatch", facts };
+      }
+    }
+    const requiredFactors = profile?.formFactors || [];
+    if (requiredFactors.length && !requiredFactors.includes(facts.formFactor)) {
+      return {
+        status: facts.formFactor === "unknown" ? "unknown" : "not-applicable",
+        reason: facts.formFactor === "unknown" ? "hardware-unknown" : "form-factor-mismatch",
+        facts,
+      };
+    }
+    const requiredFlags = profile?.configurationFlags || [];
+    if (requiredFlags.some((flag) => !facts.configurationFlags.includes(flag))) {
+      return { status: "not-applicable", reason: "feature-mismatch", facts };
+    }
+    if (facts.hybrid && profile?.category === "graphics") {
+      return { status: "review", reason: "hybrid-gpu", facts };
+    }
+    if (profile?.guidance === "manual") {
+      return { status: "review", reason: "manual-review", facts };
+    }
+    return { status: "recommended", reason: "hardware-match", facts };
+  }
+
+  function driverProfileDelta(profile, options) {
+    return Object.entries(profile?.options || {}).filter(
+      ([path, value]) => JSON.stringify((options || {})[path]) !== JSON.stringify(value),
+    ).length;
+  }
+
+  function applyDriverProfile(profile, state) {
+    const current = state || { schemaVersion: 1, packages: [], options: {} };
+    const options = normalizeOptions({ ...(current.options || {}), ...(profile?.options || {}) });
+    return {
+      state: {
+        schemaVersion: current.schemaVersion || 1,
+        packages: [...(current.packages || [])],
+        options,
+      },
+      changedOptions: driverProfileDelta(profile, current.options || {}),
+    };
+  }
+
+  function driverSummary(profiles, options, context) {
+    const counts = { total: 0, recommended: 0, review: 0, configured: 0 };
+    for (const profile of profiles || []) {
+      counts.total += 1;
+      const status = driverProfileAssessment(profile, context).status;
+      if (status === "recommended") counts.recommended += 1;
+      if (status === "review") counts.review += 1;
+      if (driverProfileDelta(profile, options) === 0) counts.configured += 1;
+    }
+    return counts;
+  }
+
   const api = {
     normalizeOptions,
     optionChangeCount,
@@ -181,6 +344,12 @@
     serviceDefinitions,
     serviceTargetStatus,
     serviceSummary,
+    normalizeDriverProfiles,
+    driverTargetFacts,
+    driverProfileAssessment,
+    driverProfileDelta,
+    applyDriverProfile,
+    driverSummary,
   };
   root.NcmSettings = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
