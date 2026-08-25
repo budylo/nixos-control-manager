@@ -22,6 +22,19 @@
   const targetStatuses = new Set([
     "invalid", "missing", "not-applicable", "selected", "unverified",
   ]);
+  const previewStatuses = new Set([
+    "analyzing", "blocked", "cancelled", "cancelling", "cleaning", "failed",
+    "idle", "no-change", "passed", "preparing", "queued", "running", "unavailable",
+  ]);
+  const previewKeys = [
+    "activationEnabled", "after", "applyEnabled", "before", "candidateOnlyChanges",
+    "cancelRequested", "cancellable", "changedNodeCount", "changedNodes", "command",
+    "createdAt", "durationMs", "effectiveUid", "error", "events", "exitCode",
+    "finishedAt", "inputName", "jobId", "lockDiff", "logsTruncated", "networkRequired",
+    "nextCursor", "nixStoreWriteExpected", "privileged", "schemaVersion", "sourceFingerprint",
+    "sourceUnchanged", "sourceWriteEnabled", "startedAt", "status", "temporaryCopyRemoved",
+    "temporaryLockWriteEnabled", "timedOut",
+  ];
 
   function exactKeys(value, expected) {
     return value && typeof value === "object" && !Array.isArray(value)
@@ -34,10 +47,10 @@
     return value;
   }
 
-  function stringList(value, { maxItems = 512, maxLength = 128 } = {}) {
+  function stringList(value, { maxItems = 512, maxLength = 128, unique = true } = {}) {
     if (!Array.isArray(value) || value.length > maxItems) throw new Error("Некоректний список у звіті Flakes");
     const result = value.map((item) => string(item, { max: maxLength }));
-    if (new Set(result).size !== result.length) throw new Error("Повторювані значення у звіті Flakes");
+    if (unique && new Set(result).size !== result.length) throw new Error("Повторювані значення у звіті Flakes");
     return result;
   }
 
@@ -109,6 +122,119 @@
     };
   }
 
+  function nullableNumber(value, label) {
+    if (value === null) return null;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Некоректне поле ${label} у preview Flakes`);
+    }
+    return value;
+  }
+
+  function normalizePreviewEvent(value) {
+    if (!exactKeys(value, ["message", "sequence", "stream", "timestamp"])
+      || !Number.isInteger(value.sequence) || value.sequence < 1) {
+      throw new Error("Некоректна подія preview Flakes");
+    }
+    return {
+      sequence: value.sequence,
+      timestamp: nullableNumber(value.timestamp, "timestamp"),
+      stream: string(value.stream, { max: 32 }),
+      message: string(value.message, { max: 1000 }),
+    };
+  }
+
+  function normalizeFlakeUpdatePreview(value) {
+    if (!exactKeys(value, previewKeys) || value.schemaVersion !== 1
+      || !previewStatuses.has(value.status)) {
+      throw new Error("Некоректна схема update-preview Flakes");
+    }
+    if (value.networkRequired !== true || value.sourceWriteEnabled !== false
+      || value.temporaryLockWriteEnabled !== true || value.nixStoreWriteExpected !== true
+      || value.applyEnabled !== false || value.activationEnabled !== false) {
+      throw new Error("Update-preview Flakes порушує preview-only межу");
+    }
+    for (const key of [
+      "sourceUnchanged", "candidateOnlyChanges", "temporaryCopyRemoved", "cancelRequested",
+      "timedOut", "cancellable", "privileged", "logsTruncated",
+    ]) {
+      if (typeof value[key] !== "boolean") throw new Error(`Некоректне поле ${key} у preview Flakes`);
+    }
+    const idle = value.status === "idle";
+    const jobId = string(value.jobId, { nullable: true, max: 24 });
+    const inputName = string(value.inputName, { nullable: true, max: 128 });
+    if (idle ? (jobId !== null || inputName !== null) : !/^[0-9a-f]{24}$/.test(jobId || "")) {
+      throw new Error("Некоректний ідентифікатор update-preview Flakes");
+    }
+    if (!idle && !/^[A-Za-z0-9_-]{1,128}$/.test(inputName || "")) {
+      throw new Error("Некоректний input update-preview Flakes");
+    }
+    if (value.exitCode !== null && !Number.isInteger(value.exitCode)) {
+      throw new Error("Некоректний exit code update-preview Flakes");
+    }
+    if (value.effectiveUid !== null && (!Number.isInteger(value.effectiveUid) || value.effectiveUid < 0)) {
+      throw new Error("Некоректний UID update-preview Flakes");
+    }
+    if (!Number.isInteger(value.nextCursor) || value.nextCursor < 0
+      || !Number.isInteger(value.changedNodeCount) || value.changedNodeCount < 0) {
+      throw new Error("Некоректний лічильник update-preview Flakes");
+    }
+    const changedNodes = stringList(value.changedNodes);
+    if (changedNodes.length !== value.changedNodeCount) {
+      throw new Error("Кількість змінених lock-вузлів не збігається");
+    }
+    const command = stringList(value.command, { maxItems: 32, maxLength: 4096, unique: false });
+    const events = Array.isArray(value.events) && value.events.length <= 256
+      ? value.events.map(normalizePreviewEvent)
+      : null;
+    if (!events || new Set(events.map((event) => event.sequence)).size !== events.length) {
+      throw new Error("Некоректний журнал update-preview Flakes");
+    }
+    let error = null;
+    if (value.error !== null) {
+      if (!exactKeys(value.error, ["code", "message"])) throw new Error("Некоректна помилка preview Flakes");
+      error = {
+        code: string(value.error.code, { max: 128 }),
+        message: string(value.error.message, { max: 4096 }),
+      };
+    }
+    const before = value.before === null ? null : normalizeInput(value.before);
+    const after = value.after === null ? null : normalizeInput(value.after);
+    const sourceFingerprint = string(value.sourceFingerprint, { nullable: true, max: 64 });
+    if (sourceFingerprint !== null && !/^[0-9a-f]{64}$/.test(sourceFingerprint)) {
+      throw new Error("Некоректний fingerprint update-preview Flakes");
+    }
+    if (["passed", "no-change"].includes(value.status)
+      && (!before || !after || value.exitCode !== 0 || value.sourceUnchanged !== true
+        || value.candidateOnlyChanges !== true || value.temporaryCopyRemoved !== true)) {
+      throw new Error("Завершений update-preview Flakes не підтвердив безпечну межу");
+    }
+    const lockDiff = string(value.lockDiff, { max: 128000 });
+    if (value.status === "passed" && !lockDiff) throw new Error("Update-preview не містить lock diff");
+    if (value.status === "no-change" && lockDiff) throw new Error("No-change preview містить неочікуваний diff");
+    return {
+      ...value,
+      jobId,
+      inputName,
+      createdAt: nullableNumber(value.createdAt, "createdAt"),
+      startedAt: nullableNumber(value.startedAt, "startedAt"),
+      finishedAt: nullableNumber(value.finishedAt, "finishedAt"),
+      durationMs: nullableNumber(value.durationMs, "durationMs"),
+      command,
+      before,
+      after,
+      changedNodes,
+      lockDiff,
+      sourceFingerprint,
+      error,
+      events,
+    };
+  }
+
+  function isUpdatePreviewEligible(input) {
+    return Boolean(input?.locked && (!input.follows || input.follows.length === 0)
+      && !new Set(["follows", "indirect", "path", "unknown"]).has(input.type));
+  }
+
   function flakeSummary(inspection) {
     const inputs = inspection?.inputs || [];
     const targets = inspection?.nixosConfigurations || [];
@@ -121,5 +247,10 @@
     };
   }
 
-  return { normalizeFlakeInspection, flakeSummary };
+  return {
+    normalizeFlakeInspection,
+    normalizeFlakeUpdatePreview,
+    isUpdatePreviewEligible,
+    flakeSummary,
+  };
 }));

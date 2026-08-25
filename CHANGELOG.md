@@ -12,6 +12,14 @@ release name; Python packaging may normalize prereleases to PEP 440 spelling.
 - fail-closed Flake inspection: missing or invalid lock files prevent Nix
   evaluation, while valid configurations are evaluated offline without lock
   writes, input updates, network access, or import-from-derivation;
+- explicit single-input Flake update preview in a disposable configuration
+  copy, with source fingerprint/race checks, fixed no-shell Nix arguments,
+  cancellation and timeout, strict candidate scope validation, changed-node
+  reporting, and an exact before/after `flake.lock` diff;
+- preview-only Flake GUI boundary: the network and Nix store are used only on
+  request, while the original configuration, real lock file, system profile,
+  and active system remain unchanged and no raw resolver output reaches the
+  browser;
 - read-only package compatibility inspection against the `pkgs` instance of the
   selected NixOS configuration;
 - per-package explanations for missing attributes, unsupported platforms,
@@ -67,7 +75,7 @@ First public alpha release.
 - automatic PRIME/hybrid-GPU setup, legacy GPU branch selection, Plasma
   Manager, and multi-host adaptation are not implemented;
 - Home Manager activation remains intentionally unavailable;
-- the Flakes page is inspection-only; input update previews and confirmed
-  lock-file changes are not implemented yet;
+- the Flakes page can inspect and preview one direct input update, but confirmed
+  writes to the real lock file are not implemented yet;
 - release updates, when implemented, will be explicit flake-input updates and
   will never run in the background.

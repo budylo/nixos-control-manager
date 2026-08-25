@@ -256,6 +256,18 @@ copy. Its result deliberately sets configuration write, activation, test,
 switch, flake-input mutation, and lock-file write capabilities to false; the
 only expected mutation is ordinary unprivileged Nix store population.
 
+The Flake update-preview API is another isolated ownership domain. It accepts
+only one strict direct-input name and refuses root execution, path/indirect/
+follows inputs, missing or non-regular Flake files, unsafe lock data, oversized
+source trees, and concurrent source changes. The worker runs a fixed
+single-input `nix flake update` vector in a disposable copy with registries,
+flake-provided configuration, and import-from-derivation disabled. It discards
+raw command output, permits normal network and Nix store activity, and treats a
+change outside the candidate `flake.lock` as failure. The original tree is
+fingerprinted before and after execution; only a cleaned-up, strictly parsed
+before/after lock diff reaches the token-bound local API. There is no source
+write, apply, build, test, switch, or helper capability in this phase.
+
 The transaction workflow does not weaken that public contract. Fixture
 writes require the exact transaction marker and reject `/etc/nixos`,
 `/etc/home-manager`, and the resolved default `~/.config/home-manager`. The

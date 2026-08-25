@@ -137,6 +137,16 @@ const ui = {
   flakeWarnings: document.querySelector("#flakeWarnings"),
   flakeBoundaryTitle: document.querySelector("#flakeBoundaryTitle"),
   flakeBoundaryDetail: document.querySelector("#flakeBoundaryDetail"),
+  flakeUpdatePreview: document.querySelector("#flakeUpdatePreview"),
+  flakeUpdatePreviewTitle: document.querySelector("#flakeUpdatePreviewTitle"),
+  flakeUpdatePreviewDetail: document.querySelector("#flakeUpdatePreviewDetail"),
+  flakeUpdateStatusBadge: document.querySelector("#flakeUpdateStatusBadge"),
+  cancelFlakeUpdatePreview: document.querySelector("#cancelFlakeUpdatePreview"),
+  flakeUpdateError: document.querySelector("#flakeUpdateError"),
+  flakeUpdateBefore: document.querySelector("#flakeUpdateBefore"),
+  flakeUpdateAfter: document.querySelector("#flakeUpdateAfter"),
+  flakeUpdateChangedNodes: document.querySelector("#flakeUpdateChangedNodes"),
+  flakeUpdateDiff: document.querySelector("#flakeUpdateDiff code"),
   topActions: document.querySelector(".top-actions"),
   homeManagerNav: document.querySelector("#homeManagerNav"),
   homeManagerPage: document.querySelector("#homeManagerPage"),
@@ -256,6 +266,9 @@ const model = {
   managedApplyIntent: null,
   generations: { status: "loading", generations: [], warnings: [] },
   flakes: null,
+  flakeUpdatePreview: null,
+  flakeUpdateStarting: null,
+  flakeUpdatePollingJobId: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -1886,6 +1899,184 @@ function localizedFlakeWarning(warning) {
   return fixed[warning] || warning;
 }
 
+function localizedFlakeUpdateError(error) {
+  if (!error) return "";
+  const messages = {
+    "privileged-execution": "Preview навмисно не запускається від root. Відкрийте NCM як звичайний користувач.",
+    "missing-flake-files": "Для preview потрібні звичайні файли flake.nix і flake.lock.",
+    "unsafe-lock": "Поточний flake.lock спочатку має пройти сувору локальну перевірку.",
+    "unknown-input": "Обраний input більше не є прямою закріпленою залежністю.",
+    "unsupported-input": "Цей тип input не можна безпечно перевірити окремо.",
+    "nix-unavailable": "Команда Nix недоступна в поточному середовищі.",
+    "source-race": "Конфігурація змінилася під час створення тимчасової копії. Запустіть preview ще раз.",
+    "preview-timed-out": "Перевірка не завершилася у відведений час.",
+    "update-failed": "Nix не зміг обчислити оновлення цього input.",
+    "source-changed": "Оригінальна конфігурація змінилася під час preview; результат відхилено.",
+    "candidate-scope-changed": "Тимчасова команда торкнулася не лише flake.lock; результат відхилено.",
+    "invalid-candidate-lock": "Отриманий тимчасовий lock не пройшов сувору перевірку.",
+    "direct-input-shape-changed": "Оновлення несподівано змінило структуру прямих inputs; результат відхилено.",
+    "other-direct-input-changed": "Оновлення торкнулося іншого прямого input; результат відхилено.",
+    "preview-io-error": "Не вдалося безпечно прочитати або скопіювати Flake.",
+    "preview-boundary-error": "Конфігурація виходить за безпечні межі цього preview.",
+    "incomplete-preview": "Preview завершився без повного підтвердження меж безпеки.",
+    "internal-error": "Сталася внутрішня помилка preview.",
+  };
+  return messages[error.code] || error.message;
+}
+
+function flakeRevisionView(input, placeholder) {
+  const container = document.createElement("div");
+  container.className = `flake-update-revision${input ? "" : " empty"}`;
+  if (!input) {
+    container.textContent = placeholder;
+    return container;
+  }
+  const title = document.createElement("strong");
+  title.textContent = input.source || input.name;
+  const revision = document.createElement("code");
+  revision.textContent = input.revision || "ревізію не вказано";
+  const details = document.createElement("dl");
+  for (const [term, value] of [
+    ["Гілка", input.ref || "—"],
+    ["Дата", input.lastModifiedDate || "—"],
+    ["NAR hash", shortFlakeValue(input.narHash, 22)],
+  ]) {
+    const dt = document.createElement("dt");
+    dt.textContent = term;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    details.append(dt, dd);
+  }
+  container.append(title, revision, details);
+  return container;
+}
+
+function renderFlakeUpdatePreview() {
+  const preview = model.flakeUpdatePreview;
+  const idle = !preview || preview.status === "idle";
+  ui.flakeUpdatePreview.hidden = idle;
+  if (idle) return;
+  const active = activeBuildStatuses.has(preview.status);
+  const copies = {
+    queued: ["Preview поставлено в чергу", "Готуємо ізольовану перевірку без запису в конфігурацію."],
+    preparing: ["Перевіряємо межі безпеки", "Читаємо lock і створюємо контрольовану тимчасову копію."],
+    running: ["Шукаємо оновлення в мережі", "Nix змінює flake.lock лише всередині тимчасової копії."],
+    analyzing: ["Перевіряємо отриманий lock", "Порівнюємо джерело, прямі inputs і точний diff."],
+    cancelling: ["Скасовуємо preview", "Зупиняємо Nix і прибираємо тимчасову копію."],
+    cleaning: ["Прибираємо тимчасову копію", "Результат з’явиться лише після підтвердженого очищення."],
+    passed: ["Оновлення знайдено", "Нижче показано точний результат для тимчасового flake.lock."],
+    "no-change": ["Input уже актуальний", "Тимчасовий flake.lock повністю збігається з поточним."],
+    cancelled: ["Preview скасовано", "Тимчасову копію прибрано; конфігурація не змінювалася."],
+    blocked: ["Preview безпечно зупинено", "Одна з обов’язкових меж безпеки не виконана."],
+    unavailable: ["Preview недоступний", "У цьому середовищі немає потрібного локального інструмента."],
+    failed: ["Preview не підтверджено", "Неповний або небезпечний результат відхилено."],
+  };
+  const [title, detail] = copies[preview.status] || copies.failed;
+  ui.flakeUpdatePreviewTitle.textContent = `${title}: ${preview.inputName}`;
+  ui.flakeUpdatePreviewDetail.textContent = detail;
+  ui.flakeUpdateStatusBadge.className = "flake-update-status-badge";
+  if (["passed", "no-change"].includes(preview.status)) ui.flakeUpdateStatusBadge.classList.add("passed");
+  if (["blocked", "unavailable", "failed", "cancelled"].includes(preview.status)) ui.flakeUpdateStatusBadge.classList.add("attention");
+  const statusLabels = {
+    queued: "у черзі", preparing: "підготовка", running: "мережа", analyzing: "перевірка",
+    cancelling: "скасування", cleaning: "очищення", passed: "оновлення знайдено",
+    "no-change": "актуально", cancelled: "скасовано", blocked: "зупинено",
+    unavailable: "недоступно", failed: "відхилено",
+  };
+  ui.flakeUpdateStatusBadge.textContent = statusLabels[preview.status] || "preview-only";
+  ui.cancelFlakeUpdatePreview.hidden = !preview.cancellable;
+  ui.cancelFlakeUpdatePreview.disabled = preview.status === "cancelling";
+  ui.flakeUpdateError.hidden = !preview.error;
+  ui.flakeUpdateError.textContent = localizedFlakeUpdateError(preview.error);
+  ui.flakeUpdateBefore.replaceChildren(flakeRevisionView(preview.before, "Читаємо поточну закріплену ревізію…"));
+  ui.flakeUpdateAfter.replaceChildren(flakeRevisionView(
+    preview.after,
+    active ? "Очікуємо результат від Nix…" : "Нова ревізія не підтверджена.",
+  ));
+  if (preview.status === "passed") {
+    const nodeLabel = preview.changedNodeCount === 1 ? "lock-вузол" : "lock-вузлів";
+    ui.flakeUpdateChangedNodes.textContent = `Змінено ${preview.changedNodeCount} ${nodeLabel}: ${preview.changedNodes.join(", ")}`;
+  } else if (preview.status === "no-change") {
+    ui.flakeUpdateChangedNodes.textContent = "Жодного lock-вузла не змінено.";
+  } else if (active) {
+    ui.flakeUpdateChangedNodes.textContent = "Зміни ще не підтверджено.";
+  } else {
+    ui.flakeUpdateChangedNodes.textContent = "Безпечного lock diff не отримано.";
+  }
+  ui.flakeUpdateDiff.textContent = preview.lockDiff
+    || (preview.status === "no-change" ? "Змін немає — flake.lock уже актуальний."
+      : (active ? "Обчислюємо точну різницю…" : "Diff відсутній."));
+}
+
+async function pollFlakeUpdatePreview(jobId) {
+  if (!jobId || model.flakeUpdatePollingJobId === jobId) return;
+  model.flakeUpdatePollingJobId = jobId;
+  try {
+    while (model.flakeUpdatePollingJobId === jobId) {
+      const current = model.flakeUpdatePreview;
+      if (!current || current.jobId !== jobId || !activeBuildStatuses.has(current.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const result = NcmFlakes.normalizeFlakeUpdatePreview(await api(
+        `/api/flakes/update-preview/${jobId}?after=${current.nextCursor}`,
+      ));
+      model.flakeUpdatePreview = result;
+      renderFlakes();
+    }
+  } catch (error) {
+    showToast(`Не вдалося оновити Flake preview: ${error.message}`, true);
+  } finally {
+    if (model.flakeUpdatePollingJobId === jobId) model.flakeUpdatePollingJobId = null;
+  }
+}
+
+async function startFlakeUpdatePreview(inputName) {
+  if (model.flakeUpdateStarting || activeBuildStatuses.has(model.flakeUpdatePreview?.status)) return;
+  model.flakeUpdateStarting = inputName;
+  renderFlakes();
+  try {
+    const result = NcmFlakes.normalizeFlakeUpdatePreview(await api("/api/flakes/update-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: inputName }),
+    }));
+    model.flakeUpdatePreview = result;
+    renderFlakes();
+    if (activeBuildStatuses.has(result.status)) void pollFlakeUpdatePreview(result.jobId);
+  } catch (error) {
+    showToast(`Не вдалося запустити Flake preview: ${error.message}`, true);
+  } finally {
+    model.flakeUpdateStarting = null;
+    renderFlakes();
+  }
+}
+
+async function refreshFlakeUpdatePreview() {
+  try {
+    const result = NcmFlakes.normalizeFlakeUpdatePreview(await api("/api/flakes/update-preview"));
+    model.flakeUpdatePreview = result;
+    renderFlakes();
+    if (activeBuildStatuses.has(result.status)) void pollFlakeUpdatePreview(result.jobId);
+  } catch (error) {
+    showToast(`Не вдалося прочитати Flake preview: ${error.message}`, true);
+  }
+}
+
+async function cancelFlakeUpdatePreview() {
+  const preview = model.flakeUpdatePreview;
+  if (!preview?.jobId || !preview.cancellable) return;
+  ui.cancelFlakeUpdatePreview.disabled = true;
+  try {
+    model.flakeUpdatePreview = NcmFlakes.normalizeFlakeUpdatePreview(await api(
+      `/api/flakes/update-preview/${preview.jobId}/cancel`, { method: "POST" },
+    ));
+    renderFlakes();
+    void pollFlakeUpdatePreview(preview.jobId);
+  } catch (error) {
+    showToast(`Не вдалося скасувати Flake preview: ${error.message}`, true);
+    ui.cancelFlakeUpdatePreview.disabled = false;
+  }
+}
+
 function renderFlakes() {
   const inspection = model.flakes;
   if (!inspection) {
@@ -1894,6 +2085,7 @@ function renderFlakes() {
     ui.flakesStatusTitle.textContent = "Читаємо flake-конфігурацію…";
     ui.flakesStatusDetail.textContent = "Локальний flake.lock та offline Nix evaluation без запису.";
     ui.refreshFlakes.disabled = true;
+    renderFlakeUpdatePreview();
     return;
   }
   const summary = NcmFlakes.flakeSummary(inspection);
@@ -1994,7 +2186,28 @@ function renderFlakes() {
       dd.textContent = value;
       details.append(dt, dd);
     }
-    card.append(header, source, details);
+    const action = document.createElement("footer");
+    action.className = "flake-input-preview-action";
+    const note = document.createElement("small");
+    const eligible = NcmFlakes.isUpdatePreviewEligible(input);
+    note.textContent = eligible
+      ? "Мережевий preview · лише тимчасовий lock"
+      : "Окремий preview для цього типу недоступний";
+    const button = document.createElement("button");
+    button.className = "button secondary";
+    button.type = "button";
+    const active = activeBuildStatuses.has(model.flakeUpdatePreview?.status);
+    const thisInputActive = active && model.flakeUpdatePreview.inputName === input.name;
+    button.disabled = !eligible || active || Boolean(model.flakeUpdateStarting);
+    button.textContent = model.flakeUpdateStarting === input.name || thisInputActive
+      ? "Перевіряємо…"
+      : (model.flakeUpdatePreview?.inputName === input.name ? "Перевірити ще раз" : "Перевірити оновлення");
+    button.title = eligible
+      ? "Дозволити мережеву перевірку в тимчасовій копії"
+      : "Підтримуються лише прямі окремо закріплені мережеві inputs";
+    button.addEventListener("click", () => { void startFlakeUpdatePreview(input.name); });
+    action.append(note, button);
+    card.append(header, source, details, action);
     return card;
   });
   if (!inputCards.length) {
@@ -2022,8 +2235,9 @@ function renderFlakes() {
   } else {
     ui.flakeWarnings.replaceChildren();
   }
-  ui.flakeBoundaryTitle.textContent = "Оновлення inputs вимкнено";
-  ui.flakeBoundaryDetail.textContent = "Read-only етап використовує offline evaluation і --no-write-lock-file; update, запис lock та активація відсутні.";
+  ui.flakeBoundaryTitle.textContent = "Застосування оновлень вимкнено";
+  ui.flakeBoundaryDetail.textContent = "Preview може змінити лише тимчасовий lock; оригінальний flake.lock, конфігурація та активна система недоторканні.";
+  renderFlakeUpdatePreview();
 }
 
 async function refreshFlakes() {
@@ -3476,6 +3690,7 @@ async function initialize() {
     void refreshEffectiveSettings();
     void refreshCatalogCompatibility();
     void refreshFlakes();
+    void refreshFlakeUpdatePreview();
   } catch (error) {
     showToast(`Не вдалося завантажити стан: ${error.message}`, true);
   }
@@ -3498,6 +3713,7 @@ ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.generationsNav.addEventListener("click", () => showPage("generations"));
 ui.refreshGenerations.addEventListener("click", refreshGenerations);
 ui.refreshFlakes.addEventListener("click", refreshFlakes);
+ui.cancelFlakeUpdatePreview.addEventListener("click", cancelFlakeUpdatePreview);
 ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
 ui.homeManagerAdoptionButton.addEventListener("click", openHomeAdoption);
 ui.closeHomePreview.addEventListener("click", closeHomePreview);

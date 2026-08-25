@@ -3,6 +3,15 @@
 Nix Control Manager has no background updater. A release update is an explicit,
 reviewable flake change followed by the ordinary NixOS build/test/switch flow.
 
+The Flakes page can now perform the first, non-mutating part of that review for
+any supported direct input. **Check for update** is an explicit network action:
+NCM resolves only the selected input in a disposable configuration copy, may
+populate `/nix/store`, and displays the exact proposed `flake.lock` diff after
+the copy has been removed. It does not save that diff to the real lock file and
+does not build or activate the system.
+
+The commands below remain the manual path for actually accepting an update.
+
 ## Check the installed release
 
 ```console

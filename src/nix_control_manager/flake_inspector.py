@@ -182,10 +182,15 @@ def _input_from_node(
     )
 
 
-def _parse_lock(path: Path) -> tuple[str, int | None, str | None, tuple[FlakeInput, ...], list[str]]:
+def parse_flake_lock(
+    path: Path,
+) -> tuple[str, int | None, str | None, tuple[FlakeInput, ...], list[str]]:
+    """Parse a bounded lock file without evaluating or resolving any input."""
     warnings: list[str] = []
     if not path.is_file():
-        return "missing", None, None, (), ["flake.lock is missing; offline output inspection was not attempted."]
+        return "missing", None, None, (), [
+            "flake.lock is missing; offline output inspection was not attempted."
+        ]
     try:
         if path.stat().st_size > _MAX_LOCK_BYTES:
             raise ValueError("flake.lock exceeds the read-only inspection limit")
@@ -282,7 +287,7 @@ def inspect_flake(
             evaluation_status="not-run", warnings=("No flake.nix entrypoint was found.",),
             **common,
         )
-    lock_status, lock_version, root_node, inputs, warnings = _parse_lock(lock_path)
+    lock_status, lock_version, root_node, inputs, warnings = parse_flake_lock(lock_path)
     if lock_status in {"missing", "invalid"}:
         return FlakeInspection(
             status="incomplete" if lock_status == "missing" else "invalid",

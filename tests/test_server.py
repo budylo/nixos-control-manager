@@ -373,6 +373,7 @@ class ServerTests(unittest.TestCase):
         state = self.request_json("/api/state")
         system = self.request_json("/api/system")
         flakes = self.request_json("/api/flakes")
+        flake_update = self.request_json("/api/flakes/update-preview")
         adoption = self.request_json("/api/adoption")
         helper = self.request_json("/api/helper")
         effective = self.request_json("/api/effective-settings")
@@ -413,6 +414,11 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(flakes["networkAccessEnabled"])
         self.assertFalse(flakes["lockWriteEnabled"])
         self.assertFalse(flakes["inputUpdateEnabled"])
+        self.assertEqual(flake_update["status"], "idle")
+        self.assertTrue(flake_update["networkRequired"])
+        self.assertFalse(flake_update["sourceWriteEnabled"])
+        self.assertTrue(flake_update["temporaryLockWriteEnabled"])
+        self.assertFalse(flake_update["applyEnabled"])
         self.assertEqual(adoption["status"], "blocked")
         self.assertFalse(adoption["safeToApply"])
         self.assertTrue(helper["available"])
@@ -438,7 +444,53 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="driversNav"', html)
             self.assertIn('id="flakesPage"', html)
             self.assertIn('id="flakesNav"', html)
+            self.assertIn('id="flakeUpdatePreview"', html)
+            self.assertIn('id="cancelFlakeUpdatePreview"', html)
             self.assertIn("Content-Security-Policy", response.headers)
+
+    def test_flake_update_preview_api_is_token_bound_and_never_applies(self) -> None:
+        with self.assertRaises(HTTPError) as context:
+            self.request_json(
+                "/api/flakes/update-preview",
+                method="POST",
+                body={"input": "nixpkgs"},
+            )
+        self.assertEqual(context.exception.code, 403)
+        context.exception.close()
+
+        started = self.request_json(
+            "/api/flakes/update-preview",
+            method="POST",
+            body={"input": "nixpkgs"},
+            token=self.server.token,
+        )
+        job_id = started["jobId"]
+        deadline = time.monotonic() + 2
+        result = started
+        while result["status"] not in {
+            "passed", "no-change", "failed", "cancelled", "blocked", "unavailable"
+        } and time.monotonic() < deadline:
+            result = self.request_json(
+                f"/api/flakes/update-preview/{job_id}?after={result['nextCursor']}"
+            )
+            time.sleep(0.01)
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["error"]["code"], "missing-flake-files")
+        self.assertFalse(result["sourceWriteEnabled"])
+        self.assertTrue(result["temporaryCopyRemoved"])
+        self.assertFalse(result["applyEnabled"])
+        self.assertFalse(result["activationEnabled"])
+
+        with self.assertRaises(HTTPError) as invalid:
+            self.request_json(
+                "/api/flakes/update-preview",
+                method="POST",
+                body={"input": "bad.input"},
+                token=self.server.token,
+            )
+        self.assertEqual(invalid.exception.code, 400)
+        invalid.exception.close()
 
     def test_managed_save_hides_receipt_and_requires_exact_confirmation(self) -> None:
         root = self.server.config_root

@@ -383,7 +383,7 @@
             <div>
               <span class="hero-tag">Закріплені джерела конфігурації</span>
               <h2>Flakes без магії.<br><em>Спочатку бачимо точний lock.</em></h2>
-              <p>NCM читає прямі inputs, закріплені ревізії та доступні nixosConfigurations. Перевірка працює offline, не створює lock-файл, не шукає оновлення й нічого не записує.</p>
+              <p>Основний огляд працює offline. Для окремого input можна явно запустити мережевий preview: NCM змінить lock лише в тимчасовій копії, покаже точний diff і видалить її.</p>
             </div>
             <div class="hero-orbit flakes-orbit" aria-hidden="true">
               <span class="orbit orbit-one"></span>
@@ -432,12 +432,49 @@
           </section>
           <section id="flakeInputs" class="flake-inputs" aria-live="polite"></section>
 
+          <section id="flakeUpdatePreview" class="flake-update-preview" hidden aria-live="polite">
+            <header>
+              <div>
+                <p class="section-kicker">Мережевий preview · тимчасова копія</p>
+                <h2 id="flakeUpdatePreviewTitle">Перевіряємо оновлення input</h2>
+                <p id="flakeUpdatePreviewDetail">Оригінальний flake.lock залишається недоторканним.</p>
+              </div>
+              <div class="flake-update-actions">
+                <span id="flakeUpdateStatusBadge" class="flake-update-status-badge">preview-only</span>
+                <button id="cancelFlakeUpdatePreview" class="button secondary" type="button" hidden>Скасувати</button>
+              </div>
+            </header>
+            <div id="flakeUpdateError" class="flake-update-error" hidden></div>
+            <div class="flake-update-comparison">
+              <article>
+                <span>Поточний lock</span>
+                <div id="flakeUpdateBefore"></div>
+              </article>
+              <span class="flake-update-arrow" aria-hidden="true">→</span>
+              <article>
+                <span>Лише preview</span>
+                <div id="flakeUpdateAfter"></div>
+              </article>
+            </div>
+            <div class="flake-update-meta">
+              <strong id="flakeUpdateChangedNodes">Очікуємо результат…</strong>
+              <span>Мережа потрібна · можливе кешування у Nix store · запис у конфігурацію та apply відсутні</span>
+            </div>
+            <div class="flake-update-diff-wrap">
+              <div>
+                <strong>Точна різниця flake.lock</strong>
+                <small>Цей diff ще ніде не збережено.</small>
+              </div>
+              <pre id="flakeUpdateDiff"><code>Завантаження…</code></pre>
+            </div>
+          </section>
+
           <section id="flakeWarnings" class="flake-warnings" hidden aria-live="polite"></section>
           <section class="generation-boundary flake-boundary">
             <span>◇</span>
             <div>
-              <strong id="flakeBoundaryTitle">Оновлення inputs вимкнено</strong>
-              <small id="flakeBoundaryDetail">Цей етап не запускає update, не змінює flake.lock і не перебудовує активну систему.</small>
+              <strong id="flakeBoundaryTitle">Застосування оновлень вимкнено</strong>
+              <small id="flakeBoundaryDetail">Preview може змінити лише тимчасовий lock; оригінальний flake.lock, конфігурація та активна система недоторканні.</small>
             </div>
           </section>
         </div>

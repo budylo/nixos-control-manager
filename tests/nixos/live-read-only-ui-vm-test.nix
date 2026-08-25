@@ -232,6 +232,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"driversNav\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"flakesPage\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"flakesNav\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"flakeUpdatePreview\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"cancelFlakeUpdatePreview\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -314,6 +316,16 @@ pkgs.testers.runNixOSTest {
     t.assertFalse(flakes["networkAccessEnabled"])
     t.assertFalse(flakes["lockWriteEnabled"])
     t.assertFalse(flakes["inputUpdateEnabled"])
+    flake_update = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/flakes/update-preview"
+    ))
+    t.assertEqual(flake_update["status"], "idle")
+    t.assertTrue(flake_update["networkRequired"])
+    t.assertFalse(flake_update["sourceWriteEnabled"])
+    t.assertTrue(flake_update["temporaryLockWriteEnabled"])
+    t.assertTrue(flake_update["temporaryCopyRemoved"])
+    t.assertFalse(flake_update["applyEnabled"])
+    t.assertFalse(flake_update["activationEnabled"])
     compatibility = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
         timeout=long_timeout,

@@ -27,6 +27,7 @@ from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
 from .errors import NcmError, ValidationError
 from .flake_inspector import FlakeInspection, inspect_flake
+from .flake_update_preview import FlakeUpdatePreviewManager
 from .home_manager_adoption import (
     home_manager_plan_identity,
     plan_home_manager_adoption,
@@ -68,6 +69,12 @@ _HOME_BUILD_JOB_PATH = re.compile(
 _HOME_BUILD_CANCEL_PATH = re.compile(
     r"^/api/home-manager/build-preview/([0-9a-f]{24})/cancel$"
 )
+_FLAKE_UPDATE_JOB_PATH = re.compile(
+    r"^/api/flakes/update-preview/([0-9a-f]{24})$"
+)
+_FLAKE_UPDATE_CANCEL_PATH = re.compile(
+    r"^/api/flakes/update-preview/([0-9a-f]{24})/cancel$"
+)
 
 
 def _load_ui_state(path: Path) -> ManagedState:
@@ -96,6 +103,7 @@ class NcmServer(ThreadingHTTPServer):
         build_timeout: int = 3_600,
         build_manager: CandidateBuildManager | None = None,
         home_manager_build_manager: HomeManagerBuildManager | None = None,
+        flake_update_preview_manager: FlakeUpdatePreviewManager | None = None,
         settings_inspector: Callable[
             ..., EffectiveSettingsInspection
         ] = inspect_effective_settings,
@@ -143,6 +151,13 @@ class NcmServer(ThreadingHTTPServer):
                 inspector=home_manager_inspector,
                 planner=home_manager_planner,
                 validator=home_manager_validator,
+            )
+        )
+        self.flake_update_preview_manager = (
+            flake_update_preview_manager
+            or FlakeUpdatePreviewManager(
+                config_root=config_root,
+                timeout=validation_timeout,
             )
         )
         self.token = secrets.token_urlsafe(32)
@@ -230,6 +245,7 @@ class NcmServer(ThreadingHTTPServer):
     def server_close(self) -> None:
         self.build_manager.close()
         self.home_manager_build_manager.close()
+        self.flake_update_preview_manager.close()
         super().server_close()
 
 
@@ -357,6 +373,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = target.path
             build_match = _BUILD_JOB_PATH.fullmatch(path)
             home_build_match = _HOME_BUILD_JOB_PATH.fullmatch(path)
+            flake_update_match = _FLAKE_UPDATE_JOB_PATH.fullmatch(path)
             if path == "/api/config":
                 self._json(
                     {
@@ -418,6 +435,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                         timeout=self.server.validation_timeout,
                     ).to_mapping()
                 )
+            elif path == "/api/flakes/update-preview":
+                self._json(
+                    self.server.flake_update_preview_manager.latest(
+                        after=self._build_cursor(target.query)
+                    )
+                )
             elif path == "/api/generations":
                 self._json(self.server.generation_inspector().to_mapping())
             elif path == "/api/adoption":
@@ -457,6 +480,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                         after=self._build_cursor(target.query),
                     )
                 )
+            elif flake_update_match:
+                self._json(
+                    self.server.flake_update_preview_manager.poll(
+                        flake_update_match.group(1),
+                        after=self._build_cursor(target.query),
+                    )
+                )
             elif build_match:
                 self._json(
                     self.server.build_manager.poll(
@@ -480,6 +510,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = target.path
             cancel_match = _BUILD_CANCEL_PATH.fullmatch(path)
             home_cancel_match = _HOME_BUILD_CANCEL_PATH.fullmatch(path)
+            flake_update_cancel_match = _FLAKE_UPDATE_CANCEL_PATH.fullmatch(path)
             if target.query:
                 raise ValidationError("POST API endpoints do not accept query parameters")
             if path == "/api/save" and not self.server.local_write_enabled:
@@ -505,6 +536,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                         packages=packages,
                         plan_fingerprint=fingerprint,
                     ),
+                    HTTPStatus.ACCEPTED,
+                )
+                return
+            if path == "/api/flakes/update-preview":
+                payload = self._read_json_object()
+                if set(payload) != {"input"} or not isinstance(
+                    payload.get("input"), str
+                ):
+                    raise ValidationError(
+                        "Flake update preview requires exactly one input string"
+                    )
+                self._json(
+                    self.server.flake_update_preview_manager.start(payload["input"]),
                     HTTPStatus.ACCEPTED,
                 )
                 return
@@ -693,6 +737,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(
                     self.server.home_manager_build_manager.cancel(
                         home_cancel_match.group(1)
+                    )
+                )
+                return
+            if flake_update_cancel_match:
+                self._json(
+                    self.server.flake_update_preview_manager.cancel(
+                        flake_update_cancel_match.group(1)
                     )
                 )
                 return

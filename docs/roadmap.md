@@ -195,14 +195,17 @@
   and expose the result through a strict local API and dedicated graphical page
   (implemented, including real-browser and booted NixOS VM coverage);
 - add a separate update-preview phase that explains the exact proposed input
-  revision and lock diff before any mutation (future work);
+  revision and lock diff before any mutation (implemented for one direct
+  network input at a time, using a disposable source copy and explicit network
+  action; the original source remains fingerprint-verified and unchanged);
 - permit a confirmed lock-file update only through a new narrow helper scope,
   followed by validation, build, test, switch, and rollback gates (future work;
-  no mutation endpoint or UI control exists in the read-only phase).
+  no original-lock mutation endpoint or UI control exists in the preview
+  phase).
 
 ## Later
 
-- confirmed Flake input updates after the read-only preview phase;
+- confirmed Flake input updates after the disposable preview phase;
 - Plasma Manager;
 - native desktop shell;
 - multi-host configuration and hardware-aware profile adaptation.

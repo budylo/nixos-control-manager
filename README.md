@@ -434,7 +434,7 @@ profile still performs no write or activation: it only updates the ordinary
 draft and must pass the existing preview, dependency, build, test, and switch
 boundaries.
 
-### Read-only Flakes control center
+### Flakes control center
 
 The Flakes page turns the selected host's existing `flake.nix` and
 `flake.lock` into a bounded, human-readable report. It lists direct inputs with
@@ -442,11 +442,26 @@ their source, branch or tag, locked revision, timestamp, and content hash;
 shows the available `nixosConfigurations`; and verifies whether the configured
 host target is present.
 
-Inspection is deliberately non-mutating. The lock file is parsed before Nix is
-allowed to run, and a missing or invalid lock blocks evaluation. The evaluator
-then runs offline with lock-file writes and import-from-derivation disabled.
-This phase cannot fetch, update, add, remove, or rewrite an input. Explicit
-update previews and separately confirmed lock-file changes remain future work.
+The default inspection is deliberately non-mutating. The lock file is parsed
+before Nix is allowed to run, and a missing or invalid lock blocks evaluation.
+The evaluator then runs offline with lock-file writes and
+import-from-derivation disabled.
+
+For a direct, separately locked network input, the user can explicitly start a
+single-input update preview. NCM fingerprints the bounded source tree, copies
+it to a disposable directory, and invokes one fixed `nix flake update <input>
+--flake path:<copy>` argument vector without a shell. Network access and normal
+Nix store population are expected in this opt-in operation, but only the
+temporary `flake.lock` may change. The worker then verifies that the original
+source remained byte-identical, no candidate file except `flake.lock` changed,
+the direct input graph retained its shape, and no other direct input moved.
+Only after the copy is removed does the GUI expose the old and proposed
+revision, changed lock nodes, and exact unified diff. Raw Nix output is not sent
+to the browser.
+
+This preview cannot write the original `flake.lock`, add or remove an input,
+build the system, or activate anything. A separately confirmed lock-file
+transaction remains future work.
 
 ## Application catalog, presets, and profiles
 

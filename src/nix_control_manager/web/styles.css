@@ -371,7 +371,39 @@ kbd { padding: 2px 7px; border: 1px solid var(--line); border-bottom-color: rgba
 .flake-input-card dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; }
 .flake-input-card dt { color: #65768b; font-size: 8px; }
 .flake-input-card dd { margin: 0; overflow-wrap: anywhere; color: #a2b1c2; font: 8px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-align: right; }
+.flake-input-preview-action { padding-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,.055); }
+.flake-input-preview-action small { max-width: 190px; color: #6f8094; font-size: 8px; line-height: 1.45; }
+.flake-input-preview-action .button { min-height: 32px; padding: 7px 10px; white-space: nowrap; font-size: 8px; }
+.flake-input-preview-action .button:disabled { opacity: .42; cursor: not-allowed; }
 .flake-inline-empty { grid-column: 1 / -1; margin: 0; padding: 20px; border: 1px dashed var(--line); border-radius: 13px; color: var(--muted); background: rgba(255,255,255,.018); font-size: 9px; text-align: center; }
+.flake-update-preview { margin: 22px clamp(28px, 4vw, 58px) 0; overflow: hidden; border: 1px solid rgba(94,215,255,.24); border-radius: 16px; background: linear-gradient(145deg, rgba(16,29,42,.96), rgba(10,17,27,.98)); box-shadow: 0 18px 55px rgba(0,0,0,.2); }
+.flake-update-preview > header { padding: 18px 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: rgba(94,215,255,.025); }
+.flake-update-preview > header h2 { margin-top: 4px; font-size: 16px; }
+.flake-update-preview > header p:last-child { margin: 6px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.flake-update-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.flake-update-status-badge { padding: 6px 8px; border: 1px solid rgba(94,215,255,.24); border-radius: 99px; color: #9de8ff; background: rgba(94,215,255,.065); font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.flake-update-status-badge.passed { border-color: rgba(116,228,177,.25); color: #9ee8c7; background: rgba(116,228,177,.07); }
+.flake-update-status-badge.attention { border-color: rgba(255,184,108,.27); color: #ffd18a; background: rgba(255,184,108,.07); }
+.flake-update-error { margin: 14px 20px 0; padding: 11px 13px; border: 1px solid rgba(255,116,116,.3); border-radius: 10px; color: #ffc2c2; background: rgba(255,116,116,.055); font-size: 9px; line-height: 1.5; }
+.flake-update-comparison { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; gap: 13px; }
+.flake-update-comparison article { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.022); }
+.flake-update-comparison article > span { display: block; margin-bottom: 11px; color: #718299; font-size: 7px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.flake-update-revision { display: grid; gap: 8px; }
+.flake-update-revision strong { overflow-wrap: anywhere; font-size: 12px; }
+.flake-update-revision code { overflow-wrap: anywhere; color: #8fdfff; font: 9px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.flake-update-revision dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 10px; }
+.flake-update-revision dt { color: #65768b; font-size: 8px; }
+.flake-update-revision dd { margin: 0; overflow-wrap: anywhere; color: #a2b1c2; font: 8px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-align: right; }
+.flake-update-revision.empty { min-height: 92px; place-items: center; color: var(--muted); font-size: 9px; text-align: center; }
+.flake-update-arrow { align-self: center; color: #71dffb; font-size: 18px; }
+.flake-update-meta { margin: 0 20px 18px; padding: 11px 13px; display: flex; align-items: center; justify-content: space-between; gap: 15px; border: 1px solid rgba(116,228,177,.14); border-radius: 10px; background: rgba(116,228,177,.025); }
+.flake-update-meta strong { font-size: 9px; }
+.flake-update-meta span { max-width: 470px; color: #718299; font-size: 8px; line-height: 1.5; text-align: right; }
+.flake-update-diff-wrap { border-top: 1px solid var(--line); }
+.flake-update-diff-wrap > div { padding: 14px 20px 10px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.flake-update-diff-wrap strong { font-size: 10px; }
+.flake-update-diff-wrap small { color: #718299; font-size: 8px; }
+.flake-update-diff-wrap pre { max-height: 430px; padding: 17px 20px; overflow: auto; border-top: 1px solid rgba(255,255,255,.04); background: #080c12; font-size: 9px; line-height: 1.55; }
 .flake-warnings { margin: 18px clamp(28px, 4vw, 58px) 0; padding: 14px 16px; border: 1px solid rgba(255,184,108,.25); border-radius: 13px; color: #d7b985; background: rgba(255,184,108,.04); }
 .flake-warnings strong { font-size: 10px; }
 .flake-warnings ul { margin: 8px 0 0; padding-left: 17px; }
@@ -487,7 +519,7 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .topbar { padding: 18px 20px; align-items: flex-start; }
   .top-actions { flex-wrap: wrap; justify-content: end; }
   .change-count { width: 100%; margin: 0; text-align: right; }
-  .hero, .preset-section, .catalog-compatibility-status, .catalog-guidance, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note, .effective-settings-status, .service-overview, .driver-safety-note, .driver-filters, .driver-catalog, .home-manager-status, .home-manager-grid, .home-manager-state, .home-package-toolbar, .flake-files, .flake-targets, .flake-inputs, .flake-warnings, .generation-status, .generation-list, .generation-boundary { margin-left: 20px; margin-right: 20px; }
+  .hero, .preset-section, .catalog-compatibility-status, .catalog-guidance, .controls, .catalog, .catalog-heading, .settings-catalog, .unknown-settings-note, .effective-settings-status, .service-overview, .driver-safety-note, .driver-filters, .driver-catalog, .home-manager-status, .home-manager-grid, .home-manager-state, .home-package-toolbar, .flake-files, .flake-targets, .flake-inputs, .flake-update-preview, .flake-warnings, .generation-status, .generation-list, .generation-boundary { margin-left: 20px; margin-right: 20px; }
   .adoption-banner { margin-left: 20px; margin-right: 20px; }
   .hero { min-height: 245px; padding: 27px; }
   .hero-orbit { display: none; }
@@ -512,6 +544,13 @@ pre { margin: 0; color: #bfd0e2; font: 11px/1.7 ui-monospace, SFMono-Regular, Co
   .home-manager-grid { grid-template-columns: 1fr; }
   .flake-files, .flake-targets, .flake-inputs { grid-template-columns: 1fr; }
   .flake-input-card > header { flex-direction: column; }
+  .flake-input-preview-action, .flake-update-preview > header, .flake-update-meta, .flake-update-diff-wrap > div { align-items: stretch; flex-direction: column; }
+  .flake-input-preview-action small { max-width: none; }
+  .flake-input-preview-action .button { width: 100%; }
+  .flake-update-actions { justify-content: space-between; }
+  .flake-update-comparison { grid-template-columns: 1fr; }
+  .flake-update-arrow { justify-self: center; transform: rotate(90deg); }
+  .flake-update-meta span { max-width: none; text-align: left; }
   .home-manager-state-card { grid-template-columns: 1fr; }
   .home-manager-state-card code { text-align: left; }
   .home-package-toolbar, .home-package-preview-action { align-items: stretch; flex-direction: column; }
