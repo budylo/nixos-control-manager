@@ -372,6 +372,7 @@ class ServerTests(unittest.TestCase):
         driver_profiles = self.request_json("/api/driver-profiles")
         state = self.request_json("/api/state")
         system = self.request_json("/api/system")
+        flakes = self.request_json("/api/flakes")
         adoption = self.request_json("/api/adoption")
         helper = self.request_json("/api/helper")
         effective = self.request_json("/api/effective-settings")
@@ -407,6 +408,11 @@ class ServerTests(unittest.TestCase):
         )
         self.assertEqual(state["packages"], [])
         self.assertEqual(system["configuration"]["mode"], "missing")
+        self.assertEqual(flakes["status"], "absent")
+        self.assertTrue(flakes["readOnly"])
+        self.assertFalse(flakes["networkAccessEnabled"])
+        self.assertFalse(flakes["lockWriteEnabled"])
+        self.assertFalse(flakes["inputUpdateEnabled"])
         self.assertEqual(adoption["status"], "blocked")
         self.assertFalse(adoption["safeToApply"])
         self.assertTrue(helper["available"])
@@ -430,6 +436,8 @@ class ServerTests(unittest.TestCase):
             self.assertIn('id="servicesNav"', html)
             self.assertIn('id="driversPage"', html)
             self.assertIn('id="driversNav"', html)
+            self.assertIn('id="flakesPage"', html)
+            self.assertIn('id="flakesNav"', html)
             self.assertIn("Content-Security-Policy", response.headers)
 
     def test_managed_save_hides_receipt_and_requires_exact_confirmation(self) -> None:

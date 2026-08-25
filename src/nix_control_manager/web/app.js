@@ -78,10 +78,12 @@ const ui = {
   settingsNav: document.querySelector("#settingsNav"),
   servicesNav: document.querySelector("#servicesNav"),
   driversNav: document.querySelector("#driversNav"),
+  flakesNav: document.querySelector("#flakesNav"),
   programsPage: document.querySelector("#programsPage"),
   settingsPage: document.querySelector("#settingsPage"),
   servicesPage: document.querySelector("#servicesPage"),
   driversPage: document.querySelector("#driversPage"),
+  flakesPage: document.querySelector("#flakesPage"),
   pageTitle: document.querySelector("#pageTitle"),
   settingsCatalog: document.querySelector("#settingsCatalog"),
   settingsEmptyState: document.querySelector("#settingsEmptyState"),
@@ -120,6 +122,21 @@ const ui = {
   driversFilters: document.querySelector("#driversFilters"),
   driversCatalog: document.querySelector("#driversCatalog"),
   driversEmptyState: document.querySelector("#driversEmptyState"),
+  flakesStatus: document.querySelector("#flakesStatus"),
+  flakesStatusIcon: document.querySelector("#flakesStatusIcon"),
+  flakesStatusTitle: document.querySelector("#flakesStatusTitle"),
+  flakesStatusDetail: document.querySelector("#flakesStatusDetail"),
+  refreshFlakes: document.querySelector("#refreshFlakes"),
+  flakeContextNote: document.querySelector("#flakeContextNote"),
+  flakeSummaryCards: document.querySelector("#flakeSummaryCards"),
+  flakeFiles: document.querySelector("#flakeFiles"),
+  flakeTargetCount: document.querySelector("#flakeTargetCount"),
+  flakeTargets: document.querySelector("#flakeTargets"),
+  flakeInputCount: document.querySelector("#flakeInputCount"),
+  flakeInputs: document.querySelector("#flakeInputs"),
+  flakeWarnings: document.querySelector("#flakeWarnings"),
+  flakeBoundaryTitle: document.querySelector("#flakeBoundaryTitle"),
+  flakeBoundaryDetail: document.querySelector("#flakeBoundaryDetail"),
   topActions: document.querySelector(".top-actions"),
   homeManagerNav: document.querySelector("#homeManagerNav"),
   homeManagerPage: document.querySelector("#homeManagerPage"),
@@ -238,6 +255,7 @@ const model = {
   homeApplyIntent: null,
   managedApplyIntent: null,
   generations: { status: "loading", generations: [], warnings: [] },
+  flakes: null,
 };
 
 const activeBuildStatuses = new Set(["queued", "preparing", "running", "analyzing", "cancelling", "cleaning"]);
@@ -1814,29 +1832,246 @@ function renderHomeManager() {
   renderHomeManagerPackages();
 }
 
+function flakeSummaryCard(value, label, className = "") {
+  const card = document.createElement("article");
+  card.className = `service-summary-card ${className}`.trim();
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  const small = document.createElement("small");
+  small.textContent = label;
+  card.append(strong, small);
+  return card;
+}
+
+function flakeFileCard(label, path, exists, detail) {
+  const card = document.createElement("article");
+  card.className = `flake-file-card ${exists ? "present" : "missing"}`;
+  const icon = document.createElement("span");
+  icon.textContent = exists ? "✓" : "○";
+  const body = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = label;
+  const code = document.createElement("code");
+  code.textContent = path;
+  const small = document.createElement("small");
+  small.textContent = detail;
+  body.append(title, code, small);
+  card.append(icon, body);
+  return card;
+}
+
+function shortFlakeValue(value, length = 12) {
+  if (!value) return "не вказано";
+  return value.length > length ? `${value.slice(0, length)}…` : value;
+}
+
+function localizedFlakeWarning(warning) {
+  const activeTarget = warning.match(/^Active target '([^']+)' is not present in nixosConfigurations\.$/);
+  if (activeTarget) return `Активної цілі «${activeTarget[1]}» немає в nixosConfigurations.`;
+  const missingNode = warning.match(/^Input (.+) references missing lock node (.+)\.$/);
+  if (missingNode) return `Input «${missingNode[1]}» посилається на відсутній lock-вузол «${missingNode[2]}».`;
+  const incompleteInput = warning.match(/^Input (.+) has no complete locked source metadata\.$/);
+  if (incompleteInput) return `Input «${incompleteInput[1]}» не має повних закріплених даних джерела.`;
+  const invalidReference = warning.match(/^Input (.+) has an invalid lock reference\.$/);
+  if (invalidReference) return `Input «${invalidReference[1]}» має некоректне посилання в lock-файлі.`;
+  const fixed = {
+    "No flake.nix entrypoint was found.": "Точку входу flake.nix не знайдено.",
+    "flake.lock contains an invalid direct input name.": "flake.lock містить некоректну назву прямого input.",
+    "Inspection timeout must be positive.": "Час очікування перевірки налаштовано некоректно.",
+    "The configured nixosConfigurations target is not a safe attribute name.": "Назва налаштованої цілі nixosConfigurations є некоректною.",
+    "The nix command is unavailable; outputs were not evaluated.": "Команда Nix недоступна, тому outputs не перевірено.",
+    "Offline Nix evaluation failed.": "Offline-оцінка Nix завершилася помилкою.",
+    "Evaluated direct inputs and flake.lock root inputs do not match exactly.": "Прямі inputs у результаті оцінки та кореневому вузлі flake.lock не збігаються.",
+  };
+  return fixed[warning] || warning;
+}
+
+function renderFlakes() {
+  const inspection = model.flakes;
+  if (!inspection) {
+    ui.flakesStatus.classList.remove("passed", "attention");
+    ui.flakesStatusIcon.textContent = "◎";
+    ui.flakesStatusTitle.textContent = "Читаємо flake-конфігурацію…";
+    ui.flakesStatusDetail.textContent = "Локальний flake.lock та offline Nix evaluation без запису.";
+    ui.refreshFlakes.disabled = true;
+    return;
+  }
+  const summary = NcmFlakes.flakeSummary(inspection);
+  const detected = inspection.status === "detected";
+  const passed = detected && inspection.evaluation.status === "passed";
+  const needsAttention = !passed || inspection.warnings.length > 0;
+  ui.flakesStatus.classList.toggle("passed", passed && !inspection.warnings.length);
+  ui.flakesStatus.classList.toggle("attention", needsAttention);
+  ui.refreshFlakes.disabled = false;
+  const statusCopy = {
+    absent: ["○", "Flake-конфігурацію не виявлено", "У корені конфігурації немає flake.nix; система може використовувати channels."],
+    incomplete: ["!", "flake.lock відсутній", "Offline-оцінку не запущено, щоб не створювати lock і не завантажувати inputs."],
+    invalid: ["!", "flake.lock не пройшов перевірку", "Пошкоджений або невідомий lock-файл не передається Nix evaluator-у."],
+    detected: passed
+      ? ["✓", "Flake прочитано без змін", `Offline evaluation завершено за ${inspection.evaluation.durationMs} мс.`]
+      : ["◇", "Flake знайдено, outputs не підтверджено", inspection.warnings.length ? localizedFlakeWarning(inspection.warnings[0]) : "Offline evaluation недоступно."],
+  };
+  const copy = statusCopy[inspection.status] || statusCopy.invalid;
+  [ui.flakesStatusIcon.textContent, ui.flakesStatusTitle.textContent, ui.flakesStatusDetail.textContent] = copy;
+  const lockLabel = inspection.lock.version ? `v${inspection.lock.version}` : "—";
+  ui.flakeSummaryCards.replaceChildren(
+    flakeSummaryCard(lockLabel, "версія flake.lock", inspection.lock.status === "valid" ? "enabled" : "pending"),
+    flakeSummaryCard(String(summary.inputs), "прямих inputs", "driver-total"),
+    flakeSummaryCard(String(summary.locked), "окремо закріплено", "managed"),
+    flakeSummaryCard(String(summary.targets), "NixOS-цілей", inspection.activeTargetStatus === "selected" ? "enabled" : "pending"),
+  );
+  const target = inspection.activeTarget || "не визначено";
+  ui.flakeContextNote.textContent = inspection.status === "detected"
+    ? `Активна ціль: ${target} · lock: ${inspection.lock.status} · мережа вимкнена.`
+    : `Корінь: ${inspection.root}`;
+  ui.flakeFiles.replaceChildren(
+    flakeFileCard(
+      "flake.nix", inspection.files.flake, inspection.files.flakeExists,
+      inspection.files.flakeExists ? "Точка входу знайдена" : "Точка входу відсутня",
+    ),
+    flakeFileCard(
+      "flake.lock", inspection.files.lock, inspection.files.lockExists,
+      inspection.files.lockExists
+        ? `Стан: ${inspection.lock.status}${inspection.lock.version ? ` · схема ${inspection.lock.version}` : ""}`
+        : "Не створюється автоматично",
+    ),
+  );
+
+  const targetCards = inspection.nixosConfigurations.map((name) => {
+    const selected = name === inspection.activeTarget;
+    const card = document.createElement("article");
+    card.className = `flake-target-card${selected ? " selected" : ""}`;
+    const icon = document.createElement("span");
+    icon.textContent = selected ? "✓" : "◇";
+    const body = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = name;
+    const small = document.createElement("small");
+    small.textContent = selected ? "Активна ціль NCM" : "Доступна nixosConfiguration";
+    body.append(title, small);
+    card.append(icon, body);
+    return card;
+  });
+  if (!targetCards.length) {
+    const empty = document.createElement("p");
+    empty.className = "flake-inline-empty";
+    empty.textContent = inspection.evaluation.status === "passed"
+      ? "Flake не експортує nixosConfigurations."
+      : "Цілі з’являться після успішної offline-оцінки.";
+    targetCards.push(empty);
+  }
+  ui.flakeTargets.replaceChildren(...targetCards);
+  ui.flakeTargetCount.textContent = `${inspection.nixosConfigurations.length} цілей`;
+
+  const inputCards = inspection.inputs.map((input) => {
+    const card = document.createElement("article");
+    card.className = `flake-input-card${input.locked ? " locked" : " follows"}`;
+    const header = document.createElement("header");
+    const heading = document.createElement("div");
+    const type = document.createElement("span");
+    type.className = "flake-input-type";
+    type.textContent = input.type;
+    const title = document.createElement("h3");
+    title.textContent = input.name;
+    heading.append(type, title);
+    const badge = document.createElement("span");
+    badge.className = `flake-lock-badge ${input.locked ? "locked" : "follows"}`;
+    badge.textContent = input.locked ? "закріплено" : "follows";
+    header.append(heading, badge);
+    const source = document.createElement("code");
+    source.textContent = input.source || (input.follows.length ? input.follows.join(" → ") : "джерело не вказано");
+    const details = document.createElement("dl");
+    const rows = [
+      ["Гілка", input.ref || "—"],
+      ["Ревізія", shortFlakeValue(input.revision)],
+      ["Дата", input.lastModifiedDate || "—"],
+      ["NAR hash", shortFlakeValue(input.narHash, 18)],
+    ];
+    for (const [term, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = term;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      details.append(dt, dd);
+    }
+    card.append(header, source, details);
+    return card;
+  });
+  if (!inputCards.length) {
+    const empty = document.createElement("p");
+    empty.className = "flake-inline-empty";
+    empty.textContent = inspection.files.lockExists
+      ? "Прямих inputs у кореневому lock-вузлі немає."
+      : "Inputs з’являться після наявного валідного flake.lock.";
+    inputCards.push(empty);
+  }
+  ui.flakeInputs.replaceChildren(...inputCards);
+  ui.flakeInputCount.textContent = `${inspection.inputs.length} inputs`;
+
+  ui.flakeWarnings.hidden = inspection.warnings.length === 0;
+  if (inspection.warnings.length) {
+    const title = document.createElement("strong");
+    title.textContent = "Потрібна увага";
+    const list = document.createElement("ul");
+    for (const warning of inspection.warnings) {
+      const item = document.createElement("li");
+      item.textContent = localizedFlakeWarning(warning);
+      list.append(item);
+    }
+    ui.flakeWarnings.replaceChildren(title, list);
+  } else {
+    ui.flakeWarnings.replaceChildren();
+  }
+  ui.flakeBoundaryTitle.textContent = "Оновлення inputs вимкнено";
+  ui.flakeBoundaryDetail.textContent = "Read-only етап використовує offline evaluation і --no-write-lock-file; update, запис lock та активація відсутні.";
+}
+
+async function refreshFlakes() {
+  ui.refreshFlakes.disabled = true;
+  ui.flakesStatus.classList.remove("passed", "attention");
+  ui.flakesStatusIcon.textContent = "◎";
+  ui.flakesStatusTitle.textContent = "Оновлюємо read-only огляд…";
+  ui.flakesStatusDetail.textContent = "Мережа і запис flake.lock залишаються вимкненими.";
+  try {
+    model.flakes = NcmFlakes.normalizeFlakeInspection(await api("/api/flakes"));
+    renderFlakes();
+  } catch (error) {
+    ui.flakesStatus.classList.add("attention");
+    ui.flakesStatusIcon.textContent = "!";
+    ui.flakesStatusTitle.textContent = "Не вдалося прочитати Flake";
+    ui.flakesStatusDetail.textContent = error.message;
+    ui.refreshFlakes.disabled = false;
+  }
+}
+
 function showPage(page) {
   model.page = page;
   const settings = page === "settings";
   const services = page === "services";
   const drivers = page === "drivers";
+  const flakes = page === "flakes";
   const homeManager = page === "home-manager";
   const generations = page === "generations";
-  const programs = !settings && !services && !drivers && !homeManager && !generations;
+  const programs = !settings && !services && !drivers && !flakes && !homeManager && !generations;
   ui.programsPage.hidden = !programs;
   ui.settingsPage.hidden = !settings;
   ui.servicesPage.hidden = !services;
   ui.driversPage.hidden = !drivers;
+  ui.flakesPage.hidden = !flakes;
   ui.homeManagerPage.hidden = !homeManager;
   ui.generationsPage.hidden = !generations;
   ui.programsNav.classList.toggle("active", programs);
   ui.settingsNav.classList.toggle("active", settings);
   ui.servicesNav.classList.toggle("active", services);
   ui.driversNav.classList.toggle("active", drivers);
+  ui.flakesNav.classList.toggle("active", flakes);
   ui.homeManagerNav.classList.toggle("active", homeManager);
   ui.generationsNav.classList.toggle("active", generations);
-  ui.topActions.hidden = homeManager || generations;
+  ui.topActions.hidden = homeManager || flakes || generations;
   ui.pageTitle.textContent = generations
     ? "Покоління"
+    : flakes
+    ? "Flakes"
     : homeManager
     ? "Home Manager"
     : services
@@ -1847,6 +2082,7 @@ function showPage(page) {
   if (settings) renderSettings();
   if (services) renderServices();
   if (drivers) renderDrivers();
+  if (flakes) renderFlakes();
   if (homeManager) renderHomeManager();
   if (generations) renderGenerations();
 }
@@ -3235,9 +3471,11 @@ async function initialize() {
     renderDrivers();
     renderHomeManager();
     renderGenerations();
+    renderFlakes();
     updateChangeState();
     void refreshEffectiveSettings();
     void refreshCatalogCompatibility();
+    void refreshFlakes();
   } catch (error) {
     showToast(`Не вдалося завантажити стан: ${error.message}`, true);
   }
@@ -3255,9 +3493,11 @@ ui.programsNav.addEventListener("click", () => showPage("programs"));
 ui.settingsNav.addEventListener("click", () => showPage("settings"));
 ui.servicesNav.addEventListener("click", () => showPage("services"));
 ui.driversNav.addEventListener("click", () => showPage("drivers"));
+ui.flakesNav.addEventListener("click", () => showPage("flakes"));
 ui.homeManagerNav.addEventListener("click", () => showPage("home-manager"));
 ui.generationsNav.addEventListener("click", () => showPage("generations"));
 ui.refreshGenerations.addEventListener("click", refreshGenerations);
+ui.refreshFlakes.addEventListener("click", refreshFlakes);
 ui.homeManagerPreviewButton.addEventListener("click", openHomePreview);
 ui.homeManagerAdoptionButton.addEventListener("click", openHomeAdoption);
 ui.closeHomePreview.addEventListener("click", closeHomePreview);
@@ -3306,7 +3546,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.homePreviewDrawer.classList.contains("open")) closeHomePreview();
   if (event.key === "Escape" && ui.homeAdoptionDrawer.classList.contains("open")) closeHomeAdoption();
   if (event.key === "Escape" && ui.planDrawer.classList.contains("open")) closeAdoptionPlan();
-  const activeSearch = ["drivers", "generations"].includes(model.page)
+  const activeSearch = ["drivers", "flakes", "generations"].includes(model.page)
     ? null
     : model.page === "settings"
     ? ui.settingsSearch

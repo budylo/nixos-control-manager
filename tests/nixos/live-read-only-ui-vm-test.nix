@@ -230,6 +230,8 @@ pkgs.testers.runNixOSTest {
     machine.succeed("grep -F 'id=\"servicesNav\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"driversPage\"' <(${curl} -fsS " + base_url + "/)")
     machine.succeed("grep -F 'id=\"driversNav\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"flakesPage\"' <(${curl} -fsS " + base_url + "/)")
+    machine.succeed("grep -F 'id=\"flakesNav\"' <(${curl} -fsS " + base_url + "/)")
     machine.fail("grep -F 'id=\"applyHelperButton\"' <(${curl} -fsS " + base_url + "/)")
 
     helper_status = json.loads(machine.succeed("${curl} -fsS " + base_url + "/api/helper"))
@@ -304,6 +306,14 @@ pkgs.testers.runNixOSTest {
         profile for profile in driver_profiles["profiles"] if profile["id"] == "nvidia-open"
     )
     t.assertTrue(nvidia_open["options"]["hardware.nvidia.open"])
+    flakes = json.loads(machine.succeed(
+        "${curl} -fsS " + base_url + "/api/flakes"
+    ))
+    t.assertEqual(flakes["status"], "absent")
+    t.assertTrue(flakes["readOnly"])
+    t.assertFalse(flakes["networkAccessEnabled"])
+    t.assertFalse(flakes["lockWriteEnabled"])
+    t.assertFalse(flakes["inputUpdateEnabled"])
     compatibility = json.loads(machine.succeed(
         "${curl} -fsS --max-time 300 " + base_url + "/api/catalog-compatibility",
         timeout=long_timeout,

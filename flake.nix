@@ -255,8 +255,11 @@
             NCM_SETTINGS_JS=${./src/nix_control_manager/web/settings.js} \
               NCM_CATALOG_JS=${./src/nix_control_manager/web/catalog.js} \
               node ${./tests/test_web_catalog.js}
+            NCM_FLAKES_JS=${./src/nix_control_manager/web/flakes.js} \
+              node ${./tests/test_web_flakes.js}
             node --check ${./src/nix_control_manager/web/settings.js}
             node --check ${./src/nix_control_manager/web/catalog.js}
+            node --check ${./src/nix_control_manager/web/flakes.js}
             node --check ${./src/nix_control_manager/web/app.js}
             touch "$out"
           '';

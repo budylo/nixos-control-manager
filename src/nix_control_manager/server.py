@@ -26,6 +26,7 @@ from .adoption import plan_adoption
 from .candidate import validate_adoption
 from .candidate_build import CandidateBuildManager, HomeManagerBuildManager
 from .errors import NcmError, ValidationError
+from .flake_inspector import FlakeInspection, inspect_flake
 from .home_manager_adoption import (
     home_manager_plan_identity,
     plan_home_manager_adoption,
@@ -105,6 +106,7 @@ class NcmServer(ThreadingHTTPServer):
         home_manager_planner: Callable[..., Any] = plan_home_manager_adoption,
         home_manager_validator: Callable[..., Any] = validate_home_manager_adoption,
         generation_inspector: Callable[..., GenerationInspection] = inspect_generations,
+        flake_inspector: Callable[..., FlakeInspection] = inspect_flake,
         local_write_enabled: bool = True,
     ) -> None:
         super().__init__(server_address, handler)
@@ -121,6 +123,7 @@ class NcmServer(ThreadingHTTPServer):
         self.home_manager_planner = home_manager_planner
         self.home_manager_validator = home_manager_validator
         self.generation_inspector = generation_inspector
+        self.flake_inspector = flake_inspector
         self.local_write_enabled = local_write_enabled
         self.helper_adapter = helper_adapter
         self.build_manager = build_manager or CandidateBuildManager(
@@ -407,6 +410,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._json(build_preview(state, self.server.output_path))
             elif path == "/api/system":
                 self._json(inspect_system(self.server.config_root).to_mapping())
+            elif path == "/api/flakes":
+                self._json(
+                    self.server.flake_inspector(
+                        self.server.config_root,
+                        flake_target=self.server.flake_target,
+                        timeout=self.server.validation_timeout,
+                    ).to_mapping()
+                )
             elif path == "/api/generations":
                 self._json(self.server.generation_inspector().to_mapping())
             elif path == "/api/adoption":

@@ -27,7 +27,7 @@
           <button id="driversNav" class="nav-item" type="button"><span>⌁</span> Драйвери</button>
           <p class="nav-label">Конфігурація</p>
           <button id="homeManagerNav" class="nav-item" type="button"><span>⌂</span> Home Manager</button>
-          <button class="nav-item" type="button" disabled><span>❄</span> Flakes <small>згодом</small></button>
+          <button id="flakesNav" class="nav-item" type="button"><span>❄</span> Flakes</button>
           <button id="generationsNav" class="nav-item" type="button"><span>◴</span> Покоління</button>
         </nav>
 
@@ -378,6 +378,70 @@
           </div>
         </div>
 
+        <div id="flakesPage" class="page-panel" hidden>
+          <section class="hero flakes-hero">
+            <div>
+              <span class="hero-tag">Закріплені джерела конфігурації</span>
+              <h2>Flakes без магії.<br><em>Спочатку бачимо точний lock.</em></h2>
+              <p>NCM читає прямі inputs, закріплені ревізії та доступні nixosConfigurations. Перевірка працює offline, не створює lock-файл, не шукає оновлення й нічого не записує.</p>
+            </div>
+            <div class="hero-orbit flakes-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="snowflake">❄</span>
+            </div>
+          </section>
+
+          <section id="flakesStatus" class="effective-settings-status flakes-status" aria-live="polite">
+            <span id="flakesStatusIcon" class="effective-settings-icon" aria-hidden="true">❄</span>
+            <div>
+              <strong id="flakesStatusTitle">Читаємо flake-конфігурацію…</strong>
+              <small id="flakesStatusDetail">Локальний flake.lock та offline Nix evaluation без запису.</small>
+            </div>
+            <button id="refreshFlakes" type="button">Оновити огляд</button>
+          </section>
+
+          <section class="service-overview flake-overview" aria-labelledby="flakeOverviewTitle">
+            <div class="service-overview-heading">
+              <div>
+                <p class="section-kicker">Read-only огляд</p>
+                <h2 id="flakeOverviewTitle">Стан Flake цієї системи</h2>
+              </div>
+              <p id="flakeContextNote">Жодних мережевих запитів або змін flake.lock.</p>
+            </div>
+            <div id="flakeSummaryCards" class="service-summary-cards" aria-live="polite"></div>
+          </section>
+
+          <section id="flakeFiles" class="flake-files" aria-label="Файли Flake"></section>
+
+          <section class="catalog-heading flake-section-heading">
+            <div>
+              <p class="section-kicker">nixosConfigurations</p>
+              <h2>Цілі системи</h2>
+            </div>
+            <p id="flakeTargetCount" class="result-count"></p>
+          </section>
+          <section id="flakeTargets" class="flake-targets" aria-live="polite"></section>
+
+          <section class="catalog-heading flake-section-heading">
+            <div>
+              <p class="section-kicker">Прямі залежності</p>
+              <h2>Закріплені inputs</h2>
+            </div>
+            <p id="flakeInputCount" class="result-count"></p>
+          </section>
+          <section id="flakeInputs" class="flake-inputs" aria-live="polite"></section>
+
+          <section id="flakeWarnings" class="flake-warnings" hidden aria-live="polite"></section>
+          <section class="generation-boundary flake-boundary">
+            <span>◇</span>
+            <div>
+              <strong id="flakeBoundaryTitle">Оновлення inputs вимкнено</strong>
+              <small id="flakeBoundaryDetail">Цей етап не запускає update, не змінює flake.lock і не перебудовує активну систему.</small>
+            </div>
+          </section>
+        </div>
+
         <div id="generationsPage" class="page-panel" hidden>
           <section class="hero generations-hero">
             <div>
@@ -597,6 +661,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="settings.js" defer></script>
+    <script src="flakes.js" defer></script>
     <script src="catalog.js" defer></script>
     <script src="app.js" defer></script>
   </body>

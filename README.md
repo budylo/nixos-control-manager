@@ -434,6 +434,20 @@ profile still performs no write or activation: it only updates the ordinary
 draft and must pass the existing preview, dependency, build, test, and switch
 boundaries.
 
+### Read-only Flakes control center
+
+The Flakes page turns the selected host's existing `flake.nix` and
+`flake.lock` into a bounded, human-readable report. It lists direct inputs with
+their source, branch or tag, locked revision, timestamp, and content hash;
+shows the available `nixosConfigurations`; and verifies whether the configured
+host target is present.
+
+Inspection is deliberately non-mutating. The lock file is parsed before Nix is
+allowed to run, and a missing or invalid lock blocks evaluation. The evaluator
+then runs offline with lock-file writes and import-from-derivation disabled.
+This phase cannot fetch, update, add, remove, or rewrite an input. Explicit
+update previews and separately confirmed lock-file changes remain future work.
+
 ## Application catalog, presets, and profiles
 
 The graphical catalog contains more than 130 curated package-only entries in
@@ -534,6 +548,7 @@ python -m compileall -q src tests
 node --check src/nix_control_manager/web/app.js
 node tests/test_web_settings.js
 node tests/test_web_catalog.js
+node tests/test_web_flakes.js
 ```
 
 On Linux, a manual integration check copies `/etc/nixos` to a temporary fixture,

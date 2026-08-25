@@ -183,10 +183,26 @@
 - add deeper service-specific relationships such as firewall-port guidance and
   mutually exclusive service choices (future work).
 
+## Milestone 9 — Flake control center
+
+- parse the existing `flake.lock` through a bounded, strict read-only model and
+  show direct inputs with their source, ref, locked revision, date, and content
+  hash (implemented);
+- evaluate only the existing locked Flake offline, without writing a lock file,
+  enabling import-from-derivation, fetching inputs, or searching for updates
+  (implemented; a missing or invalid lock blocks evaluation);
+- show available `nixosConfigurations`, verify the configured active target,
+  and expose the result through a strict local API and dedicated graphical page
+  (implemented, including real-browser and booted NixOS VM coverage);
+- add a separate update-preview phase that explains the exact proposed input
+  revision and lock diff before any mutation (future work);
+- permit a confirmed lock-file update only through a new narrow helper scope,
+  followed by validation, build, test, switch, and rollback gates (future work;
+  no mutation endpoint or UI control exists in the read-only phase).
+
 ## Later
 
-- safe flake input management;
-- driver workflows with hardware-aware warnings;
+- confirmed Flake input updates after the read-only preview phase;
 - Plasma Manager;
 - native desktop shell;
 - multi-host configuration and hardware-aware profile adaptation.
